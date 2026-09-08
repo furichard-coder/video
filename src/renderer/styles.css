@@ -971,3 +971,9 @@ button.danger-text,.danger-text { color: var(--danger); }
   .fixed-clip-export > div:first-child,
   .fixed-clip-actions { grid-column: 1 / -1; }
 }
+.timecode-input { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.timecode-input input { width: 4.2em; min-width: 0; }
+.timecode-input input:first-of-type { width: 3.3em; }
+.save-state { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.save-state-ERROR { color: #ff9b9b; }
+.save-state-SAVING { color: #ffd37a; }

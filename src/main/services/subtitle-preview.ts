@@ -6,6 +6,7 @@ import { assertSafeHexId, assertWithinRoot } from "./path-safety";
 import { ProjectStore } from "./project-store";
 import { ConcatRenderService } from "./concat-render";
 import { introSegmentsForOutput } from "../../shared/intro-duration";
+import { buildTimelinePlan } from "../../shared/timeline-plan";
 
 export const SUBTITLE_INTRO_PREVIEWER_VERSION = "subtitle-intro-480p-v2";
 
@@ -61,6 +62,7 @@ export class SubtitlePreviewService {
       bgmState,
       sourceState,
       transitionSeconds: 0.3,
+      canonicalMainTimelineDurationMs: buildTimelinePlan(project).durationMs,
     })).digest("hex");
     const directory = assertWithinRoot(this.cacheRoot, path.join(this.cacheRoot, cacheKey));
     const outputFileName = includeBgm ? "intro-bgm-subtitle-preview-480p.mp4" : "intro-subtitle-preview-480p.mp4";

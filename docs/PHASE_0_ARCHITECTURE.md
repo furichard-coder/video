@@ -105,7 +105,7 @@
 9. 提供 720p 與 4K 預覽輸出選項。
 10. 以本機短區段抽樣提出片頭候選，允許逐段預覽、調整、排序、排除及輸出 Intro 預覽。
 11. 對補充素材逐筆記錄安插決定，保存自訂 timeline 順序與待決定區。
-12. 每支影片提供多段 0%–200% 音量 automation，素材原音預設 80%，實際套用於串連與 Intro。
+12. 每支影片提供多段 0%–300% 音量 automation，新專案素材原音預設 100%；既有有效值（包含 80%）照舊保留，實際套用於串連與 Intro。
 13. 依 rotation/display metadata 對 9:16 素材建立同源模糊側邊的 16:9 版式。
 14. 管理唯讀 MP3、時間範圍、source IN／OUT、淡入淡出與音量，實際混入輸出並限制 peak。
 15. 管理字幕 cue、timeline revision 複核與原子 UTF-8 SRT 匯出。
@@ -152,7 +152,7 @@
 - 清單移除只更新 App manifest；來源與既有 cache 均不刪除。
 - 串連輸出先寫唯一 `.partial.mp4`；一般成功才 rename。取消時先向 FFmpeg 送出安全結束，只有 ffprobe 驗證為有效且至少 300 ms 的檔案才保留為較短 MP4，否則只清除該 App 中介檔。
 - 精彩片頭分析只在少數時間點讀取短區段；cache 綁定來源 preview fingerprint 與 analyzer version。
-- MP3 只能經原生 dialog 加入；Renderer 不可改寫來源音樂路徑。素材原音預設 80%、BGM 預設 35%，最高增益均為 200%，最終混音使用 0.95 peak limiter。YouTube URL 只能成為待確認參考，必須由使用者確認權利並連結本機 MP3，App 不任意下載或轉檔。
+- MP3 只能經原生 dialog 加入；Renderer 不可改寫來源音樂路徑。素材原音新專案預設 100%、BGM 預設 35%，最高增益均為 300%，最終混音使用 0.95 peak limiter。YouTube URL 只能成為待確認參考，必須由使用者確認權利並連結本機 MP3，App 不任意下載或轉檔。
 - SRT 與 MP4 均先寫唯一 partial；若使用者確認覆寫既有輸出，舊檔只在新 partial 完成後暫時改名，完成失敗時可還原。
 - 素材安插只記錄 asset ID、主片來源時間、插入影片 IN／OUT 與原順位；不裁切、搬移或改寫影片／照片。變更 IN／OUT 或排除區段若會讓安插點失效，操作必須阻擋並提示。
 - 安插視窗從其他資料夾加入的來源沿用既有白名單、取消與去重流程；加入後只進 `pendingAssetIds`。取消安插會回到原待決定位置，不能因開啟選擇器就自動排入正片。

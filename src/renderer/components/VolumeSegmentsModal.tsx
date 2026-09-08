@@ -40,7 +40,7 @@ export function VolumeSegmentsModal({ asset, defaultVolumePercent, onClose, onAs
         <button type="button" onClick={() => setSegments((current) => current.filter((item) => item.id !== segment.id))}>刪除</button>
       </div>)}</div>
       <button className="add-row-button" type="button" onClick={add}>＋ 新增音量區段</button>
-      <p className="mix-note">200% 是數位增益上限，不代表聽感兩倍；最終輸出另套用 peak limiter 防止超過安全峰值。</p>
+      <p className="mix-note">300% 是數位增益上限，不代表聽感三倍；最終輸出另套用 peak limiter 防止超過安全峰值。</p>
       {notice && <div className="notice success">{notice}</div>}{error && <div className="notice error" role="alert">{error}</div>}
     </div>
     <footer className="settings-footer"><span /><div><button className="secondary-button" onClick={onClose}>關閉</button><button className="primary-button" disabled={saving} onClick={() => void save()}>儲存音量設定</button></div></footer>

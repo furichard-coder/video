@@ -1,5 +1,30 @@
 # 第一階段驗證紀錄
 
+## v0.39.0 增量驗證（2026-09-09）
+
+| 檢查 | 結果 |
+|---|---|
+| SubtitleStyleProfile 預覽／burn-in 共用 | PASS；ASS 實際輸出檢查位置、字級、顏色、陰影與外框的解析度換算 |
+| 分:秒.毫秒時間輸入 | PASS；字幕與 BGM 欄位採共用元件並保留整數毫秒 |
+| autosave 狀態與背景更新草稿保護 | PASS；主畫面顯示保存狀態，字幕／配樂 dirty 編輯不被 project snapshot 靜默覆蓋 |
+| TimelinePlan 實際引用 | PASS；ProjectStore、字幕 burn-in、字幕 preview cache、BGM 匯入與輸出驗證共用同一計畫層 |
+| 音量相容 | PASS；新專案／新素材 100%、BGM 35%、上限 300%，既有有效值保留；0.95 limiter 不變 |
+| Renderer／Main TypeScript typecheck | PASS |
+
+
+## v0.38.0 增量驗證（2026-09-09）
+
+| 檢查 | 結果 |
+|---|---|
+| 字幕永久嵌入可取消 | PASS；控制項只在真正編碼時停用，已勾選狀態可於開始前直接取消；重新啟用仍受確認／複核 gate 保護 |
+| AI 字幕重跑模式 | PASS；fill blanks、replace AI scope、preserve user-edited 已納入資料模型與 ProjectStore |
+| Main／Intro revision 與 project:changed | PASS；schema 14 migration、事件快照與背景工作專案擁有者欄位完成 |
+| 共享 TimelinePlan | PASS；交接重疊位置與總時長測試通過 |
+| Renderer／Main TypeScript typecheck | PASS |
+| Vitest 完整單元、整合與 UI 回歸 | PASS，33 suites／232 tests |
+| Production build／Electron smoke／Windows packaged smoke | PASS；v0.39.0 EXE SHA-256 `136F23BAD38BA4922BDA8BF4DBFB0EE266046931BA42360DB40A14FA7B32C185` |
+| 根目錄 SOP、來源媒體、既有 release | 未修改 |
+
 ## v0.37.0 增量驗證（2026-09-08）
 
 | 檢查 | 結果 |

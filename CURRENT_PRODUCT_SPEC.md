@@ -1,0 +1,30 @@
+# Current Product Spec — v0.39.0
+
+## Scope
+
+Windows-first read-only source organizer. The first visible workflow remains source selection, thumbnail/proxy preview, ordering, IN/OUT, Intro and preview MP4 output. Sources, SOP files and previous releases are never overwritten.
+
+## Canonical project state
+
+- `ProjectManifest` is the persisted source of truth; schema 14 migrates older manifests without dropping fields.
+- Main and Intro timeline revisions and subtitle review revisions are tracked independently.
+- `ProjectStore` emits `project:changed` after every persisted mutation. Renderer state replaces only the canonical snapshot; changing project while a background job is running is blocked with an owning-project message.
+- Background jobs carry `projectId`, project name and timeline revision for auditability.
+
+## Subtitle and AI rules
+
+- AI knowledge subtitles use Codex/ChatGPT login fallback when OpenAI API billing is unavailable; speech transcription remains opt-in.
+- AI regeneration modes: fill blanks, preserve human edits, or replace AI cues in the selected scope. Manual/imported/user-edited cues are protected.
+- Subtitle burn-in is per-output and opt-in. The checkbox can always be cancelled before render; enabling still requires confirmed, current Main cues.
+
+## Timeline and output
+
+`src/shared/timeline-plan.ts` is the deterministic plan layer used for output position, overlap duration, subtitle mapping and BGM clipping. Proxy files remain derived cache and never become formal sources.
+
+## Editing UX
+
+All millisecond fields use the shared minute/second/millisecond editor. The renderer exposes autosave state and protects dirty Subtitle/BGM drafts when a canonical project snapshot arrives from another window or background job.
+
+## Verification baseline
+
+Run `npm run typecheck`, `npm test`, `npm run build`, `npm audit --audit-level=high`, `npm run package:win`, and `npm run smoke:packaged`. See `docs/VERIFICATION.md` for the release record.

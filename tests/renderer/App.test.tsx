@@ -563,7 +563,7 @@ describe("App source workflow", () => {
       resolution: "360P",
       purpose: "CONCAT",
       prependIntro: false,
-      subtitleBurnIn: { enabled: false, tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }] },
+      subtitleBurnIn: { enabled: false, tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }], styleProfile: { verticalPositionPercent: 82, fontSizePx: 28, textColor: "#FFFFFF", shadowEnabled: true, outlineWidthPx: 2 } },
       includeBgm: true,
     }));
     expect(await screen.findByText("串連預覽已完成")).toBeInTheDocument();
@@ -638,7 +638,7 @@ describe("App source workflow", () => {
     await waitFor(() => expect(renderButton).toBeEnabled()); fireEvent.click(renderButton);
     await waitFor(() => expect(api.startConcatRender).toHaveBeenCalledWith(expect.objectContaining({ subtitleBurnIn: { enabled: true, tracks: [
       { language: "zh-TW", position: "BOTTOM", fontSize1080p: 56 }, { language: "en", position: "TOP", fontSize1080p: 42 },
-    ] } })));
+    ], styleProfile: { verticalPositionPercent: 82, fontSizePx: 28, textColor: "#FFFFFF", shadowEnabled: true, outlineWidthPx: 2 } } })));
   });
 
   it("allows turning off a persisted subtitle burn-in choice when subtitles are unavailable", async () => {
@@ -1261,7 +1261,7 @@ describe("App source workflow", () => {
     const dialog = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
     expect(within(dialog).getByRole("checkbox", { name: "同時分析素材語音" })).not.toBeChecked();
     fireEvent.click(within(dialog).getByRole("button", { name: "AI 知識型字幕草稿" }));
-    expect(api.generateAiSubtitles).toHaveBeenCalledWith({ includeSpeechTranscription: false, scopes: ["MAIN"] });
+    expect(api.generateAiSubtitles).toHaveBeenCalledWith({ includeSpeechTranscription: false, scopes: ["MAIN"], mode: "FILL_BLANKS" });
     expect((await within(dialog).findAllByText("我們抵達河內老城")).length).toBeGreaterThanOrEqual(2);
     expect(within(dialog).getByText("抵達老城")).toBeInTheDocument();
     expect(within(dialog).getByText("河內老城")).toBeInTheDocument();
@@ -1287,7 +1287,7 @@ describe("App source workflow", () => {
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "片頭字幕" }));
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "正片字幕" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "AI 知識型字幕草稿" }));
-    await waitFor(() => expect(api.generateAiSubtitles).toHaveBeenCalledWith({ includeSpeechTranscription: false, scopes: ["INTRO"] }));
+    await waitFor(() => expect(api.generateAiSubtitles).toHaveBeenCalledWith({ includeSpeechTranscription: false, scopes: ["INTRO"], mode: "FILL_BLANKS" }));
     await waitFor(() => expect(api.buildSubtitleIntroPreview).toHaveBeenCalledTimes(1));
     expect(await within(dialog).findByLabelText("480P 片頭字幕同步預覽")).toHaveAttribute("src", expect.stringMatching(/^preview-media:\/\/subtitle\//));
     expect((await within(dialog).findAllByText("河內人物故事開場")).length).toBeGreaterThanOrEqual(2);

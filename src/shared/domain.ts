@@ -1,4 +1,4 @@
-export const MANIFEST_SCHEMA_VERSION = 13 as const;
+export const MANIFEST_SCHEMA_VERSION = 14 as const;
 export const PREVIEWER_VERSION = "preview-v3" as const;
 export const CLIP_PREVIEWER_VERSION = "clip-preview-v1" as const;
 export const DEFAULT_IMAGE_DURATION_MS = 5_000 as const;
@@ -8,9 +8,9 @@ export const PHOTO_INSERTION_EDGE_MARGIN_MS = 750 as const;
 export const DUNES_SHUTTER_EFFECT_ID = "DUNES_CAMERA_SHUTTER_CLICK_14671" as const;
 export const DUNES_SHUTTER_EFFECT_SHA256 = "0AC71ECABF302784F5FFB9483C2939C46B1784AA0D016A322CB6D1A0ECA07B93" as const;
 export const PHOTO_SOUND_PREVIEW_URL = "preview-media://asset/dunes-shutter.mp3" as const;
-export const DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT = 80 as const;
+export const DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT = 100 as const;
 export const DEFAULT_BGM_VOLUME_PERCENT = 35 as const;
-export const MAX_MIX_VOLUME_PERCENT = 200 as const;
+export const MAX_MIX_VOLUME_PERCENT = 300 as const;
 export const DEFAULT_INTRO_TARGET_DURATION_MS = 90_000 as const;
 export const DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS = 15_000 as const;
 export const INTRO_DURATION_WARNING_MS = 180_000 as const;
@@ -171,13 +171,17 @@ export interface SubtitleGenerationScope {
   main: boolean;
 }
 
-export interface SubtitlePreviewStyle {
+/** Shared style profile used by renderer previews and final subtitle burn-in. */
+export interface SubtitleStyleProfile {
   verticalPositionPercent: number;
   fontSizePx: number;
   textColor: string;
   shadowEnabled: boolean;
   outlineWidthPx: number;
 }
+
+/** Backwards-compatible name used by existing preference and renderer code. */
+export type SubtitlePreviewStyle = SubtitleStyleProfile;
 
 export interface VoiceInputRequest {
   audioBytes: Uint8Array;
@@ -200,6 +204,8 @@ export interface SubtitleBurnInTrack {
 export interface SubtitleBurnInOptions {
   enabled: boolean;
   tracks: SubtitleBurnInTrack[];
+  /** Optional shared preview/burn-in style. Older manifests/preferences omit it. */
+  styleProfile?: SubtitleStyleProfile;
 }
 
 export interface TranslationSettingsSnapshot {
@@ -366,6 +372,8 @@ export interface SubtitleCue {
   timelineScope?: SubtitleTimelineScope;
   origin?: SubtitleCueOrigin;
   reviewStatus?: SubtitleCueReviewStatus;
+  /** Set when a human changes text/time or explicitly protects a cue from AI regeneration. */
+  userEdited?: boolean;
   speaker?: string;
   sourceAssetId?: string;
   sourceInMs?: number;
@@ -400,6 +408,8 @@ export interface ProjectColorSettings {
 export interface AiSubtitleGenerationOptions {
   includeSpeechTranscription: boolean;
   scopes?: SubtitleTimelineScope[];
+  /** How a subsequent AI pass treats existing AI cues in the selected scope. */
+  mode?: "FILL_BLANKS" | "REPLACE_AI_SCOPE" | "PRESERVE_USER_EDITED";
 }
 
 export interface SubtitlePreviewResult {
@@ -413,7 +423,7 @@ export interface SubtitlePreviewResult {
 }
 
 export interface ProjectManifest {
-  schemaVersion: typeof MANIFEST_SCHEMA_VERSION;
+  schemaVersion: number;
   id: string;
   name: string;
   sourcePolicy: SourcePolicy;
@@ -446,6 +456,10 @@ export interface ProjectManifest {
   subtitleCues: SubtitleCue[];
   timelineRevision: number;
   subtitleTimelineRevision: number;
+  mainTimelineRevision?: number;
+  introTimelineRevision?: number;
+  mainSubtitleReviewRevision?: number;
+  introSubtitleReviewRevision?: number;
   audioMixPolicy: "ORIGINAL_PLUS_BGM_LIMITED_0_95";
 }
 
@@ -671,6 +685,19 @@ export interface BackgroundJobSnapshot {
   percent?: number;
   detail?: string;
   error?: string;
+  projectId?: string;
+  projectName?: string;
+  projectRevision?: number;
+}
+
+export type ProjectChangeSection = "SOURCES" | "MAIN_TIMELINE" | "INTRO_TIMELINE" | "BGM" | "SUBTITLES" | "AI_CONTEXT" | "SETTINGS" | "OUTPUTS";
+export interface ProjectChangedEvent {
+  projectId: string;
+  revision: number;
+  updatedAt: string;
+  changedSections: ProjectChangeSection[];
+  project: ProjectManifest;
+  filePath?: string;
 }
 
 export interface AiAccountProfile {
@@ -841,6 +868,8 @@ export interface AppApi {
   getBackgroundJobs?(): Promise<BackgroundJobSnapshot[]>;
   onBackgroundJobs?(callback: (jobs: BackgroundJobSnapshot[]) => void): void;
   clearBackgroundJobsListeners?(): void;
+  onProjectChanged?(callback: (event: ProjectChangedEvent) => void): void;
+  clearProjectChangedListeners?(): void;
   updateUserPreferences(update: UserPreferencesUpdate): Promise<UserPreferences>;
   getProject(): Promise<ProjectManifest>;
   getProjectHistoryState(): Promise<ProjectHistoryState>;

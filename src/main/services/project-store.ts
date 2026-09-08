@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { DEFAULT_BGM_VOLUME_PERCENT, DEFAULT_IMAGE_DURATION_MS, DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS, DEFAULT_INTRO_TARGET_DURATION_MS, DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT, DEFAULT_ZOOM_ENHANCEMENT_PRESET, DUNES_SHUTTER_EFFECT_ID, DUNES_SHUTTER_EFFECT_SHA256, INTRO_MAX_SEGMENT_MS, INTRO_MAX_SEGMENTS, INTRO_MIN_SEGMENT_MS, MANIFEST_SCHEMA_VERSION, MAX_IMAGE_DURATION_MS, MAX_MIX_VOLUME_PERCENT, MIN_IMAGE_DURATION_MS, PREVIEWER_VERSION, type AiStoryContext, type BgmTrack, type ImageDurationUpdateResult, type IntroAnalysisResult, type IntroSuggestion, type MainExclusionRange, type MainExclusionRangeUpdateResult, type MediaInsertion, type MusicSuggestionResult, type PlacementRequest, type PreviewRange, type PreviewRangeUpdateResult, type ProjectColorSettings, type ProjectFileResult, type ProjectFileState, type ProjectHistoryState, type ProjectManifest, type RemovedIntroSegment, type RemovedMainAsset, type SortMode, type SourceAsset, type SubtitleCue, type SubtitleTimelineScope, type VolumeSegment, type ZoomEnhancementPreset, type ZoomSegment, type ZoomSegmentUpdateResult } from "../../shared/domain";
+import { DEFAULT_BGM_VOLUME_PERCENT, DEFAULT_IMAGE_DURATION_MS, DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS, DEFAULT_INTRO_TARGET_DURATION_MS, DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT, DEFAULT_ZOOM_ENHANCEMENT_PRESET, DUNES_SHUTTER_EFFECT_ID, DUNES_SHUTTER_EFFECT_SHA256, INTRO_MAX_SEGMENT_MS, INTRO_MAX_SEGMENTS, INTRO_MIN_SEGMENT_MS, MANIFEST_SCHEMA_VERSION, MAX_IMAGE_DURATION_MS, MAX_MIX_VOLUME_PERCENT, MIN_IMAGE_DURATION_MS, PREVIEWER_VERSION, type AiStoryContext, type BgmTrack, type ImageDurationUpdateResult, type IntroAnalysisResult, type IntroSuggestion, type MainExclusionRange, type MainExclusionRangeUpdateResult, type MediaInsertion, type MusicSuggestionResult, type PlacementRequest, type PreviewRange, type PreviewRangeUpdateResult, type ProjectChangeSection, type ProjectChangedEvent, type ProjectColorSettings, type ProjectFileResult, type ProjectFileState, type ProjectHistoryState, type ProjectManifest, type RemovedIntroSegment, type RemovedMainAsset, type SortMode, type SourceAsset, type SubtitleCue, type SubtitleTimelineScope, type VolumeSegment, type ZoomEnhancementPreset, type ZoomSegment, type ZoomSegmentUpdateResult } from "../../shared/domain";
 import { clipMainExclusionRanges, clipVolumeSegments, clipZoomSegments, imageDurationMs, mainRenderSelections, normalizeMainExclusionRanges, validateBgmTrack, validateImageDurationMs, validateMediaInsertion, validatePercent, validateSubtitleCues, validateVolumeSegments, validateZoomSegments } from "../../shared/editing-rules";
 import { sortAssets } from "../../shared/sorting";
 import { DEFAULT_PROJECT_COLOR_SETTINGS, normalizeProjectColorSettings } from "../../shared/color-presets";
 import { balanceIntroSegments, normalizeIntroSegmentMaxDuration } from "../../shared/intro-duration";
+import { buildTimelinePlan } from "../../shared/timeline-plan";
 import { finalizePartialOutput } from "./atomic-output";
 
 function clone<T>(value: T): T { return structuredClone(value); }
@@ -64,7 +65,7 @@ function createProject(): ProjectManifest {
     sourcePolicy: "READ_ONLY", previewPolicy: "DERIVED_CACHE_ONLY_NOT_MASTER", previewerVersion: PREVIEWER_VERSION,
     sortMode: "SMART_SEQUENCE", createdAt: now, updatedAt: now, sources: [], timelineOrder: [], pendingAssetIds: [],
     excludedMainAssetIds: [], recentMainRemovals: [], introSegments: [], introTargetDurationMs: DEFAULT_INTRO_TARGET_DURATION_MS, introSegmentMaxDurationMs: DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS, colorSettings: DEFAULT_PROJECT_COLOR_SETTINGS, introExcludedSegmentIds: [], recentIntroRemovals: [],
-    placementDecisions: [], mediaInsertions: [], photoSoundEffect: defaultPhotoSoundEffect(), bgmTracks: [], sourceAudioVolumePercent: DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT, aiStoryContext: defaultAiStoryContext(), subtitleCues: [], timelineRevision: 0, subtitleTimelineRevision: 0,
+    placementDecisions: [], mediaInsertions: [], photoSoundEffect: defaultPhotoSoundEffect(), bgmTracks: [], sourceAudioVolumePercent: DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT, aiStoryContext: defaultAiStoryContext(), subtitleCues: [], timelineRevision: 0, subtitleTimelineRevision: 0, mainTimelineRevision: 0, introTimelineRevision: 0, mainSubtitleReviewRevision: 0, introSubtitleReviewRevision: 0,
     audioMixPolicy: "ORIGINAL_PLUS_BGM_LIMITED_0_95",
   };
 }
@@ -72,7 +73,7 @@ function createProject(): ProjectManifest {
 function looksLikeProject(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
-  return (candidate.schemaVersion === 1 || candidate.schemaVersion === 2 || candidate.schemaVersion === 3 || candidate.schemaVersion === 4 || candidate.schemaVersion === 5 || candidate.schemaVersion === 6 || candidate.schemaVersion === 7 || candidate.schemaVersion === 8 || candidate.schemaVersion === 9 || candidate.schemaVersion === 10 || candidate.schemaVersion === 11 || candidate.schemaVersion === 12 || candidate.schemaVersion === 13) && candidate.sourcePolicy === "READ_ONLY" && candidate.previewPolicy === "DERIVED_CACHE_ONLY_NOT_MASTER" && Array.isArray(candidate.sources);
+  return (candidate.schemaVersion === 1 || candidate.schemaVersion === 2 || candidate.schemaVersion === 3 || candidate.schemaVersion === 4 || candidate.schemaVersion === 5 || candidate.schemaVersion === 6 || candidate.schemaVersion === 7 || candidate.schemaVersion === 8 || candidate.schemaVersion === 9 || candidate.schemaVersion === 10 || candidate.schemaVersion === 11 || candidate.schemaVersion === 12 || candidate.schemaVersion === 13 || candidate.schemaVersion === 14) && candidate.sourcePolicy === "READ_ONLY" && candidate.previewPolicy === "DERIVED_CACHE_ONLY_NOT_MASTER" && Array.isArray(candidate.sources);
 }
 
 function normalizeZoomEnhancementPreset(value: unknown): ZoomEnhancementPreset {
@@ -173,6 +174,10 @@ function migrateProject(raw: Record<string, unknown>): ProjectManifest {
     subtitleCues: Array.isArray(raw.subtitleCues) ? (raw.subtitleCues as SubtitleCue[]).map((cue) => ({ ...cue, timelineScope: cue.timelineScope === "INTRO" ? "INTRO" : "MAIN", origin: cue.origin ?? "MANUAL", reviewStatus: cue.reviewStatus ?? "CONFIRMED" })) : [],
     timelineRevision: Number.isInteger(raw.timelineRevision) ? raw.timelineRevision as number : 0,
     subtitleTimelineRevision: Number.isInteger(raw.subtitleTimelineRevision) ? raw.subtitleTimelineRevision as number : 0,
+    mainTimelineRevision: Number.isInteger(raw.mainTimelineRevision) ? raw.mainTimelineRevision as number : (Number.isInteger(raw.timelineRevision) ? raw.timelineRevision as number : 0),
+    introTimelineRevision: Number.isInteger(raw.introTimelineRevision) ? raw.introTimelineRevision as number : (Number.isInteger(raw.timelineRevision) ? raw.timelineRevision as number : 0),
+    mainSubtitleReviewRevision: Number.isInteger(raw.mainSubtitleReviewRevision) ? raw.mainSubtitleReviewRevision as number : (Number.isInteger(raw.subtitleTimelineRevision) ? raw.subtitleTimelineRevision as number : 0),
+    introSubtitleReviewRevision: Number.isInteger(raw.introSubtitleReviewRevision) ? raw.introSubtitleReviewRevision as number : (Number.isInteger(raw.subtitleTimelineRevision) ? raw.subtitleTimelineRevision as number : 0),
     audioMixPolicy: "ORIGINAL_PLUS_BGM_LIMITED_0_95",
   };
 }
@@ -184,6 +189,7 @@ export class ProjectStore {
   private undoStack: ProjectManifest[] = [];
   private redoStack: ProjectManifest[] = [];
   private readonly historyLimit = 50;
+  private readonly changeListeners = new Set<(event: ProjectChangedEvent) => void>();
   readonly manifestPath: string;
   readonly sessionPath: string;
 
@@ -227,6 +233,7 @@ export class ProjectStore {
   }
 
   getProject(): ProjectManifest { return clone(this.current); }
+  subscribe(listener: (event: ProjectChangedEvent) => void): () => void { this.changeListeners.add(listener); return () => this.changeListeners.delete(listener); }
   getHistoryState(): ProjectHistoryState { return { canUndo: this.undoStack.length > 0, canRedo: this.redoStack.length > 0, undoCount: this.undoStack.length, redoCount: this.redoStack.length }; }
   getProjectFileState(): ProjectFileState { return { filePath: this.activeProjectPath }; }
   getAsset(assetId: string): SourceAsset | undefined { const asset = this.current.sources.find((item) => item.id === assetId); return asset ? clone(asset) : undefined; }
@@ -236,7 +243,9 @@ export class ProjectStore {
     const project = await this.queueProjectFileOperation(async () => {
       const next = { ...clone(this.current), updatedAt: new Date().toISOString() };
       await this.persistProject(next, this.activeProjectPath);
+      const previous = this.getProject();
       this.current = next;
+      this.emitChanged(previous, next, ["SETTINGS"]);
       return this.getProject();
     });
     return { project, filePath: this.activeProjectPath };
@@ -250,9 +259,11 @@ export class ProjectStore {
       const next = { ...clone(this.current), name, updatedAt: new Date().toISOString() };
       await this.persistProject(next, resolved);
       await this.writeSessionPointer(resolved);
+      const previous = this.getProject();
       this.current = next;
       this.activeProjectPath = resolved;
       this.clearHistory();
+      this.emitChanged(previous, next, ["SETTINGS"]);
       return this.getProject();
     });
     return { project, filePath: resolved };
@@ -264,9 +275,11 @@ export class ProjectStore {
       const opened = await this.readProjectFile(resolved);
       await this.writeProjectFile(this.manifestPath, opened);
       await this.writeSessionPointer(resolved);
+      const previous = this.getProject();
       this.current = opened;
       this.activeProjectPath = resolved;
       this.clearHistory();
+      this.emitChanged(previous, opened, ["SOURCES", "MAIN_TIMELINE", "INTRO_TIMELINE", "BGM", "SUBTITLES", "AI_CONTEXT", "SETTINGS"]);
       return this.getProject();
     });
     return { project, filePath: resolved };
@@ -343,13 +356,14 @@ export class ProjectStore {
       if (new Set(normalized.map((item) => item.id)).size !== normalized.length) throw new Error("片頭片段不可重複。");
       if (JSON.stringify(project.introSegments) === JSON.stringify(normalized)) return;
       project.introSegments = normalized;
-      this.bumpTimeline(project);
+      this.bumpTimeline(project, "INTRO");
     });
   }
 
   async setIntroTargetDuration(durationMs: number): Promise<ProjectManifest> {
     return this.mutate((project) => {
       project.introTargetDurationMs = normalizeIntroTargetDuration(durationMs);
+      this.bumpTimeline(project, "INTRO");
     });
   }
 
@@ -360,13 +374,14 @@ export class ProjectStore {
       const rangesChanged = balanced.some((segment, index) => segment.inMs !== project.introSegments[index]?.inMs || segment.outMs !== project.introSegments[index]?.outMs);
       project.introSegmentMaxDurationMs = maximumMs;
       project.introSegments = balanced;
-      if (rangesChanged) this.bumpTimeline(project);
+      if (rangesChanged) this.bumpTimeline(project, "INTRO");
     });
   }
 
   async setProjectColorSettings(settings: ProjectColorSettings): Promise<ProjectManifest> {
     return this.mutate((project) => {
       project.colorSettings = normalizeProjectColorSettings(settings);
+      this.bumpTimeline(project, project.colorSettings.applyToMain ? "BOTH" : "INTRO");
     });
   }
 
@@ -378,7 +393,7 @@ export class ProjectStore {
       project.introSegments.splice(index, 1);
       if (!project.introExcludedSegmentIds.includes(segmentId)) project.introExcludedSegmentIds.push(segmentId);
       project.recentIntroRemovals = [...project.recentIntroRemovals.filter((item) => item.segment.id !== segmentId), record];
-      this.bumpTimeline(project);
+      this.bumpTimeline(project, "INTRO");
     });
   }
 
@@ -392,7 +407,7 @@ export class ProjectStore {
       if (!project.introSegments.some((item) => item.id === segmentId)) {
         project.introSegments.splice(Math.max(0, Math.min(project.introSegments.length, record.previousIndex)), 0, segment);
       }
-      this.bumpTimeline(project);
+      this.bumpTimeline(project, "INTRO");
     });
   }
 
@@ -646,18 +661,34 @@ export class ProjectStore {
   }); }
   async setSubtitleCues(cues: SubtitleCue[]): Promise<ProjectManifest> { return this.mutate((project) => {
     const normalized = validateSubtitleCues(cues);
-    const mainDurationMs = mainRenderSelections(project).reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0);
+    const mainDurationMs = buildTimelinePlan(project).durationMs;
     const introDurationMs = project.introSegments.reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0);
     if (normalized.some((cue) => cue.timelineScope === "INTRO" ? cue.endMs > introDurationMs : cue.endMs > mainDurationMs)) throw new Error("字幕時間超出目前影片或所選片頭總時間，請調整 cue 或先完成影片順序。");
+    const previousByScope = (scope: SubtitleTimelineScope) => project.subtitleCues.filter((cue) => (cue.timelineScope ?? "MAIN") === scope);
+    const nextByScope = (scope: SubtitleTimelineScope) => normalized.filter((cue) => (cue.timelineScope ?? "MAIN") === scope);
+    const mainChanged = JSON.stringify(previousByScope("MAIN")) !== JSON.stringify(nextByScope("MAIN"));
+    const introChanged = JSON.stringify(previousByScope("INTRO")) !== JSON.stringify(nextByScope("INTRO"));
     project.subtitleCues = normalized; project.subtitleTimelineRevision = project.timelineRevision;
+    if (mainChanged) project.mainSubtitleReviewRevision = project.mainTimelineRevision ?? project.timelineRevision;
+    if (introChanged) project.introSubtitleReviewRevision = project.introTimelineRevision ?? project.timelineRevision;
   }); }
 
-  async replaceAiSubtitleDrafts(cues: SubtitleCue[], scopes: SubtitleTimelineScope[] = ["MAIN"]): Promise<ProjectManifest> { return this.mutate((project) => {
+  async replaceAiSubtitleDrafts(cues: SubtitleCue[], scopes: SubtitleTimelineScope[] = ["MAIN"], mode: "FILL_BLANKS" | "REPLACE_AI_SCOPE" | "PRESERVE_USER_EDITED" = "FILL_BLANKS"): Promise<ProjectManifest> { return this.mutate((project) => {
     if (!Array.isArray(cues) || cues.some((cue) => (cue.reviewStatus !== "DRAFT" && cue.reviewStatus !== "CONFIRMED") || (cue.origin !== "AI_SPEECH" && cue.origin !== "AI_VISUAL"))) throw new Error("AI 字幕格式無效。");
     const selectedScopes = new Set(scopes);
-    const preserved = project.subtitleCues.filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED" || !selectedScopes.has(cue.timelineScope ?? "MAIN"));
+    if (!["FILL_BLANKS", "REPLACE_AI_SCOPE", "PRESERVE_USER_EDITED"].includes(mode)) throw new Error("AI 字幕重生模式無效。");
+    const preserved = project.subtitleCues.filter((cue) => {
+      if (!selectedScopes.has(cue.timelineScope ?? "MAIN")) return true;
+      // Manual/imported cues and explicitly edited cues are always protected.
+      const isHuman = cue.userEdited === true || cue.origin === "MANUAL" || cue.origin === "IMPORTED_SRT";
+      if (isHuman) return true;
+      if (mode === "REPLACE_AI_SCOPE") return false;
+      // Fill blanks and preserve-user-edited keep confirmed AI cues. Draft AI
+      // cues are replaced by the new pass so stale suggestions do not linger.
+      return (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED";
+    });
     const normalized = validateSubtitleCues([...preserved, ...cues]);
-    const mainDurationMs = mainRenderSelections(project).reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0);
+    const mainDurationMs = buildTimelinePlan(project).durationMs;
     const introDurationMs = project.introSegments.reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0);
     if (normalized.some((cue) => cue.timelineScope === "INTRO" ? cue.endMs > introDurationMs : cue.endMs > mainDurationMs)) throw new Error("AI 字幕時間超出所選片頭或正片總時間。");
     project.subtitleCues = normalized;
@@ -709,7 +740,28 @@ export class ProjectStore {
     return order;
   }
 
-  private bumpTimeline(project: ProjectManifest): void { project.timelineRevision += 1; }
+  private bumpTimeline(project: ProjectManifest, scope: "MAIN" | "INTRO" | "BOTH" = "MAIN"): void {
+    project.timelineRevision += 1;
+    const revision = project.timelineRevision;
+    if (scope === "MAIN" || scope === "BOTH") project.mainTimelineRevision = revision;
+    if (scope === "INTRO" || scope === "BOTH") project.introTimelineRevision = revision;
+  }
+  private emitChanged(previous: ProjectManifest, next: ProjectManifest, forcedSections?: ProjectChangeSection[]): void {
+    const sectionKeys: Array<[ProjectChangeSection, string[]]> = [
+      ["SOURCES", ["sources"]],
+      ["MAIN_TIMELINE", ["timelineOrder", "pendingAssetIds", "excludedMainAssetIds", "mediaInsertions", "placementDecisions", "mainTimelineRevision"]],
+      ["INTRO_TIMELINE", ["introSegments", "introTargetDurationMs", "introSegmentMaxDurationMs", "introExcludedSegmentIds", "introTimelineRevision"]],
+      ["BGM", ["bgmTracks", "sourceAudioVolumePercent", "musicSuggestionResult"]],
+      ["SUBTITLES", ["subtitleCues", "subtitleTimelineRevision", "mainSubtitleReviewRevision", "introSubtitleReviewRevision"]],
+      ["AI_CONTEXT", ["aiStoryContext", "introAnalysisResult"]],
+      ["SETTINGS", ["colorSettings", "audioMixPolicy"]],
+      ["OUTPUTS", []],
+    ];
+    const sections = forcedSections ?? sectionKeys.filter(([, keys]) => keys.some((key) => JSON.stringify((previous as unknown as Record<string, unknown>)[key]) !== JSON.stringify((next as unknown as Record<string, unknown>)[key]))).map(([section]) => section);
+    if (!sections.length) return;
+    const event: ProjectChangedEvent = { projectId: next.id, revision: next.timelineRevision, updatedAt: next.updatedAt, changedSections: sections, project: clone(next), filePath: this.activeProjectPath };
+    for (const listener of this.changeListeners) listener(event);
+  }
   private validateIntroSegments(project: ProjectManifest, segments: IntroSuggestion[]): IntroSuggestion[] {
     if (!Array.isArray(segments) || segments.length > INTRO_MAX_SEGMENTS) throw new Error(`片頭最多只能保留 ${INTRO_MAX_SEGMENTS} 段。`);
     const normalized = segments.map((segment) => {
@@ -743,6 +795,7 @@ export class ProjectStore {
         this.redoStack = [];
       }
       this.current = next;
+      this.emitChanged(previous, next);
       result = this.getProject();
     });
     this.writeChain = operation.catch(() => undefined); await operation; return result;
@@ -760,7 +813,9 @@ export class ProjectStore {
       const restored = { ...clone(snapshot), updatedAt: new Date().toISOString() };
       try {
         await this.persistProject(restored);
+        const previous = this.getProject();
         this.current = restored;
+        this.emitChanged(previous, restored);
         result = this.getProject();
       } catch (error) {
         destination.pop();

@@ -2,6 +2,21 @@
 
 本檔案是每次可交付功能變更的簡短索引。完成一個階段後，必須同步更新本檔案、`README.md` 與 `VERIFICATION.md`；只有通過建置／測試的內容才可標記為完成。
 
+## v0.39.0 — 2026-09-09
+
+- 字幕預覽與 MP4 burn-in 共用 `SubtitleStyleProfile`，位置、字級、顏色、陰影與外框依輸出解析度等比套用。
+- 字幕／配樂時間欄位採共用分:秒.毫秒輸入；ProjectStore、burn-in、字幕預覽與 BGM 輸出引用共享 `TimelinePlan`。
+- 主畫面顯示 autosave 狀態；字幕與配樂工作區在收到背景專案快照時保護未保存的 local draft。
+- 新專案／新素材原音 100%、BGM 35%、可調 0–300%，既有有效值照舊遷移；新增 schema 14 相容欄位。
+- 驗證：typecheck、33 suites／232 tests、build、npm audit、Electron smoke、Windows packaged smoke 通過。
+- 交付：`release/v0.39.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer.exe`；SHA-256 `136F23BAD38BA4922BDA8BF4DBFB0EE266046931BA42360DB40A14FA7B32C185`。
+
+## v0.38.0 — 2026-09-09
+
+- Project manifest schema 14、Main／Intro revision、`project:changed` canonical snapshot、背景工作 project ownership 與安全切換 gate。
+- AI 字幕重跑模式與共享 `TimelinePlan` 基礎層；字幕永久嵌入在開始輸出前可直接取消。
+- 交付：`release/v0.38.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer.exe`；SHA-256 `C93B4625D8805A1EAE683DD831FF2AFAF0CA17AAB8C00E95B5D0409FB1843779`。
+
 ## v0.37.0 — 2026-09-08
 
 - AI 字幕新 cue 預設為 `CONFIRMED`，可直接預覽與匯出；既有 `DRAFT`／`REJECTED` 狀態仍保留。

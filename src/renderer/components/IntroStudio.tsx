@@ -499,7 +499,7 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated }: Intr
     try {
       const result = await window.sourceApp.buildSubtitleIntroPreview(true);
       setBgmPreview(result); setPreviewHistoryRevision((value) => value + 1);
-      setNotice(`已${result.cacheStatus === "HIT" ? "載入" : "建立"} 480P 配樂同步預覽；素材原音 ${project.sourceAudioVolumePercent ?? 80}%，各首 MP3 依配樂頁時間與音量設定播放。`);
+      setNotice(`已${result.cacheStatus === "HIT" ? "載入" : "建立"} 480P 配樂同步預覽；素材原音 ${project.sourceAudioVolumePercent ?? 100}%，各首 MP3 依配樂頁時間與音量設定播放。`);
       window.setTimeout(() => { const player = bgmPreviewRef.current; if (player) void player.play().catch(() => undefined); }, 0);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));

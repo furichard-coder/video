@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { MainStartCardOptions, PreviewResolution, ProjectManifest, RenderClipSelection, SubtitleBurnInOptions, SubtitleRenderLanguage, SubtitleRenderPosition } from "../../shared/domain";
 import { mainRenderSelections } from "../../shared/editing-rules";
+import { buildTimelinePlan } from "../../shared/timeline-plan";
 import type { SubtitleTranslationResult } from "./subtitle-translation";
 import { sanitizeSubtitleBurnInOptions } from "./user-preferences";
 
@@ -51,6 +52,11 @@ function escapeAssLine(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/{/g, "\\{").replace(/}/g, "\\}");
 }
 
+function assColor(hex: string): string {
+  const value = /^#[0-9a-f]{6}$/i.test(hex) ? hex.slice(1) : "FFFFFF";
+  return `&H00${value.slice(4, 6)}${value.slice(2, 4)}${value.slice(0, 2)}`;
+}
+
 function positionOverride(position: SubtitleRenderPosition, lane: number, laneCount: number, width: number, height: number, fontSize: number): string {
   const margin = Math.max(18, Math.round(height * 0.055));
   const spacing = Math.round(fontSize * 1.7);
@@ -90,8 +96,14 @@ export function buildSubtitleAss(
   const options = validateSubtitleBurnInOptions(rawOptions);
   const confirmed = project.subtitleCues.filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED");
   if (!confirmed.length) throw new Error("沒有已確認的字幕可嵌入影片。");
-  if (project.subtitleTimelineRevision !== project.timelineRevision) throw new Error("正片順序或 IN／OUT 已變更，請先逐項複核並保存字幕，再嵌入影片。");
+  if ((project.mainSubtitleReviewRevision ?? project.subtitleTimelineRevision) !== (project.mainTimelineRevision ?? project.timelineRevision)
+    || ((project.subtitleCues.some((cue) => (cue.timelineScope ?? "MAIN") === "INTRO"))
+      && (project.introSubtitleReviewRevision ?? project.subtitleTimelineRevision) !== (project.introTimelineRevision ?? project.timelineRevision))) {
+    throw new Error("正片或片頭順序／IN／OUT 已變更，請先逐項複核並保存字幕，再嵌入影片。");
+  }
   const mainClips = mainRenderSelections(project);
+  const canonicalMainPlan = buildTimelinePlan(project, { includeIntro: false, transitionSeconds });
+  if (canonicalMainPlan.clips.length !== mainClips.length) throw new Error("字幕時間線與目前正片計畫不一致。");
   if (outputClips.length !== introClipCount + mainClips.length) throw new Error("字幕時間線與目前輸出片段不一致。");
   const { width, height } = RESOLUTIONS[resolution];
   const transitionMs = Math.round(transitionSeconds * 1000);
@@ -116,9 +128,12 @@ export function buildSubtitleAss(
   let introCursor = 0;
   for (const clip of introClips) { introLogicalStarts.push(introCursor); introCursor += clip.outMs - clip.inMs; }
 
+  const sharedStyle = options.styleProfile;
   const styles = options.tracks.map((track, index) => {
-    const fontSize = Math.max(12, Math.round(track.fontSize1080p * height / 1080));
-    return `Style: Lang${index + 1},${FONT_NAMES[track.language]},${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${Math.max(1, Math.round(fontSize * 0.09))},${Math.max(1, Math.round(fontSize * 0.035))},2,20,20,20,1`;
+    const fontSize = Math.max(12, Math.round((sharedStyle?.fontSizePx ?? track.fontSize1080p) * height / 1080));
+    const outline = Math.max(0, Math.round((sharedStyle?.outlineWidthPx ?? 2) * height / 1080));
+    const shadow = sharedStyle?.shadowEnabled === false ? 0 : Math.max(1, Math.round(fontSize * 0.035));
+    return `Style: Lang${index + 1},${FONT_NAMES[track.language]},${fontSize},${assColor(sharedStyle?.textColor ?? "#FFFFFF")},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${outline},${shadow},2,20,20,20,1`;
   });
   const events: string[] = [];
   options.tracks.forEach((track, trackIndex) => {
@@ -143,7 +158,10 @@ export function buildSubtitleAss(
         const actualStart = outputStarts[outputOffset + clipIndex] + overlapStart - logicalStart;
         const actualEnd = outputStarts[outputOffset + clipIndex] + overlapEnd - logicalStart;
         const text = wrapSubtitleText(trackTexts[cueIndex], maxCharacters).map(escapeAssLine).join("\\N");
-        const override = positionOverride(track.position, lane, laneCount, width, height, fontSize);
+        const position = sharedStyle
+          ? (sharedStyle.verticalPositionPercent < 38 ? "TOP" : sharedStyle.verticalPositionPercent > 64 ? "BOTTOM" : "MIDDLE") as SubtitleRenderPosition
+          : track.position;
+        const override = positionOverride(position, lane, laneCount, width, height, fontSize);
         events.push(`Dialogue: ${trackIndex},${assTime(actualStart)},${assTime(actualEnd)},Lang${trackIndex + 1},,0,0,0,,${override}${text}`);
       }
     });

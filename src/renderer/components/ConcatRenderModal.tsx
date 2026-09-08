@@ -100,7 +100,7 @@ export function ConcatRenderModal({ assets, purpose = "CONCAT", introClips, intr
   const [prependIntro, setPrependIntro] = useState(() => isMain && Boolean(introClips?.length));
   const [autoUploadEnabled, setAutoUploadEnabled] = useState(() => isMain);
   const [autoUploadStatus, setAutoUploadStatus] = useState<"DISABLED" | "ARMED" | "COUNTING" | "CANCELLED" | "OPENED">(() => isMain ? "ARMED" : "DISABLED");
-  const [subtitleBurnIn, setSubtitleBurnIn] = useState<SubtitleBurnInOptions>({ enabled: false, tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }] });
+  const [subtitleBurnIn, setSubtitleBurnIn] = useState<SubtitleBurnInOptions>({ enabled: false, tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }], styleProfile: { verticalPositionPercent: 82, fontSizePx: 28, textColor: "#FFFFFF", shadowEnabled: true, outlineWidthPx: 2 } });
   const [includeBgm, setIncludeBgm] = useState(() => isMain);
   const [mainStartCard, setMainStartCard] = useState<MainStartCardOptions>(() => ({ ...DEFAULT_MAIN_START_CARD_OPTIONS, line1: projectName?.trim() || DEFAULT_MAIN_START_CARD_OPTIONS.line1 }));
   const [mainStartCardConfirmed, setMainStartCardConfirmed] = useState(false);
@@ -151,7 +151,7 @@ export function ConcatRenderModal({ assets, purpose = "CONCAT", introClips, intr
       if (preferencesTouchedRef.current) return;
       setTransitionSeconds(preferences.renderDefaults.transitionSeconds);
       setResolution(isClip ? "4K" : initialResolution ?? preferences.renderDefaults.resolution);
-      if (isMain) setSubtitleBurnIn(preferences.subtitleBurnInDefaults);
+      if (isMain) setSubtitleBurnIn({ ...preferences.subtitleBurnInDefaults, styleProfile: preferences.subtitlePreviewStyle });
       if (isIntro) setIncludeBgm(preferences.renderDefaults.introPreviewIncludeBgm);
       if (isMain) setIncludeBgm(preferences.renderDefaults.mainPreviewIncludeBgm);
       if (isMain) {
@@ -176,6 +176,20 @@ export function ConcatRenderModal({ assets, purpose = "CONCAT", introClips, intr
     preferencesTouchedRef.current = true;
     setSubtitleBurnIn(next);
     void window.sourceApp.updateUserPreferences({ subtitleBurnInDefaults: next }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
+  };
+
+  // The checkbox must always remain usable for turning permanent subtitle burn-in
+  // off.  Validation is only required when enabling it; this avoids a disabled
+  // control trapping a previously saved "enabled" preference.
+  const toggleSubtitleBurnIn = (enabled: boolean) => {
+    if (enabled && (!confirmedSubtitleCount || subtitlesNeedReview)) {
+      setError(!confirmedSubtitleCount
+        ? "尚無已確認字幕；請先到「CC 字幕」逐項確認並保存。"
+        : "正片順序或 IN／OUT 已變更；請先重新複核並保存字幕。\n若只是不嵌入字幕，可直接取消勾選。" );
+      return;
+    }
+    setError(undefined);
+    updateSubtitleBurnIn({ ...subtitleBurnIn, enabled });
   };
 
   const patchSubtitleTrack = (index: number, patch: Partial<SubtitleBurnInOptions["tracks"][number]>) => {
@@ -236,7 +250,7 @@ export function ConcatRenderModal({ assets, purpose = "CONCAT", introClips, intr
         prependIntro: isMain && prependIntro,
         subtitleBurnIn: isMain ? subtitleBurnIn : { enabled: false, tracks: [] },
         includeBgm: isClip ? false : includeBgm,
-        mainStartCard: isMain && prependIntro ? mainStartCard : undefined,
+        ...(isMain && prependIntro ? { mainStartCard } : {}),
       });
       setResult(completed);
       await refreshOutputHistory();
@@ -345,7 +359,7 @@ export function ConcatRenderModal({ assets, purpose = "CONCAT", introClips, intr
 
               {isMain && <section className="setting-block subtitle-burn-setting">
                 <div><span className="setting-step">04</span><div><h3>嵌入影片字幕（最多兩種語言）</h3><p>使用字幕頁中「已確認」的繁體中文。選擇其他語言時，OpenAI 新的無狀態請求優先，失敗才使用已設定的 Google Cloud 翻譯。</p></div></div>
-                <label className={`subtitle-burn-toggle ${(!confirmedSubtitleCount || subtitlesNeedReview) ? "is-disabled" : ""}`}><input type="checkbox" checked={subtitleBurnIn.enabled} disabled={rendering || ((!confirmedSubtitleCount || subtitlesNeedReview) && !subtitleBurnIn.enabled)} onChange={(event) => updateSubtitleBurnIn({ ...subtitleBurnIn, enabled: event.target.checked })} /><span><strong>將字幕永久嵌入這次 MP4</strong><small>勾選後會在本次輸出永久嵌入；尚未開始輸出前可以取消，不會修改來源檔。長句會依畫面寬度自動換行。</small></span></label>
+                <label className={`subtitle-burn-toggle ${(!confirmedSubtitleCount || subtitlesNeedReview) ? "is-disabled" : ""}`}><input aria-label="將字幕永久嵌入這次 MP4" type="checkbox" checked={subtitleBurnIn.enabled} disabled={rendering} onChange={(event) => toggleSubtitleBurnIn(event.target.checked)} /><span><strong>將字幕永久嵌入這次 MP4</strong><small>勾選後會在本次輸出永久嵌入；尚未開始輸出前隨時可以取消勾選（取消後輸出不嵌入字幕），不會修改來源檔。長句會依畫面寬度自動換行。</small></span></label>
                 {!confirmedSubtitleCount && <p className="inline-error">尚無已確認字幕；請先到「CC 字幕」逐項確認並保存。</p>}
                 {subtitlesNeedReview && <p className="inline-error">正片順序或 IN／OUT 已變更；請先重新複核並保存字幕。</p>}
                 {subtitleBurnIn.enabled && <div className="subtitle-track-settings">

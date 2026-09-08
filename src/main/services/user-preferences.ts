@@ -103,7 +103,17 @@ export function sanitizeSubtitleBurnInOptions(value: unknown): SubtitleBurnInOpt
     languages.add(language);
     return [{ language, position, fontSize1080p: Math.max(24, Math.min(96, fontSize)) }];
   });
-  return { enabled: Boolean(candidate.enabled), tracks: tracks.length ? tracks : fallback.tracks };
+  const style = candidate.styleProfile;
+  const styleProfile = style && typeof style === "object"
+    ? {
+      verticalPositionPercent: Math.max(10, Math.min(92, Number.isFinite(Number(style.verticalPositionPercent)) ? Number(style.verticalPositionPercent) : 82)),
+      fontSizePx: Math.max(16, Math.min(72, Number.isFinite(Number(style.fontSizePx)) ? Number(style.fontSizePx) : 28)),
+      textColor: typeof style.textColor === "string" && HEX_COLOR.test(style.textColor) ? style.textColor.toUpperCase() : "#FFFFFF",
+      shadowEnabled: style.shadowEnabled !== false,
+      outlineWidthPx: Math.max(0, Math.min(8, Number.isFinite(Number(style.outlineWidthPx)) ? Number(style.outlineWidthPx) : 2)),
+    }
+    : undefined;
+  return { enabled: Boolean(candidate.enabled), tracks: tracks.length ? tracks : fallback.tracks, ...(styleProfile ? { styleProfile } : {}) };
 }
 
 function defaults(): UserPreferences {

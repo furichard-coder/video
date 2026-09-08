@@ -252,7 +252,7 @@ export class AiStoryAnalysisService {
       if (!overlaps(cue, occupied)) drafts.push(cue);
     }
     onProgress({ phase: "SAVING_DRAFTS", processed: limited.length, total: limited.length });
-    const updated = await this.store.replaceAiSubtitleDrafts(drafts, scopes);
+    const updated = await this.store.replaceAiSubtitleDrafts(drafts, scopes, options.mode ?? "FILL_BLANKS");
     return {
       project: updated,
       generatedCount: drafts.length,

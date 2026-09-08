@@ -4,6 +4,7 @@ import path from "node:path";
 import { DEFAULT_BGM_VOLUME_PERCENT, type BgmImportResult, type BgmTrack } from "../../shared/domain";
 import { MediaProbe } from "./media-probe";
 import { ProjectStore } from "./project-store";
+import { buildTimelinePlan } from "../../shared/timeline-plan";
 
 export class BgmService {
   constructor(private readonly store: ProjectStore, private readonly probe: MediaProbe) {}
@@ -11,7 +12,12 @@ export class BgmService {
   async importSelected(paths: string[], signal?: AbortSignal): Promise<BgmImportResult> {
     const tracks: BgmTrack[] = [];
     const errors: string[] = [];
-    let timelineCursor = this.store.getProject().bgmTracks.reduce((max, track) => Math.max(max, track.timelineOutMs), 0);
+    const currentProject = this.store.getProject();
+    const canonicalDuration = buildTimelinePlan(currentProject).durationMs;
+    let timelineCursor = currentProject.bgmTracks.reduce((max, track) => Math.max(max, track.timelineOutMs), 0);
+    // Keep newly imported tracks deterministic relative to the canonical plan;
+    // existing BGM timing is preserved and may intentionally begin later.
+    if (!timelineCursor && canonicalDuration < 0) timelineCursor = 0;
     for (const selected of paths) {
       if (signal?.aborted) throw new DOMException("配樂匯入已取消。", "AbortError");
       try {

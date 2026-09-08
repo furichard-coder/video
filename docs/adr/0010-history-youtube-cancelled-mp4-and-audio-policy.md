@@ -1,5 +1,7 @@
 # ADR-0010：專案歷史、取消成品、YouTube 預覽上傳與音訊政策
 
+> Superseded for current defaults by ADR 0035 / `CURRENT_PRODUCT_SPEC.md`. This historical record intentionally retains the former 0–200% and 80% defaults.
+
 日期：2026-09-03  
 狀態：Accepted
 

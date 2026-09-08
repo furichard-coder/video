@@ -156,7 +156,7 @@ describe("ProjectStore", () => {
     expect(saved.project.name).toBe("我的 河內專案");
     await store.setSortMode("FILE_NAME");
     const external = JSON.parse(await readFile(projectPath, "utf8"));
-    expect(external).toMatchObject({ schemaVersion: 13, name: "我的 河內專案", sortMode: "FILE_NAME", sourcePolicy: "READ_ONLY", sourceAudioVolumePercent: 80, introSegmentMaxDurationMs: 15_000 });
+    expect(external).toMatchObject({ schemaVersion: 14, name: "我的 河內專案", sortMode: "FILE_NAME", sourcePolicy: "READ_ONLY", sourceAudioVolumePercent: 100, introSegmentMaxDurationMs: 15_000 });
     expect(external.sources).toHaveLength(2);
     expect((await readdir(root)).filter((name) => name.includes(".partial"))).toEqual([]);
 
@@ -194,13 +194,13 @@ describe("ProjectStore", () => {
     await writeFile(manifestPath, JSON.stringify(legacy), "utf8");
     const store = new ProjectStore(root);
     const migrated = await store.initialize();
-    expect(migrated.schemaVersion).toBe(13);
+    expect(migrated.schemaVersion).toBe(14);
     expect(migrated.sources).toHaveLength(1);
     expect(migrated.timelineOrder).toEqual([legacy.sources[0].id]);
     expect(migrated.sources[0].volumeSegments).toEqual([]);
     expect(migrated.sources[0].mainExclusionRanges).toEqual([]);
     expect(migrated.excludedMainAssetIds).toEqual([]);
-    expect(JSON.parse(await readFile(manifestPath, "utf8")).schemaVersion).toBe(13);
+    expect(JSON.parse(await readFile(manifestPath, "utf8")).schemaVersion).toBe(14);
   });
 
   it("migrates schema 2 to schema 10 and preserves every existing edit field", async () => {
@@ -214,7 +214,7 @@ describe("ProjectStore", () => {
     };
     await writeFile(manifestPath, JSON.stringify(schema2), "utf8");
     const migrated = await new ProjectStore(root).initialize();
-    expect(migrated).toMatchObject({ schemaVersion: 13, timelineOrder: [source.id], timelineRevision: 4, subtitleTimelineRevision: 4, sourceAudioVolumePercent: 80, introTargetDurationMs: 90_000, introSegmentMaxDurationMs: 15_000, colorSettings: { introPresetId: "NATURAL", applyToMain: false } });
+    expect(migrated).toMatchObject({ schemaVersion: 14, timelineOrder: [source.id], timelineRevision: 4, subtitleTimelineRevision: 4, sourceAudioVolumePercent: 100, mainTimelineRevision: 4, introTimelineRevision: 4, mainSubtitleReviewRevision: 4, introSubtitleReviewRevision: 4, introTargetDurationMs: 90_000, introSegmentMaxDurationMs: 15_000, colorSettings: { introPresetId: "NATURAL", applyToMain: false } });
     expect(migrated.sources[0].volumeSegments).toEqual(source.volumeSegments);
     expect(migrated.sources[0].mainExclusionRanges).toEqual([]);
     expect(migrated.introSegments).toEqual([]); expect(migrated.recentMainRemovals).toEqual([]);
@@ -231,7 +231,7 @@ describe("ProjectStore", () => {
     };
     await writeFile(manifestPath, JSON.stringify(schema3), "utf8");
     const migrated = await new ProjectStore(root).initialize();
-    expect(migrated.schemaVersion).toBe(13);
+    expect(migrated.schemaVersion).toBe(14);
     expect(migrated.sources[0].imageDurationMs).toBe(5_000);
     expect(migrated.sources[0].photoSoundEnabled).toBe(true);
     expect(migrated.mediaInsertions).toEqual([]);
@@ -250,7 +250,7 @@ describe("ProjectStore", () => {
     };
     await writeFile(manifestPath, JSON.stringify(schema5), "utf8");
     const migrated = await new ProjectStore(root).initialize();
-    expect(migrated.schemaVersion).toBe(13);
+    expect(migrated.schemaVersion).toBe(14);
     expect(migrated.aiStoryContext).toEqual({ topic: "", locations: [], people: [], storySummary: "", audiencePromise: "", subtitleLanguage: "zh" });
     expect(migrated.subtitleCues).toEqual([expect.objectContaining({ id: "legacy-cue", text: "既有字幕", origin: "MANUAL", reviewStatus: "CONFIRMED" })]);
   });
@@ -266,7 +266,7 @@ describe("ProjectStore", () => {
     raw.schemaVersion = 10; delete raw.introSegmentMaxDurationMs;
     await writeFile(manifestPath, JSON.stringify(raw), "utf8");
     const migrated = await new ProjectStore(root).initialize();
-    expect(migrated.schemaVersion).toBe(13);
+    expect(migrated.schemaVersion).toBe(14);
     expect(migrated.introSegmentMaxDurationMs).toBe(20_000);
     expect(migrated.introSegments[0]).toMatchObject({ inMs: 5_000, outMs: 25_000 });
   });
@@ -291,7 +291,7 @@ describe("ProjectStore", () => {
       { id: "boost", startMs: 5_000, endMs: 9_000, volumePercent: 200 },
     ]);
     expect(updated.volumeSegments?.map((segment) => segment.volumePercent)).toEqual([0, 100, 200]);
-    await expect(store.setVolumeSegments(source.id, [{ id: "bad", startMs: 0, endMs: 1000, volumePercent: 201 }])).rejects.toThrow(/0% 到 200%/);
+    await expect(store.setVolumeSegments(source.id, [{ id: "bad", startMs: 0, endMs: 1000, volumePercent: 301 }])).rejects.toThrow(/0% 到 300%/);
     await expect(store.setVolumeSegments(source.id, [{ id: "one", startMs: 0, endMs: 2000, volumePercent: 100 }, { id: "two", startMs: 1900, endMs: 3000, volumePercent: 100 }])).rejects.toThrow(/不可重疊/);
     const clipped = await store.setPreviewRange(source.id, 1_500, 7_000);
     expect(clipped.adjustedVolumeSegmentCount).toBe(2);
@@ -321,7 +321,7 @@ describe("ProjectStore", () => {
       { id: "detail", startMs: 6_000, endMs: 8_000, zoomPercent: 300, centerXPercent: 60, centerYPercent: 40, enhancementPreset: "BALANCED" },
     ]);
     const reopened = new ProjectStore(root); const restored = await reopened.initialize();
-    expect(restored.schemaVersion).toBe(13);
+    expect(restored.schemaVersion).toBe(14);
     expect(restored.sources[0].zoomSegments).toEqual(clipped.asset.zoomSegments);
   });
 
@@ -570,11 +570,11 @@ describe("ProjectStore", () => {
       excludedMainAssetIds: [], recentMainRemovals: [], introSegments: [], introExcludedSegmentIds: [], recentIntroRemovals: [], placementDecisions: [],
       photoInsertions: [{ id: "legacy-insertion", anchorVideoAssetId: host.id, photoAssetId: still.id, atMs: 4_000, previousTimelineIndex: 1, createdAt: "2026-01-01T00:00:00.000Z" }],
       photoSoundEffect: { id: "legacy", displayName: "快門", sourceProject: "前案", sourceUrl: "https://example.com", licenseUrl: "https://example.com/license", sha256: "a".repeat(64), volumePercent: 70 },
-      bgmTracks: [], sourceAudioVolumePercent: 80, aiStoryContext: { topic: "", locations: [], people: [], storySummary: "", audiencePromise: "", subtitleLanguage: "zh" }, subtitleCues: [], timelineRevision: 2, subtitleTimelineRevision: 2, audioMixPolicy: "ORIGINAL_PLUS_BGM_LIMITED_0_95",
+      bgmTracks: [], sourceAudioVolumePercent: 100, aiStoryContext: { topic: "", locations: [], people: [], storySummary: "", audiencePromise: "", subtitleLanguage: "zh" }, subtitleCues: [], timelineRevision: 2, subtitleTimelineRevision: 2, audioMixPolicy: "ORIGINAL_PLUS_BGM_LIMITED_0_95",
     };
     await writeFile(manifestPath, JSON.stringify(legacy), "utf8");
     const migrated = await new ProjectStore(root).initialize();
-    expect(migrated).toMatchObject({ schemaVersion: 13, timelineOrder: [host.id], introSegmentMaxDurationMs: 15_000 });
+    expect(migrated).toMatchObject({ schemaVersion: 14, timelineOrder: [host.id], introSegmentMaxDurationMs: 15_000 });
     expect(migrated.mediaInsertions).toEqual([expect.objectContaining({ id: "legacy-insertion", anchorVideoAssetId: host.id, insertedAssetId: still.id, atMs: 4_000, sourceInMs: 0, sourceOutMs: 7_000, sequenceIndex: 0, previousPlacement: "TIMELINE" })]);
     expect(mainRenderSelections(migrated).map((clip) => clip.assetId)).toEqual([host.id, still.id, host.id]);
   });

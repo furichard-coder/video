@@ -69,6 +69,9 @@ export function registerIpc(
   const outputTokens = new Map<string, { outputPath: string; createdAt: number; allowOverwrite: boolean }>();
   const subtitleOutputTokens = new Map<string, { outputPath: string; createdAt: number }>();
   const backgroundJobs = new Map<string, BackgroundJobSnapshot>();
+  const unsubscribeProjectChanges = store.subscribe((change) => {
+    for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send("project:changed", change);
+  });
   const publishBackgroundJobs = () => {
     const jobs = [...backgroundJobs.values()].sort((left, right) => right.startedAt.localeCompare(left.startedAt));
     for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send("background:jobs", jobs);
@@ -80,9 +83,14 @@ export function registerIpc(
   const beginBackgroundJob = (kind: BackgroundJobKind, label: string): string => {
     pruneBackgroundJobs();
     const id = randomUUID();
-    backgroundJobs.set(id, { id, kind, label, status: "RUNNING", startedAt: new Date().toISOString() });
+    const project = store.getProject();
+    backgroundJobs.set(id, { id, kind, label, status: "RUNNING", startedAt: new Date().toISOString(), projectId: project.id, projectName: project.name, projectRevision: project.timelineRevision });
     publishBackgroundJobs();
     return id;
+  };
+  const assertNoRunningProjectJobs = () => {
+    const running = [...backgroundJobs.values()].filter((job) => job.status === "RUNNING");
+    if (running.length) throw new Error(`目前有 ${running.length} 個背景工作正在處理「${running[0].projectName ?? "目前專案"}」，完成或取消後才能切換專案。`);
   };
   const updateBackgroundJob = (id: string, patch: Pick<BackgroundJobSnapshot, "percent" | "detail">) => {
     const current = backgroundJobs.get(id); if (!current) return;
@@ -154,6 +162,7 @@ export function registerIpc(
     return store.saveProjectAs(filePath, projectName);
   });
   ipcMain.handle("project:open", async (event) => {
+    assertNoRunningProjectJobs();
     const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
     const options: Electron.OpenDialogOptions = {
       title: "開啟 SceneryWalker 專案",

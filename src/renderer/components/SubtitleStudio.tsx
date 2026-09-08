@@ -4,6 +4,7 @@ import type { AiAnalysisProgress, ConcatRenderProgress, PreviewResult, ProjectMa
 import { mainRenderSelections } from "../../shared/editing-rules";
 import { formatDuration } from "../format";
 import { SharedIntroPreviewHistory } from "./SharedIntroPreviewHistory";
+import { TimecodeInput } from "./TimecodeInput";
 
 interface Props {
   project: ProjectManifest;
@@ -52,9 +53,15 @@ function cueOrigin(cue: SubtitleCue): string {
 
 function cueScope(cue: SubtitleCue): SubtitleTimelineScope { return cue.timelineScope ?? "MAIN"; }
 
+function scopeNeedsReview(project: ProjectManifest, scope: SubtitleTimelineScope): boolean {
+  const timelineRevision = scope === "INTRO" ? (project.introTimelineRevision ?? project.timelineRevision) : (project.mainTimelineRevision ?? project.timelineRevision);
+  const reviewedRevision = scope === "INTRO" ? (project.introSubtitleReviewRevision ?? project.subtitleTimelineRevision) : (project.mainSubtitleReviewRevision ?? project.subtitleTimelineRevision);
+  return timelineRevision !== reviewedRevision;
+}
+
 export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, onOpenAiSettings, onClose }: Props) {
   const [cues, setCues] = useState<SubtitleCue[]>(() => {
-    const timelineNeedsReview = project.subtitleCues.length > 0 && project.subtitleTimelineRevision !== project.timelineRevision;
+    const timelineNeedsReview = project.subtitleCues.length > 0 && project.subtitleCues.some((cue) => scopeNeedsReview(project, cueScope(cue)));
     return structuredClone(project.subtitleCues).map((cue) => timelineNeedsReview && cue.reviewStatus !== "REJECTED" ? { ...cue, reviewStatus: "DRAFT" as const } : cue);
   });
   const [scope, setScope] = useState<SubtitleGenerationScope>(DEFAULT_SCOPE);
@@ -73,10 +80,12 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   const [generating, setGenerating] = useState(false);
   const [buildingPreview, setBuildingPreview] = useState(false);
   const [includeSpeechTranscription, setIncludeSpeechTranscription] = useState(false);
+  const [aiRegenerationMode, setAiRegenerationMode] = useState<"FILL_BLANKS" | "REPLACE_AI_SCOPE" | "PRESERVE_USER_EDITED">("FILL_BLANKS");
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const [localDirty, setLocalDirty] = useState(false);
   const [previewHistoryRevision, setPreviewHistoryRevision] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const selectedScopes = useMemo(() => ([...(scope.intro ? ["INTRO" as const] : []), ...(scope.main ? ["MAIN" as const] : [])]), [scope]);
@@ -85,7 +94,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   const visibleCues = useMemo(() => cues.filter((cue) => selectedScopes.includes(cueScope(cue))), [cues, selectedScopes]);
   const selected = cues.find((cue) => cue.id === selectedId && selectedScopes.includes(cueScope(cue)));
   const selectedTimelineDurationMs = selected && cueScope(selected) === "INTRO" ? introDurationMs : scope.intro && !scope.main ? introDurationMs : timelineDurationMs;
-  const needsReview = cues.length > 0 && project.subtitleTimelineRevision !== project.timelineRevision;
+  const needsReview = cues.length > 0 && cues.some((cue) => scopeNeedsReview(project, cueScope(cue)));
   const counts = useMemo(() => ({
     draft: visibleCues.filter((cue) => cue.reviewStatus === "DRAFT").length,
     confirmed: visibleCues.filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED").length,
@@ -131,6 +140,17 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   }, []);
 
   useEffect(() => {
+    if (!localDirty) {
+      const needs = project.subtitleCues.length > 0 && project.subtitleCues.some((cue) => scopeNeedsReview(project, cueScope(cue)));
+      setCues(structuredClone(project.subtitleCues).map((cue) => needs && cue.reviewStatus !== "REJECTED" ? { ...cue, reviewStatus: "DRAFT" as const } : cue));
+      setSelectedId(project.subtitleCues[0]?.id);
+      setSelectedIds(project.subtitleCues[0] ? new Set([project.subtitleCues[0].id]) : new Set());
+    } else if (project.updatedAt) {
+      setNotice("專案在背景更新；目前未保存的字幕編輯仍保留，請保存或重新載入以採用外部版本。");
+    }
+  }, [project.id, project.subtitleCues, project.updatedAt]);
+
+  useEffect(() => {
     if (selected) return;
     const first = visibleCues[0]; setSelectedId(first?.id); setSelectedIds(first ? new Set([first.id]) : new Set()); selectionAnchorId.current = first?.id; setCursor(first?.startMs ?? 0);
   }, [selected, visibleCues]);
@@ -157,7 +177,8 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   };
 
   const patchCue = (id: string, field: "startMs" | "endMs" | "text", value: string | number) => {
-    setCues((current) => current.map((cue) => cue.id === id ? { ...cue, [field]: field === "text" ? value : Math.round(Number(value) * 1000) } : cue));
+    setLocalDirty(true);
+    setCues((current) => current.map((cue) => cue.id === id ? { ...cue, userEdited: true, [field]: field === "text" ? value : Math.round(Number(value) * 1000) } : cue));
   };
 
   const setStatus = (id: string, reviewStatus: SubtitleCueReviewStatus) => {
@@ -170,6 +191,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     try {
       const updated = await window.sourceApp.setSubtitleCues(cues);
       onProjectUpdated(updated); setCues(updated.subtitleCues);
+      setLocalDirty(false);
       setNotice("字幕與審核狀態已保存，並綁定目前 timeline revision。");
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBusy(false); }
@@ -190,8 +212,9 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     if (!selectedScopes.length) { setError("請至少選擇片頭或正片。"); return; }
     setGenerating(true); setError(undefined); setNotice(undefined); setProgress({ phase: "PREPARING", processed: 0, total: 1 });
     try {
-      const result = await window.sourceApp.generateAiSubtitles({ includeSpeechTranscription, scopes: selectedScopes });
+      const result = await window.sourceApp.generateAiSubtitles({ includeSpeechTranscription, scopes: selectedScopes, mode: aiRegenerationMode });
       onProjectUpdated(result.project); setCues(structuredClone(result.project.subtitleCues));
+      setLocalDirty(false);
       const firstGenerated = result.project.subtitleCues.find((cue) => (cue.origin === "AI_SPEECH" || cue.origin === "AI_VISUAL") && selectedScopes.includes(cueScope(cue)));
       setSelectedId(firstGenerated?.id ?? result.project.subtitleCues.find((cue) => selectedScopes.includes(cueScope(cue)))?.id);
       setSelectedIds(firstGenerated ? new Set([firstGenerated.id]) : new Set());
@@ -335,7 +358,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
       {error && <section className="subtitle-ai-failure" role="alert"><div><strong>AI 字幕沒有產出</strong><p>{error}</p>{error.includes("credit_balance_exhausted") || error.includes("沒有可用 API 額度") ? <small>片頭代理成功只代表本機 MP4 已完成，不代表 OpenAI API 可用。新版會自動再試 Codex／ChatGPT 登入；若此處仍顯示錯誤，請依後半段訊息確認 Codex 是否已登入，或取消勾選語音分析後重試。</small> : null}</div><button className="settings-button" type="button" onClick={onOpenAiSettings}>開啟 AI 帳號設定</button></section>}
       <div className="subtitle-studio-toolbar">
         <div><span><strong>{counts.draft}</strong> 待確認</span><span><strong>{counts.confirmed}</strong> 已確認</span><span><strong>{counts.rejected}</strong> 已排除</span></div>
-        <div className="subtitle-ai-actions"><fieldset className="subtitle-scope"><legend>產生／顯示範圍</legend><label><input aria-label="片頭字幕" type="checkbox" checked={scope.intro} disabled={!project.introSegments.length} onChange={(event) => updateScope("intro", event.target.checked)}/> 片頭</label><label><input aria-label="正片字幕" type="checkbox" checked={scope.main} disabled={timelineDurationMs <= 0} onChange={(event) => updateScope("main", event.target.checked)}/> 正片</label></fieldset><button className="secondary-button" type="button" disabled={generating || busy} onClick={() => void importFile()}>⇧ 匯入 SRT</button><label><input aria-label="同時分析素材語音" type="checkbox" checked={includeSpeechTranscription} onChange={(event) => setIncludeSpeechTranscription(event.target.checked)}/> 同時分析素材語音（預設不勾）</label><button className="settings-button" type="button" onClick={onOpenAiSettings}>✦ AI 帳號／故事設定</button><button className="ai-intro-button" type="button" disabled={generating || buildingPreview || busy || !canGenerate} onClick={() => void generate()}>AI 知識型字幕草稿</button></div>
+        <div className="subtitle-ai-actions"><fieldset className="subtitle-scope"><legend>產生／顯示範圍</legend><label><input aria-label="片頭字幕" type="checkbox" checked={scope.intro} disabled={!project.introSegments.length} onChange={(event) => updateScope("intro", event.target.checked)}/> 片頭</label><label><input aria-label="正片字幕" type="checkbox" checked={scope.main} disabled={timelineDurationMs <= 0} onChange={(event) => updateScope("main", event.target.checked)}/> 正片</label></fieldset><button className="secondary-button" type="button" disabled={generating || busy} onClick={() => void importFile()}>⇧ 匯入 SRT</button><label><input aria-label="同時分析素材語音" type="checkbox" checked={includeSpeechTranscription} onChange={(event) => setIncludeSpeechTranscription(event.target.checked)}/> 同時分析素材語音（預設不勾）</label><label className="ai-mode-select">AI 重跑方式<select aria-label="AI 字幕重跑方式" value={aiRegenerationMode} disabled={generating || busy} onChange={(event) => setAiRegenerationMode(event.target.value as typeof aiRegenerationMode)}><option value="FILL_BLANKS">填補空白（保留現有 AI）</option><option value="PRESERVE_USER_EDITED">保留人工修改（重建未修改 AI）</option><option value="REPLACE_AI_SCOPE">替換所選範圍 AI 字幕</option></select></label><button className="settings-button" type="button" onClick={onOpenAiSettings}>✦ AI 帳號／故事設定</button><button className="ai-intro-button" type="button" disabled={generating || buildingPreview || busy || !canGenerate} onClick={() => void generate()}>AI 知識型字幕草稿</button></div>
       </div>
       {scope.intro && project.introSegments.length > 0 && <div className={`subtitle-intro-ai-state ${introOpenAiCount ? "has-cloud-analysis" : "is-local-only"}`} role="status">片頭共 {project.introSegments.length} 段，其中 {introOpenAiCount} 段曾完成 OpenAI 人物／事件／故事比對。{introOpenAiCount === 0 ? "目前片頭挑選是本機畫面統計備援，不能視為 AI 連線成功。" : "字幕仍會重新依畫面與故事背景建立草稿。"}</div>}
       <div className="subtitle-review-layout">
@@ -359,7 +382,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
           <section className="subtitle-style-panel" aria-label="字幕顯示格式"><label>高低位置 <input aria-label="字幕高低位置" type="range" min="10" max="92" value={subtitleStyle.verticalPositionPercent} onChange={(event) => setSubtitleStyle((current) => ({ ...current, verticalPositionPercent: Number(event.target.value) }))}/><span>{subtitleStyle.verticalPositionPercent}%</span></label><label>文字大小 <input aria-label="字幕文字大小" type="number" min="16" max="72" value={subtitleStyle.fontSizePx} onChange={(event) => setSubtitleStyle((current) => ({ ...current, fontSizePx: Number(event.target.value) }))}/><span>px</span></label><label>顏色 <input aria-label="字幕文字顏色" type="color" value={subtitleStyle.textColor} onChange={(event) => setSubtitleStyle((current) => ({ ...current, textColor: event.target.value.toUpperCase() }))}/></label><label><input aria-label="字幕陰影" type="checkbox" checked={subtitleStyle.shadowEnabled} onChange={(event) => setSubtitleStyle((current) => ({ ...current, shadowEnabled: event.target.checked }))}/> 陰影</label><label>外框 <input aria-label="字幕外框寬度" type="number" min="0" max="8" value={subtitleStyle.outlineWidthPx} onChange={(event) => setSubtitleStyle((current) => ({ ...current, outlineWidthPx: Number(event.target.value) }))}/><span>px</span></label><button type="button" className="secondary-button" disabled={busy} onClick={() => void saveStyle()}>儲存顯示格式</button></section>
           {selected && <section className="cue-review-editor">
             <header><div><span className={`review-status status-${selected.reviewStatus ?? "CONFIRMED"}`}>{statusLabel(selected.reviewStatus)}</span><strong>{cueScope(selected) === "INTRO" ? "片頭" : "正片"} · {cueOrigin(selected)}</strong>{selected.speaker && <small>說話者：{selected.speaker}</small>}</div><button type="button" className="danger-text" disabled={busy || generating || buildingPreview} onClick={() => void deleteSelectedCue()}>刪除這筆（Delete）</button></header>
-            <div className="cue-fields"><label>開始（秒）<input type="number" min="0" max={selectedTimelineDurationMs / 1000} step="0.01" value={selected.startMs / 1000} onChange={(event) => patchCue(selected.id, "startMs", Number(event.target.value))}/></label><label>結束（秒）<input type="number" min="0" max={selectedTimelineDurationMs / 1000} step="0.01" value={selected.endMs / 1000} onChange={(event) => patchCue(selected.id, "endMs", Number(event.target.value))}/></label><label className="cue-text-field">字幕文字<textarea value={selected.text} onChange={(event) => patchCue(selected.id, "text", event.target.value)}/></label></div>
+          <div className="cue-fields"><label>開始（分:秒.毫秒）<TimecodeInput label="字幕開始" valueMs={selected.startMs} maxMs={selectedTimelineDurationMs} onChange={(value) => patchCue(selected.id, "startMs", value / 1000)} /></label><label>結束（分:秒.毫秒）<TimecodeInput label="字幕結束" valueMs={selected.endMs} maxMs={selectedTimelineDurationMs} onChange={(value) => patchCue(selected.id, "endMs", value / 1000)} /></label><label className="cue-text-field">字幕文字<textarea value={selected.text} onChange={(event) => patchCue(selected.id, "text", event.target.value)}/></label></div>
             {(selected.visualSummary || selected.eventSummary || selected.peopleSummary?.length || selected.locationSummary?.length) && <div className="ai-evidence"><h3>AI 判斷依據（請人工核對）</h3><dl>{selected.visualSummary && <><dt>畫面</dt><dd>{selected.visualSummary}</dd></>}{selected.eventSummary && <><dt>事件</dt><dd>{selected.eventSummary}</dd></>}{selected.peopleSummary?.length ? <><dt>人物</dt><dd>{selected.peopleSummary.join("、")}</dd></> : null}{selected.locationSummary?.length ? <><dt>地點</dt><dd>{selected.locationSummary.join("、")}</dd></> : null}</dl><div className="ai-score-row"><span>主題相關 <strong>{selected.topicRelevanceScore ?? "–"}</strong></span><span>聲畫符合 <strong>{selected.transcriptVisualMatchScore ?? "–"}</strong></span><span>AI 信心 <strong>{selected.aiConfidence ?? "–"}</strong></span></div>{selected.aiWarnings?.length ? <ul>{selected.aiWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}</div>}
             <div className="cue-review-actions"><button type="button" className="reject-cue" onClick={() => setStatus(selected.id, "REJECTED")}>排除</button><button type="button" onClick={() => setStatus(selected.id, "DRAFT")}>改回待確認</button><button type="button" className="confirm-cue" onClick={() => setStatus(selected.id, "CONFIRMED")}>✓ 確認時間、畫面與文字</button></div>
           </section>}

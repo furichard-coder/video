@@ -17,6 +17,17 @@ describe("subtitle ASS burn-in", () => {
     expect(result.content).toContain("\\N");
   });
 
+  it("shares preview style profile with burn-in output", () => {
+    const result = buildSubtitleAss(project, [{ assetId: asset.id, inMs: 0, outMs: 10_000 }], 0, 0.3, "480P", {
+      enabled: true,
+      tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }],
+      styleProfile: { verticalPositionPercent: 24, fontSizePx: 36, textColor: "#FFE066", shadowEnabled: false, outlineWidthPx: 3 },
+    }, { byLanguage: { "zh-TW": ["樣式一致"] }, providers: ["ORIGINAL"] });
+    expect(result.content).toContain("&H0066E0FF");
+    expect(result.content).toContain(",16,");
+    expect(result.content).toContain("\\an8\\pos");
+  });
+
   it("blocks stale timeline subtitles and escapes Chinese/spaced Windows paths", () => {
     expect(() => buildSubtitleAss({ ...project, subtitleTimelineRevision: 1 }, [{ assetId: asset.id, inMs: 0, outMs: 10_000 }], 0, 0.3, "480P", { enabled: true, tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }] }, { byLanguage: { "zh-TW": ["字幕"] }, providers: ["ORIGINAL"] })).toThrow(/複核/);
     expect(escapeFfmpegFilterPath("C:\\字幕 cache\\測試.ass")).toContain("C\\:/字幕 cache/測試.ass");

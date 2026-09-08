@@ -5,10 +5,10 @@ import type { ProjectManifest, SourceAsset } from "../src/shared/domain";
 const bgm = { id: "bgm", sourcePath: "C:\\Music\\track.mp3", fileName: "track.mp3", sizeBytes: 1, durationMs: 10_000, sourceInMs: 0, sourceOutMs: 5_000, timelineInMs: 0, timelineOutMs: 5_000, fadeInMs: 500, fadeOutMs: 500, volumePercent: 100, sourcePolicy: "READ_ONLY" as const, addedAt: "2026-01-01T00:00:00.000Z" };
 
 describe("editing validation rules", () => {
-  it("accepts 0, 100 and 200 percent but rejects values outside the fixed range", () => {
-    expect([0, 100, 200].map((value) => validatePercent(value))).toEqual([0, 100, 200]);
-    expect(() => validatePercent(-1)).toThrow(); expect(() => validatePercent(200.1)).toThrow(); expect(() => validatePercent(Number.NaN)).toThrow();
-    expect([0, 100, 200].map((volumePercent) => validateBgmTrack({ ...bgm, volumePercent }).volumePercent)).toEqual([0, 100, 200]);
+  it("accepts 0, 100, 200 and 300 percent but rejects values outside the fixed range", () => {
+    expect([0, 100, 200, 300].map((value) => validatePercent(value))).toEqual([0, 100, 200, 300]);
+    expect(() => validatePercent(-1)).toThrow(); expect(() => validatePercent(300.1)).toThrow(); expect(() => validatePercent(Number.NaN)).toThrow();
+    expect([0, 100, 200, 300].map((volumePercent) => validateBgmTrack({ ...bgm, volumePercent }).volumePercent)).toEqual([0, 100, 200, 300]);
   });
   it("validates BGM source/timeline spans and fades", () => {
     expect(() => validateBgmTrack({ ...bgm, timelineOutMs: 4_000 })).toThrow(/长度必须|長度必須/);
