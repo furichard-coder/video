@@ -1,0 +1,47 @@
+# SceneryWalker 素材整理 App 變更紀錄
+
+本檔案是每次可交付功能變更的簡短索引。完成一個階段後，必須同步更新本檔案、`README.md` 與 `VERIFICATION.md`；只有通過建置／測試的內容才可標記為完成。
+
+## v0.37.0 — 2026-09-08
+
+- AI 字幕新 cue 預設為 `CONFIRMED`，可直接預覽與匯出；既有 `DRAFT`／`REJECTED` 狀態仍保留。
+- 字幕頁新增 Shift 連續選取、批次取消確認與批次刪除；批次刪除需明確確認，來源影片、照片與代理檔不受影響。
+- 字幕 cue 編輯與保存、SRT 驗證及 timeline revision gate 維持原流程。
+- 驗證：32 suites／229 tests、TypeScript、production build、npm audit（0 vulnerabilities）、Windows packaged smoke 通過。
+- 交付：`release/v0.37.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer.exe`。
+- Windows EXE SHA-256：`8A03EC8DBAC457EFE6CE01F9110E74588667A8F90E61A5CAB6380244B7834089`。
+
+## v0.36.1 — 2026-09-08
+
+- 修正字幕永久嵌入選項在持久偏好為開啟、但目前沒有已確認字幕或字幕需要複核時被鎖定的問題。
+- 使用者現在可在開始輸出前取消嵌入；未勾選時仍安全阻擋不完整字幕的啟用。
+- 更新 UI 說明文字，明確表示取消不會修改來源檔。
+- 修正 Windows 封裝忽略規則，避免把既有大型 `.upload-staging` 暫存 MP4 複製進 EXE。
+- 驗證：32 suites／228 tests、TypeScript、production build、Windows packaged smoke 通過。
+- 交付：`release/v0.36.1/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer.exe`。
+- Windows EXE SHA-256：`9959B6CA644187EFD95A3B8266F49DFE97CB2F1E9E23367DFBA14E2EB5A5A829`。
+
+## v0.36.0 — 2026-09-08
+
+- AI 配樂、AI 片頭分析、AI 字幕、字幕片頭預覽與片頭／正片串連預覽改為主程式背景工作；關閉功能視窗不會中斷。
+- 主畫面顯示背景工作狀態；完成結果沿用既有專案 manifest 或預覽檔案庫保存規則。
+- AI 片頭分析結果保存至專案，重開片頭頁可由使用者明確套用，避免靜默覆蓋既有手動順序。
+- 功能內的取消按鈕仍保留，取消與失敗狀態會在背景工作列顯示。
+- 驗證：32 suites／227 tests、TypeScript、production build、Electron smoke、Windows packaged smoke 通過；npm audit 為 0 vulnerabilities。
+- Windows EXE SHA-256：`526AFA53A3C7F43340D71B684F413D97A5B72B5664E99F9C1D3E8F08ADD6F5A6`。
+
+## v0.35.0 — 2026-09-08
+
+- 配樂頁新增「只搜尋有 royalty-free／授權線索的音樂」選項。
+- OpenAI 與 Codex／ChatGPT 搜尋提示會要求 YouTube Audio Library、Creative Commons 或明示授權線索。
+- Main process 會排除沒有 `rightsEvidence` 的候選，並將 `royaltyFreeOnly` 寫入搜尋結果。
+- 選項偏好與最近搜尋結果可持久保存，重新開啟 App 或專案後恢復。
+- UI 明確標示：授權線索不是法律上的無版權保證，仍須逐首核對原始條款。
+- 驗證：32 suites／227 tests、TypeScript、production build、Electron smoke、Windows packaged smoke 皆通過；npm audit 為 0 vulnerabilities。
+- 交付：`release/v0.35.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer.exe`。
+
+## 文件維護規則
+
+- 新功能或修正完成後，先更新本檔案，再更新 `README.md` 的版本摘要與 `docs/VERIFICATION.md` 的驗證結果。
+- 若只完成程式修改但尚未驗證，記錄為進行中，不得宣稱已交付。
+- 不在本檔案記錄來源媒體內容、API key、密碼或其他敏感資料。

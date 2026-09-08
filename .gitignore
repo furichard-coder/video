@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-electron/
+coverage/
+release/
+.upload-staging/
+cache/
+artifacts/
+*.log
+.vite/
+.DS_Store
+Thumbs.db

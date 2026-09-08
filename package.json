@@ -1,0 +1,40 @@
+{
+  "name": "scenerywalker-source-organizer",
+  "version": "0.37.0",
+  "private": true,
+  "productName": "SceneryWalker 素材整理",
+  "description": "Windows-first read-only media source organizer and preview module",
+  "main": "dist-electron/main/main.js",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run clean && tsc -p tsconfig.main.json && vite build",
+    "clean": "node scripts/clean.mjs",
+    "start": "electron .",
+    "smoke": "node scripts/smoke.mjs",
+    "screenshot": "node scripts/screenshot.mjs",
+    "package:win": "npm run build && node scripts/package-win.mjs",
+    "smoke:packaged": "node scripts/smoke-packaged.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.main.json --noEmit"
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.6",
+    "@types/node": "26.4.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "6.1.1",
+    "electron": "44.0.0",
+    "jsdom": "30.0.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}
