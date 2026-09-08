@@ -8,6 +8,11 @@
 - 新增 Material Editor workspace 與共享 OutputLibrary compact provider；Intro／字幕頁不再各自維護播放／位置／複製清單邏輯。
 - Subtitle/BGM dirty close guard 提供保存並離開、放棄並離開、返回編輯；更新 AI 字幕預設已確認文案。
 
+## v0.41.0 — 2026-09-09
+
+- Concat、Intro、字幕與全域成品庫共用 `useOutputLibrary`、`OutputRecordActions` 與 purpose filter，移除重複的播放／開啟位置／複製路徑查詢與錯誤處理。
+- OutputHistoryModal 保留既有 MP4 登記、歷史紀錄移除及 YouTube／BiliBili／TikTok 發布交接；共用元件只承擔一般檔案動作。
+
 ## v0.39.0 — 2026-09-09
 
 - 字幕預覽與 MP4 burn-in 共用 `SubtitleStyleProfile`，位置、字級、顏色、陰影與外框依輸出解析度等比套用。

@@ -5,7 +5,6 @@ import type {
   IntroSuggestion,
   MainStartCardOptions,
   OutputSelection,
-  PreviewOutputRecord,
   PreviewResolution,
   PreviewRenderPurpose,
   RenderClipSelection,
@@ -21,6 +20,7 @@ import { introSegmentsForOutput } from "../../shared/intro-duration";
 import { YoutubeSettingsModal } from "./YoutubeSettingsModal";
 import { YoutubeUploadModal } from "./YoutubeUploadModal";
 import { MainStartCardModal } from "./MainStartCardModal";
+import { OutputLibrary } from "./OutputLibrary";
 
 interface ConcatRenderModalProps {
   assets: SourceAsset[];
@@ -91,7 +91,7 @@ export function ConcatRenderModal({ assets, purpose = "CONCAT", introClips, intr
   const [outputOpenError, setOutputOpenError] = useState<string>();
   const [platformHandoffBusy, setPlatformHandoffBusy] = useState<"BILIBILI" | "TIKTOK">();
   const [platformHandoffNotice, setPlatformHandoffNotice] = useState<string>();
-  const [previousOutputs, setPreviousOutputs] = useState<PreviewOutputRecord[]>([]);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const isIntro = purpose === "INTRO";
   const isClip = purpose === "CLIP";
   const isMain = purpose === "CONCAT";
@@ -126,14 +126,6 @@ export function ConcatRenderModal({ assets, purpose = "CONCAT", introClips, intr
         section: "MAIN" as const,
       })),
     ], [assets, effectiveIntroClips, isIntro, isMain, mainClips, prependIntro]);
-  const matchingOutputs = useMemo(() => previousOutputs
-    .filter((item) => item.exists && (isIntro ? item.purpose === "INTRO" : isClip ? item.purpose === "CLIP" : item.purpose === "CONCAT" || item.purpose === "UNKNOWN"))
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt)), [isClip, isIntro, previousOutputs]);
-
-  const refreshOutputHistory = async () => {
-    const history = await window.sourceApp.getPreviewOutputHistory();
-    setPreviousOutputs(history.outputs);
-  };
 
   const prepareAutomaticOutput = async (preserveExistingError = false) => {
     if (!preserveExistingError) setError(undefined);
@@ -146,7 +138,6 @@ export function ConcatRenderModal({ assets, purpose = "CONCAT", introClips, intr
   useEffect(() => {
     window.sourceApp.onConcatProgress(setProgress);
     void prepareAutomaticOutput();
-    void refreshOutputHistory().catch((reason: unknown) => setOutputOpenError(reason instanceof Error ? reason.message : String(reason)));
     void window.sourceApp.getUserPreferences().then((preferences) => {
       if (preferencesTouchedRef.current) return;
       setTransitionSeconds(preferences.renderDefaults.transitionSeconds);
@@ -253,7 +244,7 @@ export function ConcatRenderModal({ assets, purpose = "CONCAT", introClips, intr
         ...(isMain && prependIntro ? { mainStartCard } : {}),
       });
       setResult(completed);
-      await refreshOutputHistory();
+      setHistoryRefreshKey((value) => value + 1);
       if (isMain && autoUploadEnabled && !completed.cancelled) {
         setUploadCountdownSeconds(60);
         setAutoUploadStatus("COUNTING");
@@ -419,11 +410,7 @@ export function ConcatRenderModal({ assets, purpose = "CONCAT", introClips, intr
             </aside>
           </div>
         )}
-        <section className="inline-output-history" aria-label={historyTitle}>
-          <div><span className="eyebrow">PREVIOUS PREVIEW FILES</span><h3>{historyTitle}</h3><p>點擊檔案名稱會交給目前設定的外部播放器；來源與成品檔都不會被修改。</p></div>
-          {outputOpenError && <div className="notice error concat-error" role="alert">{outputOpenError}</div>}
-          {!matchingOutputs.length ? <p className="inline-history-empty">目前沒有仍存在的同類型預覽檔。</p> : <ol>{matchingOutputs.map((item) => <li key={item.jobId}><div><button type="button" title={item.outputPath} onClick={() => { setOutputOpenError(undefined); void window.sourceApp.playConcatOutput(item.jobId).catch((reason: unknown) => setOutputOpenError(reason instanceof Error ? reason.message : String(reason))); }}>{item.fileName}</button><span>{new Date(item.createdAt).toLocaleString("zh-TW")} · {formatBytes(item.sizeBytes)}{item.resolution ? ` · ${item.resolution}` : ""}</span></div><nav aria-label={`${item.fileName} 檔案操作`}><button type="button" onClick={() => void window.sourceApp.revealConcatOutput(item.jobId).catch((reason: unknown) => setOutputOpenError(reason instanceof Error ? reason.message : String(reason)))}>開啟位置</button><button type="button" onClick={() => void window.sourceApp.copyPreviewOutputPath(item.jobId).catch((reason: unknown) => setOutputOpenError(reason instanceof Error ? reason.message : String(reason)))}>複製路徑</button></nav></li>)}</ol>}
-        </section>
+        <OutputLibrary purpose={isIntro ? "INTRO" : isClip ? "CLIP" : ["CONCAT", "UNKNOWN"]} title={historyTitle} refreshKey={historyRefreshKey} recentOnly={false} emptyText="目前沒有仍存在的同類型預覽檔。" />
       </section>
       {showYoutubeUpload && result && isMain && (
         <YoutubeUploadModal

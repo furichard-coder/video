@@ -16,6 +16,20 @@
 | v0.40.0 Windows x64 交付 | PASS；`release/v0.40.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer.exe` SHA-256 `3B36990A83DAB304010557EC89B3764283B3DA265C619ACDC7BA2B8DAB0D137F` |
 | 根目錄 SOP、來源媒體、既有 release | 未修改 |
 
+## v0.41.0 增量驗證（2026-09-09）
+
+| 檢查 | 結果 |
+|---|---|
+| Concat／Intro／字幕／全域成品庫 purpose filter | PASS；CONCAT＋UNKNOWN、INTRO、CLIP 依用途篩選 |
+| 播放／開啟位置／複製路徑共用動作 | PASS；`OutputRecordActions` 集中查詢、錯誤處理與可用性判斷 |
+| 全域成品庫獨有操作 | PASS；既有 MP4 登記、歷史紀錄移除及三平台交接仍由 OutputHistoryModal 提供 |
+| Renderer／Main TypeScript typecheck | PASS |
+| Vitest 完整單元、整合與 UI 回歸 | PASS，35 suites／235 tests |
+| Production build／npm audit | PASS；0 high vulnerabilities |
+| Electron smoke／Windows packaged smoke | PASS |
+| v0.41.0 Windows x64 交付 | PASS；`release/v0.41.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer.exe` SHA-256 `7BA397D447DCB638E131FDC66039C21353F19A304E37373A44239AD07EA618EA` |
+| 根目錄 SOP、來源媒體、既有 release | 未修改 |
+
 ## v0.39.0 增量驗證（2026-09-09）
 
 | 檢查 | 結果 |
