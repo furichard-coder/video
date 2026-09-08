@@ -137,6 +137,7 @@ export function buildConcatFilterGraph(
   resolution: PreviewResolution,
   bgmInputs: BgmRenderInput[] = [],
   sourceAudioVolumePercent: number = DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT,
+  portrait = false,
 ): ConcatFilterPlan {
   if (inputs.length < 1) throw new Error("至少需要一個影片或照片片段才能產出預覽。");
   if (!TRANSITIONS.has(transitionSeconds)) throw new Error("疊化秒數只支援 0.3、0.5 或 0.7 秒。");
@@ -149,13 +150,13 @@ export function buildConcatFilterGraph(
     }
   }
 
-  const { width, height } = RESOLUTIONS[resolution];
+  const { width, height } = portrait ? { width: 1080, height: 1920 } : RESOLUTIONS[resolution];
   const filters: string[] = [];
   inputs.forEach((input, index) => {
     const colorChain = input.colorFilters?.length ? `,${input.colorFilters.join(",")}` : "";
     const zooms = input.isImage || input.mainStartCard ? [] : localZoomSegments(input);
     const baseVideoLabel = zooms.length || input.mainStartCard ? `vbase${index}` : `v${index}`;
-    if (input.isPortrait) {
+    if (input.isPortrait || portrait) {
       filters.push(`[${index}:v:0]fps=30000/1001,split=2[pbg${index}][pfg${index}]`);
       filters.push(`[pbg${index}]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},boxblur=luma_radius=min(h\\,w)/30:luma_power=1[blur${index}]`);
       filters.push(`[pfg${index}]scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2[front${index}]`);
@@ -404,7 +405,7 @@ export class ConcatRenderService {
   ): Promise<ConcatRenderResult> {
     if (!Array.isArray(request.orderedAssetIds)) throw new Error("影片片段順序格式無效。");
     const purpose = request.purpose ?? "CONCAT";
-    if (purpose !== "CONCAT" && purpose !== "INTRO" && purpose !== "CLIP") throw new Error("預覽輸出用途無效。");
+    if (purpose !== "CONCAT" && purpose !== "INTRO" && purpose !== "CLIP" && purpose !== "SHORTS") throw new Error("預覽輸出用途無效。");
     if (request.orderedAssetIds.length < 1) throw new Error(purpose === "INTRO" ? "至少需要一個片段才能產出 Intro 預覽。" : purpose === "CLIP" ? "至少需要一個固定時間段才能輸出。" : "正片沒有可供輸出的保留片段。");
     const project = this.store.getProject();
     const introTargetDurationMs = project.introTargetDurationMs ?? DEFAULT_INTRO_TARGET_DURATION_MS;
@@ -434,11 +435,18 @@ export class ConcatRenderService {
       if (expected.length > INTRO_MAX_SEGMENTS) throw new Error(`Intro 最多只能輸出 ${INTRO_MAX_SEGMENTS} 段。`);
       if (expected.some((clip) => clip.outMs - clip.inMs < INTRO_MIN_SEGMENT_MS || clip.outMs - clip.inMs > project.introSegmentMaxDurationMs)) throw new Error("Intro 輸出片段不符合目前每段最高時間。");
       if (expected.reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0) > introTargetDurationMs) throw new Error(`Intro 總長超過目前設定的 ${Math.round(introTargetDurationMs / 1000)} 秒。`);
-    } else {
+    } else if (purpose === "CLIP") {
       const requested = request.clipSelections;
       if (request.resolution !== "4K") throw new Error("最高解析度時間段固定輸出為 4K（3840×2160）。");
       if (request.orderedAssetIds.length !== 1 || requested?.length !== 1 || requested[0].assetId !== request.orderedAssetIds[0]) throw new Error("固定時間段輸出只能包含一個專案影片片段。");
       if (request.prependIntro || request.subtitleBurnIn?.enabled) throw new Error("固定時間段輸出不串接片頭或字幕。");
+    } else {
+      if (!request.shortsPortrait) throw new Error("Shorts 必須使用 9:16 直式輸出。" );
+      if (request.shortsMaxDurationSec !== 60 && request.shortsMaxDurationSec !== 180) throw new Error("Shorts 長度上限只支援 60 或 180 秒。" );
+      const requested = request.clipSelections;
+      const expected = mainRenderSelections(project);
+      if (!requested || requested.length !== expected.length || expected.some((clip, index) => clip.assetId !== requested[index]?.assetId || clip.inMs !== requested[index]?.inMs || clip.outMs !== requested[index]?.outMs)) throw new Error("Shorts 輸出要求與目前正片時間線不一致。" );
+      if (request.prependIntro) throw new Error("Shorts 不會靜默串接 16:9 Intro；請在 Shorts 頁明確選擇片段。" );
     }
     if (path.extname(outputPath).toLowerCase() !== ".mp4") throw new Error("串連預覽必須輸出為 MP4。");
     const mainStartCard = purpose === "CONCAT" && request.prependIntro
@@ -551,9 +559,10 @@ export class ConcatRenderService {
       if (samePath(track.sourcePath, outputPath)) throw new Error("輸出路徑不可覆蓋配樂來源。");
     }
     const sourceAudioVolumePercent = currentProject.sourceAudioVolumePercent ?? DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT;
-    const basePlan = buildConcatFilterGraph(inputs, request.transitionSeconds, request.resolution, [], sourceAudioVolumePercent);
+    const basePlan = buildConcatFilterGraph(inputs, request.transitionSeconds, request.resolution, [], sourceAudioVolumePercent, purpose === "SHORTS");
+    if (purpose === "SHORTS" && basePlan.expectedDurationMs > (request.shortsMaxDurationSec ?? 60) * 1000) throw new Error(`Shorts 總長 ${Math.ceil(basePlan.expectedDurationMs / 1000)} 秒超過目前 ${request.shortsMaxDurationSec ?? 60} 秒上限。`);
     const activeBgmTracks = bgmTracks.filter((track) => track.timelineInMs < basePlan.expectedDurationMs);
-    const plan = buildConcatFilterGraph(inputs, request.transitionSeconds, request.resolution, activeBgmTracks, sourceAudioVolumePercent);
+    const plan = buildConcatFilterGraph(inputs, request.transitionSeconds, request.resolution, activeBgmTracks, sourceAudioVolumePercent, purpose === "SHORTS");
     onProgress({
       phase: "PREPARING",
       percent: 0,
@@ -569,7 +578,7 @@ export class ConcatRenderService {
     let subtitleBurnedLanguages: SubtitleRenderLanguage[] | undefined;
     let subtitleTranslationProviders: SubtitleTranslationProvider[] | undefined;
     if (request.subtitleBurnIn?.enabled) {
-      if (purpose !== "CONCAT") throw new Error("字幕嵌入只適用於正片／片頭加正片輸出，不套用片頭單獨預覽。");
+      if (purpose !== "CONCAT" && purpose !== "SHORTS") throw new Error("字幕嵌入只適用於正片／Shorts 輸出，不套用片頭單獨預覽。");
       if (!this.subtitleTranslation || !this.subtitleCacheRoot) throw new Error("字幕翻譯與嵌入服務尚未初始化，已阻擋輸出。");
       const subtitleOptions = validateSubtitleBurnInOptions(request.subtitleBurnIn);
       const confirmedCues = project.subtitleCues.filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED");
@@ -679,6 +688,8 @@ export class ConcatRenderService {
         colorPresetId: project.colorSettings.introPresetId,
         colorAppliedToMain: purpose === "CONCAT" && project.colorSettings.applyToMain,
         mainStartCardDurationSeconds: mainStartCard?.durationSeconds,
+        shortsPortrait: purpose === "SHORTS" ? true : undefined,
+        aspectRatio: purpose === "SHORTS" ? "PORTRAIT_9_16" : "LANDSCAPE_16_9",
       };
       onProgress({
         phase: "FINALIZING",

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { DEFAULT_BGM_VOLUME_PERCENT, DEFAULT_IMAGE_DURATION_MS, DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS, DEFAULT_INTRO_TARGET_DURATION_MS, DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT, DEFAULT_ZOOM_ENHANCEMENT_PRESET, DUNES_SHUTTER_EFFECT_ID, DUNES_SHUTTER_EFFECT_SHA256, INTRO_MAX_SEGMENT_MS, INTRO_MAX_SEGMENTS, INTRO_MIN_SEGMENT_MS, MANIFEST_SCHEMA_VERSION, MAX_IMAGE_DURATION_MS, MAX_MIX_VOLUME_PERCENT, MIN_IMAGE_DURATION_MS, PREVIEWER_VERSION, type AiStoryContext, type BgmTrack, type ImageDurationUpdateResult, type IntroAnalysisResult, type IntroSuggestion, type MainExclusionRange, type MainExclusionRangeUpdateResult, type MediaInsertion, type MusicSuggestionResult, type PlacementRequest, type PreviewRange, type PreviewRangeUpdateResult, type ProjectChangeSection, type ProjectChangedEvent, type ProjectColorSettings, type ProjectFileResult, type ProjectFileState, type ProjectHistoryState, type ProjectManifest, type RemovedIntroSegment, type RemovedMainAsset, type SortMode, type SourceAsset, type SubtitleCue, type SubtitleTimelineScope, type VolumeSegment, type ZoomEnhancementPreset, type ZoomSegment, type ZoomSegmentUpdateResult } from "../../shared/domain";
+import { DEFAULT_BGM_VOLUME_PERCENT, DEFAULT_IMAGE_DURATION_MS, DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS, DEFAULT_INTRO_TARGET_DURATION_MS, DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT, DEFAULT_ZOOM_ENHANCEMENT_PRESET, DUNES_SHUTTER_EFFECT_ID, DUNES_SHUTTER_EFFECT_SHA256, INTRO_MAX_SEGMENT_MS, INTRO_MAX_SEGMENTS, INTRO_MIN_SEGMENT_MS, MANIFEST_SCHEMA_VERSION, MAX_IMAGE_DURATION_MS, MAX_MIX_VOLUME_PERCENT, MIN_IMAGE_DURATION_MS, PREVIEWER_VERSION, type AiPublishAssets, type AiStoryContext, type BgmTrack, type ImageDurationUpdateResult, type IntroAnalysisResult, type IntroSuggestion, type MainExclusionRange, type MainExclusionRangeUpdateResult, type MediaInsertion, type MusicSuggestionResult, type PlacementRequest, type PreviewRange, type PreviewRangeUpdateResult, type ProjectChangeSection, type ProjectChangedEvent, type ProjectColorSettings, type ProjectFileResult, type ProjectFileState, type ProjectHistoryState, type ProjectManifest, type RemovedIntroSegment, type RemovedMainAsset, type SortMode, type SourceAsset, type SubtitleCue, type SubtitleTimelineScope, type VolumeSegment, type ZoomEnhancementPreset, type ZoomSegment, type ZoomSegmentUpdateResult } from "../../shared/domain";
 import { clipMainExclusionRanges, clipVolumeSegments, clipZoomSegments, imageDurationMs, mainRenderSelections, normalizeMainExclusionRanges, validateBgmTrack, validateImageDurationMs, validateMediaInsertion, validatePercent, validateSubtitleCues, validateVolumeSegments, validateZoomSegments } from "../../shared/editing-rules";
 import { sortAssets } from "../../shared/sorting";
 import { DEFAULT_PROJECT_COLOR_SETTINGS, normalizeProjectColorSettings } from "../../shared/color-presets";
@@ -73,7 +73,7 @@ function createProject(): ProjectManifest {
 function looksLikeProject(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
-  return (candidate.schemaVersion === 1 || candidate.schemaVersion === 2 || candidate.schemaVersion === 3 || candidate.schemaVersion === 4 || candidate.schemaVersion === 5 || candidate.schemaVersion === 6 || candidate.schemaVersion === 7 || candidate.schemaVersion === 8 || candidate.schemaVersion === 9 || candidate.schemaVersion === 10 || candidate.schemaVersion === 11 || candidate.schemaVersion === 12 || candidate.schemaVersion === 13 || candidate.schemaVersion === 14) && candidate.sourcePolicy === "READ_ONLY" && candidate.previewPolicy === "DERIVED_CACHE_ONLY_NOT_MASTER" && Array.isArray(candidate.sources);
+  return (candidate.schemaVersion === 1 || candidate.schemaVersion === 2 || candidate.schemaVersion === 3 || candidate.schemaVersion === 4 || candidate.schemaVersion === 5 || candidate.schemaVersion === 6 || candidate.schemaVersion === 7 || candidate.schemaVersion === 8 || candidate.schemaVersion === 9 || candidate.schemaVersion === 10 || candidate.schemaVersion === 11 || candidate.schemaVersion === 12 || candidate.schemaVersion === 13 || candidate.schemaVersion === 14 || candidate.schemaVersion === 15) && candidate.sourcePolicy === "READ_ONLY" && candidate.previewPolicy === "DERIVED_CACHE_ONLY_NOT_MASTER" && Array.isArray(candidate.sources);
 }
 
 function normalizeZoomEnhancementPreset(value: unknown): ZoomEnhancementPreset {
@@ -81,6 +81,9 @@ function normalizeZoomEnhancementPreset(value: unknown): ZoomEnhancementPreset {
 }
 
 function migrateProject(raw: Record<string, unknown>): ProjectManifest {
+  const aiPublishAssets = raw.aiPublishAssets && typeof raw.aiPublishAssets === "object"
+    ? structuredClone(raw.aiPublishAssets as AiPublishAssets)
+    : undefined;
   const sources = (raw.sources as SourceAsset[]).map((asset) => ({
     ...asset,
     imageDurationMs: asset.kind === "IMAGE" ? (() => { try { return validateImageDurationMs(asset.imageDurationMs ?? DEFAULT_IMAGE_DURATION_MS); } catch { return DEFAULT_IMAGE_DURATION_MS; } })() : undefined,
@@ -171,6 +174,7 @@ function migrateProject(raw: Record<string, unknown>): ProjectManifest {
     bgmTracks,
     sourceAudioVolumePercent,
     aiStoryContext: normalizeAiStoryContext(raw.aiStoryContext),
+    ...(aiPublishAssets ? { aiPublishAssets } : {}),
     subtitleCues: Array.isArray(raw.subtitleCues) ? (raw.subtitleCues as SubtitleCue[]).map((cue) => ({ ...cue, timelineScope: cue.timelineScope === "INTRO" ? "INTRO" : "MAIN", origin: cue.origin ?? "MANUAL", reviewStatus: cue.reviewStatus ?? "CONFIRMED" })) : [],
     timelineRevision: Number.isInteger(raw.timelineRevision) ? raw.timelineRevision as number : 0,
     subtitleTimelineRevision: Number.isInteger(raw.subtitleTimelineRevision) ? raw.subtitleTimelineRevision as number : 0,
@@ -703,6 +707,13 @@ export class ProjectStore {
     });
   }
 
+  async setAiPublishAssets(assets: AiPublishAssets): Promise<ProjectManifest> {
+    return this.mutate((project) => {
+      if (!assets || typeof assets !== "object" || !Array.isArray(assets.titles) || !Array.isArray(assets.thumbnails) || !Array.isArray(assets.chapters)) throw new Error("AI 發布素材格式無效。");
+      project.aiPublishAssets = structuredClone(assets);
+    }, false);
+  }
+
   async setMusicSuggestionResult(result: MusicSuggestionResult): Promise<ProjectManifest> {
     return this.mutate((project) => {
       if (!result || typeof result !== "object" || !Array.isArray(result.suggestions)) throw new Error("AI 配樂建議格式無效。");
@@ -753,7 +764,7 @@ export class ProjectStore {
       ["INTRO_TIMELINE", ["introSegments", "introTargetDurationMs", "introSegmentMaxDurationMs", "introExcludedSegmentIds", "introTimelineRevision"]],
       ["BGM", ["bgmTracks", "sourceAudioVolumePercent", "musicSuggestionResult"]],
       ["SUBTITLES", ["subtitleCues", "subtitleTimelineRevision", "mainSubtitleReviewRevision", "introSubtitleReviewRevision"]],
-      ["AI_CONTEXT", ["aiStoryContext", "introAnalysisResult"]],
+      ["AI_CONTEXT", ["aiStoryContext", "introAnalysisResult", "aiPublishAssets"]],
       ["SETTINGS", ["colorSettings", "audioMixPolicy"]],
       ["OUTPUTS", []],
     ];

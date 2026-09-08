@@ -1,4 +1,4 @@
-# Current Product Spec — v0.41.0
+# Current Product Spec — v0.42.0
 
 ## Scope
 
@@ -26,6 +26,10 @@ Windows-first read-only source organizer. The first visible workflow remains sou
 All millisecond fields use the shared minute/second/millisecond editor. The renderer exposes autosave state and protects dirty Subtitle/BGM drafts when a canonical project snapshot arrives from another window or background job.
 
 The main screen exposes six primary workspaces: sources/order, Intro, BGM, subtitles, preview/output library, and publishing. Per-material edits enter a single Material Editor workspace before opening the detailed safe editor. Output pages use the shared compact OutputLibrary provider for recent files and actions. As of v0.41.0, `useOutputLibrary` and `OutputRecordActions` are the shared query/action layer for Concat, Intro, subtitle and global output views; global registration/removal and platform handoff remain owned by OutputHistoryModal.
+
+## v0.42.0 incremental fix
+
+The permanent-subtitle checkbox is explicitly reversible before rendering. A saved enabled preference remains visually and functionally actionable even when the current project has no confirmed cues or requires subtitle review; turning it off is always allowed and persists `enabled: false`. Enabling still requires confirmed, current subtitles. The source files and existing output are never modified by this setting change.
 
 ## Verification baseline
 

@@ -350,7 +350,7 @@ export function ConcatRenderModal({ assets, purpose = "CONCAT", introClips, intr
 
               {isMain && <section className="setting-block subtitle-burn-setting">
                 <div><span className="setting-step">04</span><div><h3>嵌入影片字幕（最多兩種語言）</h3><p>使用字幕頁中「已確認」的繁體中文。選擇其他語言時，OpenAI 新的無狀態請求優先，失敗才使用已設定的 Google Cloud 翻譯。</p></div></div>
-                <label className={`subtitle-burn-toggle ${(!confirmedSubtitleCount || subtitlesNeedReview) ? "is-disabled" : ""}`}><input aria-label="將字幕永久嵌入這次 MP4" type="checkbox" checked={subtitleBurnIn.enabled} disabled={rendering} onChange={(event) => toggleSubtitleBurnIn(event.target.checked)} /><span><strong>將字幕永久嵌入這次 MP4</strong><small>勾選後會在本次輸出永久嵌入；尚未開始輸出前隨時可以取消勾選（取消後輸出不嵌入字幕），不會修改來源檔。長句會依畫面寬度自動換行。</small></span></label>
+                <label className={`subtitle-burn-toggle ${(!subtitleBurnIn.enabled && (!confirmedSubtitleCount || subtitlesNeedReview)) ? "is-disabled" : ""}`}><input aria-label="將字幕永久嵌入這次 MP4" aria-describedby="subtitle-burn-help" type="checkbox" checked={subtitleBurnIn.enabled} disabled={rendering} onChange={(event) => toggleSubtitleBurnIn(event.target.checked)} /><span><strong>將字幕永久嵌入這次 MP4</strong><small id="subtitle-burn-help">勾選後會在本次輸出永久嵌入；尚未開始輸出前隨時可以取消勾選（取消後輸出不嵌入字幕），不會修改來源檔。即使目前字幕需要複核或尚無確認字幕，只要尚未開始輸出，仍可取消已勾選狀態。</small></span></label>
                 {!confirmedSubtitleCount && <p className="inline-error">尚無已確認字幕；請先到「CC 字幕」逐項確認並保存。</p>}
                 {subtitlesNeedReview && <p className="inline-error">正片順序或 IN／OUT 已變更；請先重新複核並保存字幕。</p>}
                 {subtitleBurnIn.enabled && <div className="subtitle-track-settings">

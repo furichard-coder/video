@@ -23,6 +23,7 @@ import { TranslationSettingsStore } from "./services/translation-settings";
 import { SubtitleTranslationService } from "./services/subtitle-translation";
 import { SubtitlePreviewService } from "./services/subtitle-preview";
 import { MusicSuggestionService } from "./services/music-suggestion";
+import { AiPublishAssetsService } from "./services/ai-publish-assets";
 import type { CredentialProtector } from "./services/ai-settings";
 
 protocol.registerSchemesAsPrivileged([
@@ -164,6 +165,7 @@ void app.whenReady().then(async () => {
   await userPreferences.initialize();
   const aiStory = new AiStoryAnalysisService(path.join(app.getPath("userData"), "cache", "ai-story"), store, sources, aiSettings);
   await aiStory.initialize();
+  const aiPublishAssets = new AiPublishAssetsService(store, sources, previews, aiStory, aiSettings);
   const musicSuggestions = new MusicSuggestionService(
     store,
     aiSettings,
@@ -190,7 +192,7 @@ void app.whenReady().then(async () => {
   await playerSettings.initialize();
   const externalPlayers = new ExternalPlayerService(store, sources, previews, playerSettings, (targetPath) => shell.openPath(targetPath));
   const bgm = new BgmService(store, new MediaProbe());
-  registerIpc(store, sources, previews, concatRenderer, introAnalyzer, playerSettings, externalPlayers, bgm, aiSettings, aiStory, translationSettings, subtitleTranslation, youtubeSettings, youtubeUpload, platformUploadHandoff, outputHistory, userPreferences, subtitlePreviews, musicSuggestions);
+  registerIpc(store, sources, previews, concatRenderer, introAnalyzer, playerSettings, externalPlayers, bgm, aiSettings, aiStory, translationSettings, subtitleTranslation, youtubeSettings, youtubeUpload, platformUploadHandoff, outputHistory, userPreferences, subtitlePreviews, musicSuggestions, aiPublishAssets);
   ipcMain.removeAllListeners("app:confirm-close");
   ipcMain.on("app:confirm-close", (event) => {
     const target = BrowserWindow.fromWebContents(event.sender);

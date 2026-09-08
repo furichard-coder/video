@@ -1,4 +1,4 @@
-export const MANIFEST_SCHEMA_VERSION = 14 as const;
+export const MANIFEST_SCHEMA_VERSION = 15 as const;
 export const PREVIEWER_VERSION = "preview-v3" as const;
 export const CLIP_PREVIEWER_VERSION = "clip-preview-v1" as const;
 export const DEFAULT_IMAGE_DURATION_MS = 5_000 as const;
@@ -36,7 +36,7 @@ export type TransitionDurationSec = 0.3 | 0.5 | 0.7;
 export type MainStartCardTransition = "DISSOLVE" | "FADE_BLACK" | "HARD_CUT";
 export type PreviewResolution = "360P" | "480P" | "720P" | "4K";
 export type ConcatRenderPhase = "PREPARING" | "TRANSLATING_SUBTITLES" | "RENDERING" | "FINALIZING";
-export type PreviewRenderPurpose = "CONCAT" | "INTRO" | "CLIP";
+export type PreviewRenderPurpose = "CONCAT" | "INTRO" | "CLIP" | "SHORTS";
 export type IntroAnalysisPhase = "PREPARING" | "ANALYZING" | "RANKING";
 export type KnownExternalPlayerId = "SYSTEM_DEFAULT" | "VLC" | "WINDOWS_MEDIA_PLAYER" | "MPC_HC";
 export type ExternalPlayerId = KnownExternalPlayerId | `CUSTOM:${string}`;
@@ -400,6 +400,100 @@ export interface AiStoryContext {
   introBaseAssetId?: string;
 }
 
+export type PublishAiProvider = "OPENAI_API" | "CODEX_CHATGPT" | "MANUAL" | "LOCAL_FALLBACK";
+export type PublishRegenerationMode = "FILL_BLANKS" | "PRESERVE_USER_EDITED" | "REPLACE_AI_DRAFTS";
+export interface PublishTopicSnapshot {
+  topic: string;
+  locations: string[];
+  storySummary: string;
+  audiencePromise: string;
+  capturedAt: string;
+}
+export interface PublishTitleCandidate {
+  id: string;
+  text: string;
+  charCount: number;
+  reason: string;
+  userEdited?: boolean;
+}
+export interface ThumbnailStyle {
+  text: string;
+  textXPercent: number;
+  textYPercent: number;
+  fontSizePx: number;
+  textColor: string;
+  outlineWidthPx: number;
+  overlayOpacityPercent: number;
+}
+export interface ThumbnailCandidate {
+  id: string;
+  assetId: string;
+  sourceTimeMs: number;
+  sourceFileName: string;
+  reason: string;
+  layout: "LEFT_TEXT" | "RIGHT_TEXT" | "CENTER_TEXT";
+  colorNote: string;
+  previewUrl?: string;
+  outputPath?: string;
+  importedPath?: string;
+  style: ThumbnailStyle;
+  userEdited?: boolean;
+}
+export interface PublishChapterCue {
+  id: string;
+  startMs: number;
+  title: string;
+  description: string;
+  sourceAssetId?: string;
+  userEdited?: boolean;
+}
+export interface AiPublishAssets {
+  schemaVersion: 1;
+  topicSnapshot: PublishTopicSnapshot;
+  titles: PublishTitleCandidate[];
+  description: string;
+  englishSummary: string;
+  hashtags: string[];
+  thumbnails: ThumbnailCandidate[];
+  chapters: PublishChapterCue[];
+  selectedTitleId?: string;
+  selectedThumbnailId?: string;
+  provider: PublishAiProvider;
+  model?: string;
+  analyzerVersion: string;
+  generatedAt: string;
+  mainTimelineRevision: number;
+  introTimelineRevision?: number;
+  stale: boolean;
+  userEdited: boolean;
+  warnings: string[];
+}
+export interface AiPublishGenerationOptions {
+  topic: PublishTopicSnapshot;
+  mode?: PublishRegenerationMode;
+}
+export interface AiPublishGenerationResult {
+  project: ProjectManifest;
+  assets: AiPublishAssets;
+  provider: PublishAiProvider;
+  model?: string;
+}
+export interface PublishProgress { percent: number; detail: string; }
+export interface ThumbnailRenderRequest {
+  candidateId: string;
+  outputToken: string;
+  format: "jpg" | "png";
+  quality?: number;
+}
+export interface ThumbnailRenderResult {
+  candidateId: string;
+  outputPath: string;
+  sizeBytes: number;
+  width: 1280;
+  height: 720;
+  format: "jpg" | "png";
+}
+
 export interface ProjectColorSettings {
   introPresetId: ColorPresetId;
   applyToMain: boolean;
@@ -449,6 +543,7 @@ export interface ProjectManifest {
   bgmTracks: BgmTrack[];
   sourceAudioVolumePercent?: number;
   aiStoryContext: AiStoryContext;
+  aiPublishAssets?: AiPublishAssets;
   /** Last completed intro analysis; suggestions remain pending until the user applies them. */
   introAnalysisResult?: IntroAnalysisResult;
   /** Last manual AI music discovery for this project; never used as a licensed audio source. */
@@ -559,6 +654,8 @@ export interface ConcatRenderRequest {
   includeBgm?: boolean;
   /** Required by the UI whenever a confirmed Intro is prepended to Main. */
   mainStartCard?: MainStartCardOptions;
+  shortsPortrait?: boolean;
+  shortsMaxDurationSec?: 60 | 180;
 }
 
 export interface RenderClipSelection extends PreviewRange {
@@ -592,6 +689,8 @@ export interface ConcatRenderResult {
   colorPresetId?: ColorPresetId;
   colorAppliedToMain?: boolean;
   mainStartCardDurationSeconds?: number;
+  shortsPortrait?: boolean;
+  aspectRatio?: "PORTRAIT_9_16" | "LANDSCAPE_16_9";
 }
 
 export interface PreviewOutputRecord {
@@ -608,6 +707,7 @@ export interface PreviewOutputRecord {
   includedIntroSegmentCount?: number;
   projectName?: string;
   exists: boolean;
+  aspectRatio?: "PORTRAIT_9_16" | "LANDSCAPE_16_9";
 }
 
 export interface PreviewOutputHistorySnapshot {
@@ -672,7 +772,7 @@ export interface IntroAnalysisResult {
   cloudFallbackReason?: string;
 }
 
-export type BackgroundJobKind = "MUSIC_SUGGESTIONS" | "INTRO_ANALYSIS" | "AI_SUBTITLES" | "SUBTITLE_PREVIEW" | "CONCAT_RENDER";
+export type BackgroundJobKind = "MUSIC_SUGGESTIONS" | "INTRO_ANALYSIS" | "AI_SUBTITLES" | "SUBTITLE_PREVIEW" | "CONCAT_RENDER" | "AI_PUBLISH_ASSETS";
 export type BackgroundJobStatus = "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
 
 export interface BackgroundJobSnapshot {
@@ -931,6 +1031,15 @@ export interface AppApi {
   testGoogleTranslation(): Promise<TranslationConnectionTestResult>;
   setAiStoryContext(context: AiStoryContext): Promise<ProjectManifest>;
   generateAiSubtitles(options: AiSubtitleGenerationOptions): Promise<AiSubtitleGenerationResult>;
+  /** Optional until the AI publishing workspace is loaded; keeps older renderer test harnesses compatible. */
+  getAiPublishAssets?(): Promise<AiPublishAssets | null>;
+  setAiPublishAssets?(assets: AiPublishAssets): Promise<ProjectManifest>;
+  generateAiPublishAssets?(options: AiPublishGenerationOptions): Promise<AiPublishGenerationResult>;
+  cancelAiPublishAssets?(): Promise<void>;
+  choosePublishThumbnailOutput?(format: "jpg" | "png"): Promise<{ token: string; displayPath: string; format: "jpg" | "png" } | null>;
+  renderPublishThumbnail?(request: ThumbnailRenderRequest): Promise<ThumbnailRenderResult>;
+  onPublishProgress?(callback: (progress: PublishProgress) => void): void;
+  clearPublishProgressListeners?(): void;
   buildSubtitleIntroPreview(includeBgm?: boolean): Promise<SubtitlePreviewResult>;
   cancelSubtitleIntroPreview(): Promise<void>;
   setProjectColorSettings(settings: ProjectColorSettings): Promise<ProjectManifest>;

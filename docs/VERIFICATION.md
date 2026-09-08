@@ -766,3 +766,11 @@ npm start
 - Main exclusion 可把一個來源展開成多個保留片段；若任一保留片段短於所選 xfade 所需 handles，輸出會明確阻擋並要求調整區段或轉場，不會凍結格或製造假 handles。
 - 放大預覽 seek 使用 10 ms UI 步進，但實際定位精度仍受 proxy keyframe、瀏覽器解碼器與來源 frame rate 限制；不宣稱 sample/frame-accurate 專業剪輯定位。
 - 多軌 Timeline、正式 Master render、HDR 與無人值守自動發布仍未啟用；YouTube 由使用者確認後走官方 API，BiliBili／TikTok 由官方頁面人工完成。
+## v0.42.0 增量驗證（2026-09-09）
+
+| 項目 | 結果 |
+|---|---|
+| 字幕永久嵌入勾選可取消 | PASS；`ConcatRenderModal` 在尚未開始輸出時允許已勾選狀態取消，只有重新啟用才需要確認字幕與時間線。 |
+| TypeScript | PASS；`npm run typecheck` |
+| Vitest | PASS；35 suites / 235 tests |
+| 來源保護 | PASS；本輪只修改 UI 判斷、測試期望 schema 15 與文件，未修改來源媒體。 |

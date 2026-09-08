@@ -6,6 +6,7 @@ import type {
   BackgroundJobSnapshot,
   ProjectChangedEvent,
   AiStoryContext,
+  AiPublishGenerationOptions,
   AiSubtitleGenerationOptions,
   ConcatRenderProgress,
   ConcatRenderRequest,
@@ -33,6 +34,8 @@ import type {
   UserPreferencesUpdate,
   TranslationSettingsUpdate,
   VoiceInputRequest,
+  ThumbnailRenderRequest,
+  PublishProgress,
 } from "../shared/domain";
 
 const api: AppApi = {
@@ -113,6 +116,14 @@ const api: AppApi = {
   testGoogleTranslation: () => ipcRenderer.invoke("translation:test-google"),
   transcribeVoiceInput: (request: VoiceInputRequest) => ipcRenderer.invoke("ai:transcribe-voice-input", request),
   setAiStoryContext: (context: AiStoryContext) => ipcRenderer.invoke("project:set-ai-story-context", context),
+  getAiPublishAssets: () => ipcRenderer.invoke("publish:get-assets"),
+  setAiPublishAssets: (assets) => ipcRenderer.invoke("publish:set-assets", assets),
+  generateAiPublishAssets: (options: AiPublishGenerationOptions) => ipcRenderer.invoke("publish:generate", options),
+  cancelAiPublishAssets: () => ipcRenderer.invoke("publish:cancel"),
+  choosePublishThumbnailOutput: (format: "jpg" | "png") => ipcRenderer.invoke("publish:thumbnail:choose-output", format),
+  renderPublishThumbnail: (request: ThumbnailRenderRequest) => ipcRenderer.invoke("publish:thumbnail:render", request),
+  onPublishProgress: (callback: (progress: PublishProgress) => void) => { ipcRenderer.on("publish:progress", (_event, progress: PublishProgress) => callback(progress)); },
+  clearPublishProgressListeners: () => ipcRenderer.removeAllListeners("publish:progress"),
   generateAiSubtitles: (options: AiSubtitleGenerationOptions) => ipcRenderer.invoke("subtitle:ai-generate", options),
   buildSubtitleIntroPreview: (includeBgm = false) => ipcRenderer.invoke("subtitle:build-intro-preview", includeBgm),
   cancelSubtitleIntroPreview: () => ipcRenderer.invoke("subtitle:cancel-intro-preview"),

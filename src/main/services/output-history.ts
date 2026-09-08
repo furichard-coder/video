@@ -20,7 +20,7 @@ function canonicalPath(value: string): string {
 }
 
 function validPurpose(value: unknown): value is PreviewOutputPurpose {
-  return value === "CONCAT" || value === "INTRO" || value === "CLIP" || value === "UNKNOWN";
+  return value === "CONCAT" || value === "INTRO" || value === "CLIP" || value === "SHORTS" || value === "UNKNOWN";
 }
 
 function validResolution(value: unknown): value is PreviewResolution {
@@ -48,6 +48,7 @@ function sanitizeRecord(value: unknown): StoredOutput | undefined {
     cancelled: item.cancelled === true,
     includedIntroSegmentCount: Number.isInteger(item.includedIntroSegmentCount) && Number(item.includedIntroSegmentCount) >= 0 ? Number(item.includedIntroSegmentCount) : undefined,
     projectName: typeof item.projectName === "string" && item.projectName.trim() ? item.projectName.trim().slice(0, 160) : undefined,
+    aspectRatio: item.aspectRatio === "PORTRAIT_9_16" || item.aspectRatio === "LANDSCAPE_16_9" ? item.aspectRatio : undefined,
   };
 }
 
@@ -101,6 +102,7 @@ export class OutputHistoryStore {
       cancelled: result.cancelled,
       includedIntroSegmentCount: result.includedIntroSegmentCount,
       projectName,
+      aspectRatio: result.aspectRatio,
     };
     await this.mutate((outputs) => {
       const key = canonicalPath(record.outputPath);
@@ -126,7 +128,7 @@ export class OutputHistoryStore {
         const displayWidth = media.displayWidth ?? media.width;
         const displayHeight = media.displayHeight ?? media.height;
         const resolution = displayWidth === 640 && displayHeight === 360 ? "360P" : displayWidth === 854 && displayHeight === 480 ? "480P" : displayWidth === 1280 && displayHeight === 720 ? "720P" : displayWidth === 3840 && displayHeight === 2160 ? "4K" : undefined;
-        additions.push({ jobId: randomUUID(), outputPath: resolved, fileName: path.basename(resolved), purpose: "UNKNOWN", origin: "IMPORTED_EXISTING", createdAt: file.birthtime.toISOString(), sizeBytes: file.size, durationMs: media.durationMs, resolution });
+        additions.push({ jobId: randomUUID(), outputPath: resolved, fileName: path.basename(resolved), purpose: "UNKNOWN", origin: "IMPORTED_EXISTING", createdAt: file.birthtime.toISOString(), sizeBytes: file.size, durationMs: media.durationMs, resolution, aspectRatio: displayWidth && displayHeight && displayHeight > displayWidth ? "PORTRAIT_9_16" : "LANDSCAPE_16_9" });
         known.add(key); addedCount += 1;
       } catch (error) { errors.push(`${path.basename(resolved)}：${error instanceof Error ? error.message : String(error)}`); }
     }

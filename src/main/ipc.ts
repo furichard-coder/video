@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell as electronShell } from "electron";
-import type { AiAccountSaveInput, AiStoryContext, AiSubtitleGenerationOptions, BackgroundJobKind, BackgroundJobSnapshot, BackgroundJobStatus, BgmTrack, BrowserUploadPlatform, ConcatRenderRequest, ExternalMediaTarget, ExternalPlayerId, ExternalPlayerSettingsUpdate, IntroSuggestion, MainExclusionRange, MusicSuggestionRequest, PlacementRequest, PreviewVariant, ProjectColorSettings, SortMode, SubtitleCue, SubtitleTimelineScope, TranslationSettingsUpdate, UserPreferencesUpdate, VoiceInputRequest, VolumeSegment, YoutubeSettingsUpdate, YoutubeUploadRequest, ZoomSegment } from "../shared/domain";
+import type { AiAccountSaveInput, AiPublishGenerationOptions, AiStoryContext, AiSubtitleGenerationOptions, BackgroundJobKind, BackgroundJobSnapshot, BackgroundJobStatus, BgmTrack, BrowserUploadPlatform, ConcatRenderRequest, ExternalMediaTarget, ExternalPlayerId, ExternalPlayerSettingsUpdate, IntroSuggestion, MainExclusionRange, MusicSuggestionRequest, PlacementRequest, PreviewVariant, ProjectColorSettings, SortMode, SubtitleCue, SubtitleTimelineScope, ThumbnailRenderRequest, TranslationSettingsUpdate, UserPreferencesUpdate, VoiceInputRequest, VolumeSegment, YoutubeSettingsUpdate, YoutubeUploadRequest, ZoomSegment } from "../shared/domain";
 import { ConcatRenderService } from "./services/concat-render";
 import { IntroAnalyzer } from "./services/intro-analyzer";
 import { PreviewCache } from "./services/preview-cache";
@@ -24,6 +24,8 @@ import { SubtitleTranslationService } from "./services/subtitle-translation";
 import { SubtitlePreviewService } from "./services/subtitle-preview";
 import { nextAvailableOutputPath, safePreviewFileName } from "./services/output-path";
 import { MusicSuggestionService } from "./services/music-suggestion";
+import { AiPublishAssetsService } from "./services/ai-publish-assets";
+import { renderThumbnail } from "./services/thumbnail-render";
 
 const SORT_MODES = new Set<SortMode>([
   "MANUAL_ORDER",
@@ -54,6 +56,7 @@ export function registerIpc(
   userPreferences: UserPreferencesStore,
   subtitlePreviews: SubtitlePreviewService,
   musicSuggestions: MusicSuggestionService,
+  aiPublishAssets: AiPublishAssetsService,
 ): void {
   let importController: AbortController | undefined;
   let concatController: AbortController | undefined;
@@ -63,10 +66,12 @@ export function registerIpc(
   let subtitlePreviewController: AbortController | undefined;
   let voiceInputController: AbortController | undefined;
   let musicSuggestionController: AbortController | undefined;
+  let aiPublishController: AbortController | undefined;
   let youtubeAuthController: AbortController | undefined;
   let youtubeUploadController: AbortController | undefined;
   const previewControllers = new Map<string, AbortController>();
   const outputTokens = new Map<string, { outputPath: string; createdAt: number; allowOverwrite: boolean }>();
+  const thumbnailTokens = new Map<string, { outputPath: string; createdAt: number; format: "jpg" | "png" }>();
   const subtitleOutputTokens = new Map<string, { outputPath: string; createdAt: number }>();
   const backgroundJobs = new Map<string, BackgroundJobSnapshot>();
   const unsubscribeProjectChanges = store.subscribe((change) => {
@@ -405,6 +410,46 @@ export function registerIpc(
     }
   });
   ipcMain.handle("project:set-ai-story-context", (_event, context: AiStoryContext) => store.setAiStoryContext(context));
+  ipcMain.handle("publish:get-assets", () => store.getProject().aiPublishAssets ?? null);
+  ipcMain.handle("publish:set-assets", (_event, assets: import("../shared/domain").AiPublishAssets) => store.setAiPublishAssets(assets));
+  ipcMain.handle("publish:generate", async (event, options: AiPublishGenerationOptions) => {
+    if (aiPublishController) throw new Error("AI 發布素材分析已在進行中。");
+    const controller = new AbortController(); aiPublishController = controller;
+    const backgroundJobId = beginBackgroundJob("AI_PUBLISH_ASSETS", "AI 發布素材與縮圖建議");
+    try {
+      const result = await aiPublishAssets.generate(options, controller.signal, (percent, detail) => {
+        updateBackgroundJob(backgroundJobId, { percent, detail });
+        if (!event.sender.isDestroyed()) event.sender.send("publish:progress", { percent, detail });
+      });
+      finishBackgroundJob(backgroundJobId, "COMPLETED", { detail: "AI 發布素材已保存" });
+      return result;
+    } catch (error) {
+      finishBackgroundJob(backgroundJobId, error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED", { error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    } finally { if (aiPublishController === controller) aiPublishController = undefined; }
+  });
+  ipcMain.handle("publish:cancel", () => aiPublishController?.abort());
+  ipcMain.handle("publish:thumbnail:choose-output", async (event, format: "jpg" | "png" = "jpg") => {
+    if (format !== "jpg" && format !== "png") throw new Error("縮圖格式只支援 JPG 或 PNG。");
+    const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const result = window ? await dialog.showSaveDialog(window, { title: "另存 YouTube 縮圖", defaultPath: path.join(userPreferences.getLastDirectory("PREVIEW_OUTPUT", app.getPath("pictures")), `SceneryWalker_thumbnail.${format}`), filters: [{ name: format.toUpperCase(), extensions: [format] }], properties: ["showOverwriteConfirmation", "createDirectory"] }) : await dialog.showSaveDialog({ title: "另存 YouTube 縮圖", defaultPath: path.join(app.getPath("pictures"), `SceneryWalker_thumbnail.${format}`), filters: [{ name: format.toUpperCase(), extensions: [format] }], properties: ["showOverwriteConfirmation", "createDirectory"] });
+    if (result.canceled || !result.filePath) return null;
+    const outputPath = path.extname(result.filePath).toLowerCase() === `.${format}` ? result.filePath : `${result.filePath}.${format}`;
+    const token = randomUUID(); thumbnailTokens.set(token, { outputPath, createdAt: Date.now(), format });
+    await userPreferences.rememberDirectory("PREVIEW_OUTPUT", outputPath);
+    return { token, displayPath: outputPath, format };
+  });
+  ipcMain.handle("publish:thumbnail:render", async (_event, request: ThumbnailRenderRequest) => {
+    if (!request || typeof request.outputToken !== "string" || typeof request.candidateId !== "string" || (request.format !== "jpg" && request.format !== "png")) throw new Error("縮圖產出要求格式無效。");
+    const token = thumbnailTokens.get(request.outputToken); thumbnailTokens.delete(request.outputToken);
+    if (!token || token.format !== request.format || Date.now() - token.createdAt > 30 * 60_000) throw new Error("縮圖輸出位置授權已失效，請重新選擇儲存位置。");
+    const project = store.getProject(); const candidate = project.aiPublishAssets?.thumbnails.find((item) => item.id === request.candidateId);
+    if (!candidate) throw new Error("找不到縮圖候選，請重新產生或選擇候選影格。");
+    const asset = project.sources.find((item) => item.id === candidate.assetId);
+    if (!asset) throw new Error("縮圖候選的來源素材不存在；來源檔沒有被修改。");
+    const result = await renderThumbnail(asset, candidate, token.outputPath, request.format);
+    return { candidateId: candidate.id, outputPath: token.outputPath, ...result, format: request.format };
+  });
   ipcMain.handle("external-player:get-settings", () => playerSettings.snapshotWithCurrentAvailability());
   ipcMain.handle("external-player:update-settings", (_event, update: ExternalPlayerSettingsUpdate) =>
     playerSettings.update(update));
