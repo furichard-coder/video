@@ -1,5 +1,21 @@
 # 第一階段驗證紀錄
 
+## v0.40.0 增量驗證（2026-09-09）
+
+| 檢查 | 結果 |
+|---|---|
+| 六步主要工作區導覽 | PASS；一次只開啟一個主要工作區入口 |
+| Material Editor workspace | PASS；集中素材編輯入口並保留既有安全子編輯器 |
+| OutputLibrary reusable actions | PASS；Intro／字幕共用 compact query/actions |
+| Subtitle/BGM dirty close guard | PASS；三選一保存語意，不直接丟棄未保存修改 |
+| default CONFIRMED 文案 | PASS；字幕頁不再描述 AI cue 必須先逐項確認才能使用 |
+| Renderer／Main TypeScript typecheck | PASS |
+| Vitest 完整單元、整合與 UI 回歸 | PASS，34 suites／233 tests |
+| Production build／npm audit | PASS；0 high vulnerabilities |
+| Electron smoke／Windows packaged smoke | PASS |
+| v0.40.0 Windows x64 交付 | PASS；`release/v0.40.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer.exe` SHA-256 `3B36990A83DAB304010557EC89B3764283B3DA265C619ACDC7BA2B8DAB0D137F` |
+| 根目錄 SOP、來源媒體、既有 release | 未修改 |
+
 ## v0.39.0 增量驗證（2026-09-09）
 
 | 檢查 | 結果 |

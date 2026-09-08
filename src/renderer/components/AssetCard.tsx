@@ -19,6 +19,7 @@ interface AssetCardProps {
   externalOpening: boolean;
   onOpenVolume(asset: SourceAsset): void;
   onOpenMediaInsertion(asset: SourceAsset): void;
+  onOpenMaterialEditor?(asset: SourceAsset, section: "VOLUME" | "INSERT"): void;
   mediaInsertions: Array<MediaInsertion & { insertedFileName: string; insertedKind: "VIDEO" | "IMAGE" }>;
   availableMediaCount: number;
   onProjectUpdated(project: import("../../shared/domain").ProjectManifest): void;
@@ -46,6 +47,7 @@ export function AssetCard({
   externalOpening,
   onOpenVolume,
   onOpenMediaInsertion,
+  onOpenMaterialEditor,
   mediaInsertions,
   availableMediaCount,
   onProjectUpdated,

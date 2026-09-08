@@ -2,6 +2,12 @@
 
 本檔案是每次可交付功能變更的簡短索引。完成一個階段後，必須同步更新本檔案、`README.md` 與 `VERIFICATION.md`；只有通過建置／測試的內容才可標記為完成。
 
+## v0.40.0 — 2026-09-09
+
+- 主畫面加入六步主要工作區導覽，設定入口集中；素材編輯、輸出成品庫與細節 modal 可依目前工作區開啟。
+- 新增 Material Editor workspace 與共享 OutputLibrary compact provider；Intro／字幕頁不再各自維護播放／位置／複製清單邏輯。
+- Subtitle/BGM dirty close guard 提供保存並離開、放棄並離開、返回編輯；更新 AI 字幕預設已確認文案。
+
 ## v0.39.0 — 2026-09-09
 
 - 字幕預覽與 MP4 burn-in 共用 `SubtitleStyleProfile`，位置、字級、顏色、陰影與外框依輸出解析度等比套用。

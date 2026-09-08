@@ -18,6 +18,7 @@ import { AiSettingsModal } from "./components/AiSettingsModal";
 import { DisplaySettingsModal } from "./components/DisplaySettingsModal";
 import { YoutubeSettingsModal } from "./components/YoutubeSettingsModal";
 import { OutputHistoryModal } from "./components/OutputHistoryModal";
+import { MaterialEditorModal, type MaterialEditorSection } from "./components/MaterialEditorModal";
 import { formatBytes } from "./format";
 import { applyUiTextSize, applyUiZoom, readUiTextSize, readUiZoom, stepUiZoom, type UiTextSize, type UiZoomPercent } from "./ui-preferences";
 
@@ -26,6 +27,8 @@ function projectScopeNeedsReview(project: ProjectManifest, scope: "MAIN" | "INTR
   const reviewRevision = scope === "INTRO" ? (project.introSubtitleReviewRevision ?? project.subtitleTimelineRevision) : (project.mainSubtitleReviewRevision ?? project.subtitleTimelineRevision);
   return timelineRevision !== reviewRevision;
 }
+
+type MainWorkspace = "SOURCES" | "INTRO" | "BGM" | "SUBTITLES" | "OUTPUTS" | "PUBLISH";
 
 const SORT_LABELS: Record<SortMode, string> = {
   MANUAL_ORDER: "自訂順序",
@@ -81,7 +84,7 @@ export function App() {
   const [uiZoom, setUiZoom] = useState<UiZoomPercent>(() => readUiZoom());
   const [externalAsset, setExternalAsset] = useState<SourceAsset>();
   const [externalOpeningId, setExternalOpeningId] = useState<string>();
-  const [volumeAsset, setVolumeAsset] = useState<SourceAsset>();
+  const [volumeAsset, setVolumeAssetState] = useState<SourceAsset>();
   const [placementQueue, setPlacementQueue] = useState<string[]>([]);
   const [showBgm, setShowBgm] = useState(false);
   const [showSubtitles, setShowSubtitles] = useState(false);
@@ -94,13 +97,29 @@ export function App() {
   const [saveState, setSaveState] = useState<"SAVED" | "SAVING" | "ERROR">("SAVED");
   const [savedAt, setSavedAt] = useState<string>();
   const [backgroundJobs, setBackgroundJobs] = useState<BackgroundJobSnapshot[]>([]);
-  const [mediaInsertionVideo, setMediaInsertionVideo] = useState<SourceAsset>();
+  const [mediaInsertionVideo, setMediaInsertionVideoState] = useState<SourceAsset>();
   const [draggingAssetId, setDraggingAssetId] = useState<string>();
   const [dragTargetAssetId, setDragTargetAssetId] = useState<string>();
   const [showCloseConfirmation, setShowCloseConfirmation] = useState(false);
+  const [materialEditorAsset, setMaterialEditorAsset] = useState<SourceAsset>();
+  const [materialEditorSection, setMaterialEditorSection] = useState<MaterialEditorSection>("CLIP");
+  const [activeWorkspace, setActiveWorkspace] = useState<MainWorkspace>("SOURCES");
   const draggingAssetIdRef = useRef<string | undefined>(undefined);
   const dragOrderRef = useRef<string[]>([]);
   const dragOriginIndexRef = useRef<number | undefined>(undefined);
+
+  const setVolumeAsset = (asset?: SourceAsset) => {
+    if (!asset) { setVolumeAssetState(undefined); setMaterialEditorAsset(undefined); return; }
+    if (materialEditorAsset?.id === asset.id) { setMaterialEditorAsset(undefined); setVolumeAssetState(asset); return; }
+    setMaterialEditorAsset(asset);
+    setMaterialEditorSection("VOLUME");
+  };
+  const setMediaInsertionVideo = (asset?: SourceAsset) => {
+    if (!asset) { setMediaInsertionVideoState(undefined); setMaterialEditorAsset(undefined); return; }
+    if (materialEditorAsset?.id === asset.id) { setMaterialEditorAsset(undefined); setMediaInsertionVideoState(asset); return; }
+    setMaterialEditorAsset(asset);
+    setMaterialEditorSection("INSERT");
+  };
 
   useEffect(() => {
     void Promise.all([window.sourceApp.getProject(), window.sourceApp.getProjectFileState(), window.sourceApp.getAppInfo(), window.sourceApp.getUserPreferences()])
@@ -206,10 +225,18 @@ export function App() {
 
   const closeProjectViews = () => {
     setSelectedAsset(undefined); setShowPlaylist(false); setShowConcatRender(false); setShowIntroStudio(false);
-    setExternalAsset(undefined); setVolumeAsset(undefined); setShowBgm(false); setShowSubtitles(false);
+    setExternalAsset(undefined); setVolumeAssetState(undefined); setShowBgm(false); setShowSubtitles(false);
     setConfirmRemoveAsset(undefined); setPlacementQueue([]); setLastRemovedMainId(undefined);
-    setMediaInsertionVideo(undefined); setShowAiSettings(false); setShowYoutubeSettings(false);
+    setMediaInsertionVideoState(undefined); setShowAiSettings(false); setShowYoutubeSettings(false);
     setShowOutputHistory(false);
+  };
+  const openWorkspace = (workspace: MainWorkspace) => {
+    closeProjectViews(); setActiveWorkspace(workspace);
+    if (workspace === "INTRO") setShowIntroStudio(true);
+    else if (workspace === "BGM") setShowBgm(true);
+    else if (workspace === "SUBTITLES") setShowSubtitles(true);
+    else if (workspace === "OUTPUTS") setShowOutputHistory(true);
+    else if (workspace === "PUBLISH") setShowYoutubeSettings(true);
   };
 
   const runHistory = useCallback(async (direction: "UNDO" | "REDO") => {
@@ -450,12 +477,13 @@ export function App() {
       {error && <div className="notice error" role="alert">{error}</div>}
 
       <section className="library-section">
+        <nav className="workspace-nav" aria-label="主要工作區"><button className={activeWorkspace === "SOURCES" ? "active" : ""} onClick={() => openWorkspace("SOURCES")}>01 素材與順序</button><button className={activeWorkspace === "INTRO" ? "active" : ""} onClick={() => openWorkspace("INTRO")}>02 片頭</button><button className={activeWorkspace === "BGM" ? "active" : ""} onClick={() => openWorkspace("BGM")}>03 配樂</button><button className={activeWorkspace === "SUBTITLES" ? "active" : ""} onClick={() => openWorkspace("SUBTITLES")}>04 字幕</button><button className={activeWorkspace === "OUTPUTS" ? "active" : ""} onClick={() => openWorkspace("OUTPUTS")}>05 預覽輸出／成品庫</button><button className={activeWorkspace === "PUBLISH" ? "active" : ""} onClick={() => openWorkspace("PUBLISH")}>06 發布</button></nav>
         <div className="library-toolbar">
           <div><span className="eyebrow">PROJECT SOURCE MANIFEST</span><h2>素材清單</h2></div>
           <div className="toolbar-actions">
             <label className="sort-control"><span>排序</span><select value={project.sortMode} onChange={(event) => void changeSort(event.target.value as SortMode)}>{Object.entries(SORT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <div className="segmented-control" aria-label="檢視方式"><button type="button" className={viewMode === "GRID" ? "active" : ""} onClick={() => void changeViewMode("GRID")}>網格</button><button type="button" className={viewMode === "LIST" ? "active" : ""} onClick={() => void changeViewMode("LIST")}>清單</button></div>
-            <button className="play-all-button" type="button" disabled={!mainClips.length} onClick={() => setShowPlaylist(true)}>▶ 總體預覽</button>
+            <button className="secondary-button" type="button" disabled={!sortedAssets.length} onClick={() => { setMaterialEditorAsset(sortedAssets[0]); setMaterialEditorSection("CLIP"); }}>素材工作區</button><button className="play-all-button" type="button" disabled={!mainClips.length} onClick={() => setShowPlaylist(true)}>▶ 總體預覽</button>
             <button className="concat-button" type="button" disabled={!mainClips.length} title={!mainClips.length ? "正片沒有可供輸出的保留影片片段" : undefined} onClick={() => setShowConcatRender(true)}>⇄ 產出串連預覽</button>
             <button className="ai-intro-button" type="button" onClick={() => setShowIntroStudio(true)}>✦ AI 精彩片頭</button>
             <button className="music-button" type="button" onClick={() => setShowBgm(true)}>♫ 配樂 {project.bgmTracks.length ? `(${project.bgmTracks.length})` : ""}</button>
@@ -479,6 +507,7 @@ export function App() {
       <footer className="app-footer"><span title={projectFilePath}>專案：{project.name}{projectFilePath ? " · 已連結專案檔" : " · App Data 自動恢復"}</span><span>Preview cache：衍生檔、可重建、不可作正式輸出</span><span>串連預覽：低解析交接檢查，非正式 Master</span></footer>
 
       {selectedAsset && <PreviewModal asset={project.sources.find((asset) => asset.id === selectedAsset.id) ?? selectedAsset} project={project} onClose={() => setSelectedAsset(undefined)} onAssetUpdated={updateAsset} onProjectUpdated={setProject} onOpenExternal={setExternalAsset} onOpenIntro={() => { setSelectedAsset(undefined); setShowIntroStudio(true); }} />}
+      {materialEditorAsset && <MaterialEditorModal asset={project.sources.find((asset) => asset.id === materialEditorAsset.id) ?? materialEditorAsset} initialSection={materialEditorSection} onClose={() => setMaterialEditorAsset(undefined)} onOpenSection={(section) => { setMaterialEditorSection(section); if (section === "VOLUME") { setMaterialEditorAsset(undefined); setVolumeAsset(materialEditorAsset); } else if (section === "INSERT") { setMaterialEditorAsset(undefined); setMediaInsertionVideo(materialEditorAsset); } else if (section === "CLIP" || section === "PREVIEW") { setMaterialEditorAsset(undefined); setSelectedAsset(materialEditorAsset); } }} />}
       {showPlaylist && mainClips.length > 0 && <PlaylistModal assets={project.sources} clips={mainClips} onClose={() => setShowPlaylist(false)} onAssetUpdated={updateAsset} />}
       {showConcatRender && mainClips.length > 0 && <ConcatRenderModal assets={project.sources} mainClips={mainClips} introClips={project.introSegments} introSegmentMaxDurationMs={project.introSegmentMaxDurationMs} confirmedSubtitleCount={project.subtitleCues.filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED" && (cue.timelineScope ?? "MAIN") === "MAIN").length} subtitlesNeedReview={project.subtitleCues.some((cue) => (cue.timelineScope ?? "MAIN") === "MAIN") && projectScopeNeedsReview(project, "MAIN")} projectName={project.name} onClose={() => setShowConcatRender(false)} />}
       {showIntroStudio && <IntroStudio project={project} videos={sortedVideos} onClose={() => setShowIntroStudio(false)} onProjectUpdated={setProject} />}

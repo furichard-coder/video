@@ -86,6 +86,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [localDirty, setLocalDirty] = useState(false);
+  const [closePrompt, setClosePrompt] = useState(false);
   const [previewHistoryRevision, setPreviewHistoryRevision] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const selectedScopes = useMemo(() => ([...(scope.intro ? ["INTRO" as const] : []), ...(scope.main ? ["MAIN" as const] : [])]), [scope]);
@@ -186,16 +187,18 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     setNotice(reviewStatus === "CONFIRMED" ? "已標記為確認；請保存字幕以寫入專案。" : reviewStatus === "REJECTED" ? "已排除這筆草稿；不會匯出到 SRT。" : "已改回待確認草稿。");
   };
 
-  const save = async () => {
+  const save = async (): Promise<boolean> => {
     setBusy(true); setError(undefined);
     try {
       const updated = await window.sourceApp.setSubtitleCues(cues);
       onProjectUpdated(updated); setCues(updated.subtitleCues);
       setLocalDirty(false);
       setNotice("字幕與審核狀態已保存，並綁定目前 timeline revision。");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+      return true;
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); return false; }
     finally { setBusy(false); }
   };
+  const requestClose = () => { if (localDirty) setClosePrompt(true); else onClose(); };
 
   const buildIntroPreview = async () => {
     if (!project.introSegments.length) throw new Error("片頭目前沒有片段，無法建立 480P 字幕預覽。");
@@ -351,7 +354,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
 
   return <div className="modal-backdrop studio-backdrop" role="presentation">
     <section className="editor-modal subtitle-modal subtitle-review-modal" role="dialog" aria-modal="true" aria-label="AI 字幕審核與 SRT">
-      <header className="modal-header"><div><span className="eyebrow">AI SUBTITLE REVIEW · 480P SYNC PREVIEW</span><h2>片頭／正片畫面與故事字幕審核</h2><p>先選範圍，再由 AI 建立草稿；逐項比對時間、影像與文字後才保存或匯出。</p></div><button className="icon-button" onClick={onClose} aria-label="關閉">×</button></header>
+    <header className="modal-header"><div><span className="eyebrow">AI SUBTITLE REVIEW · 480P SYNC PREVIEW</span><h2>片頭／正片畫面與故事字幕審核</h2><p>AI 新字幕預設已確認，可直接預覽；人工修改、時間與文字仍可逐項調整並保存。</p></div><button className="icon-button" onClick={requestClose} aria-label="關閉">×</button></header>
       {needsReview && <div className="subtitle-global-warning" role="alert">⚠ 片頭、正片順序或 IN／OUT 已改變；全部字幕時間需要重新複核。</div>}
       {generating && <div className="ai-analysis-progress" aria-live="polite"><span className="spinner"/><div><strong>{phaseLabel(progress)}</strong><small>{progress?.currentName ?? ""}</small><progress max={Math.max(1, progress?.total ?? 1)} value={progress?.processed ?? 0}/></div><span>{progress?.processed ?? 0} / {progress?.total ?? 0}</span><button className="cancel-button" onClick={() => void window.sourceApp.cancelAiSubtitles()}>取消</button></div>}
       {buildingPreview && <div className="subtitle-preview-progress" aria-live="polite"><span className="spinner"/><div><strong>{previewPhaseLabel(previewProgress)}</strong><progress max="100" value={previewProgress?.percent ?? 0}/></div><span>{Math.round(previewProgress?.percent ?? 0)}%</span><button className="cancel-button" onClick={() => void window.sourceApp.cancelSubtitleIntroPreview()}>取消代理</button></div>}
@@ -391,6 +394,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
       <SharedIntroPreviewHistory refreshKey={previewHistoryRevision} title="片頭頁／字幕頁共用預覽" />
       {notice && <div className="subtitle-result-notice" role="status">{notice}</div>}
       <footer className="settings-footer"><p>片頭與正片字幕使用各自時間基準；480P 只供同步檢視，來源保持唯讀且代理不可作正式 Master。</p><div>{exporting && <button className="cancel-button" onClick={() => void window.sourceApp.cancelSubtitleExport()}>取消匯出</button>}<button className="secondary-button" disabled={busy || generating || buildingPreview} onClick={() => void save()}>保存字幕</button><button className="primary-button" disabled={busy || generating || buildingPreview || !counts.confirmed} onClick={() => void exportFile()}>匯出 {counts.confirmed} 筆已確認 SRT</button></div></footer>
+      {closePrompt && <div className="inline-close-guard" role="alertdialog" aria-label="字幕未保存"><strong>字幕有未保存修改</strong><p>要先保存再離開，還是放棄這次修改？</p><button className="primary-button" disabled={busy} onClick={async () => { if (await save()) { setClosePrompt(false); onClose(); } }}>保存並離開</button><button className="danger-secondary-button" disabled={busy} onClick={() => { setLocalDirty(false); setClosePrompt(false); onClose(); }}>放棄並離開</button><button className="secondary-button" disabled={busy} onClick={() => setClosePrompt(false)}>返回編輯</button></div>}
     </section>
   </div>;
 }

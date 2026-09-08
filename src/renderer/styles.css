@@ -977,3 +977,15 @@ button.danger-text,.danger-text { color: var(--danger); }
 .save-state { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .save-state-ERROR { color: #ff9b9b; }
 .save-state-SAVING { color: #ffd37a; }
+.inline-close-guard { position: absolute; inset: auto 20px 20px; z-index: 4; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 16px; border: 1px solid rgba(255,211,122,.45); border-radius: 12px; background: rgba(13,24,31,.97); box-shadow: 0 12px 40px rgba(0,0,0,.45); }
+.inline-close-guard p { flex-basis: 100%; margin: 0; color: var(--muted); }
+.workspace-nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 18px; padding: 6px; border: 1px solid rgba(120,215,221,.16); border-radius: 12px; background: rgba(10,21,28,.72); }
+.workspace-nav button { border: 0; border-radius: 8px; background: transparent; color: var(--muted); padding: 9px 12px; cursor: pointer; }
+.workspace-nav button.active, .workspace-nav button:hover { color: var(--text); background: rgba(176,238,83,.16); }
+.output-library-compact { margin: 14px 0; padding: 14px; border: 1px solid rgba(120,215,221,.18); border-radius: 12px; background: rgba(10,21,28,.7); }
+.output-library-compact header { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.output-library-compact ol { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.output-library-compact li { display: flex; justify-content: space-between; gap: 12px; padding: 8px; border-radius: 8px; background: rgba(255,255,255,.035); }
+.output-library-compact li div { display: grid; gap: 2px; min-width: 0; }
+.output-library-compact li strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.output-library-compact nav { display: flex; gap: 5px; }

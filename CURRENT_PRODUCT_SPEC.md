@@ -1,4 +1,4 @@
-# Current Product Spec — v0.39.0
+# Current Product Spec — v0.40.0
 
 ## Scope
 
@@ -24,6 +24,8 @@ Windows-first read-only source organizer. The first visible workflow remains sou
 ## Editing UX
 
 All millisecond fields use the shared minute/second/millisecond editor. The renderer exposes autosave state and protects dirty Subtitle/BGM drafts when a canonical project snapshot arrives from another window or background job.
+
+The main screen exposes six primary workspaces: sources/order, Intro, BGM, subtitles, preview/output library, and publishing. Per-material edits enter a single Material Editor workspace before opening the detailed safe editor. Output pages use the shared compact OutputLibrary provider for recent files and actions.
 
 ## Verification baseline
 
