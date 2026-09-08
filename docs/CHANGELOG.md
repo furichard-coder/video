@@ -2,6 +2,13 @@
 
 本檔案是每次可交付功能變更的簡短索引。完成一個階段後，必須同步更新本檔案、`README.md` 與 `VERIFICATION.md`；只有通過建置／測試的內容才可標記為完成。
 
+## v0.43.0 — 2026-09-09
+
+- 完成 AI 發布素材第七主頁與可編輯 topic／title／description／hashtags／chapters／thumbnail 候選流程。
+- 新增 Intro→Shorts 可見流程；Shorts 驗證 Intro 片段來源與順序，使用 9:16 輸出並進共享成品庫。
+- YouTube upload 支援人工確認後的縮圖；`videos.insert` 與 `thumbnails.set` 失敗狀態分離，支援縮圖重試。
+- 明確保留本機 fallback 限制，不宣稱尚未實作的遠端 Structured Outputs 或 AI 圖片生成。
+
 ## v0.40.0 — 2026-09-09
 
 - 主畫面加入六步主要工作區導覽，設定入口集中；素材編輯、輸出成品庫與細節 modal 可依目前工作區開啟。

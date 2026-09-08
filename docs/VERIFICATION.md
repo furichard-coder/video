@@ -1,5 +1,15 @@
 # 第一階段驗證紀錄
 
+## v0.43.0 增量驗證（2026-09-09）
+
+| 項目 | 結果 |
+|---|---|
+| AI 發布素材第七頁 | PASS；可編輯 topic、5 筆標題上限、說明／hashtags、章節與提示詞貼回。 |
+| Shorts | PASS；使用 `purpose=SHORTS`、`shortsSource=INTRO`，選定 Intro 片段不改動原 Intro。 |
+| YouTube 縮圖 partial success | PASS；影片成功與縮圖失敗分開回報，單元測試覆蓋 `thumbnails/set` 失敗。 |
+| v0.42 partial 限制 | PASS；遠端 AI 只做診斷，本機 fallback 明確標示；未宣稱 AI 圖片生成。 |
+| publish rules | PASS；title counting、chapter rules、user-edited merge 測試新增。 |
+
 ## v0.40.0 增量驗證（2026-09-09）
 
 | 檢查 | 結果 |

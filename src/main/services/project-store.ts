@@ -7,6 +7,7 @@ import { sortAssets } from "../../shared/sorting";
 import { DEFAULT_PROJECT_COLOR_SETTINGS, normalizeProjectColorSettings } from "../../shared/color-presets";
 import { balanceIntroSegments, normalizeIntroSegmentMaxDuration } from "../../shared/intro-duration";
 import { buildTimelinePlan } from "../../shared/timeline-plan";
+import { isValidYoutubeChapterSet, youtubeTextLength } from "../../shared/publish-rules";
 import { finalizePartialOutput } from "./atomic-output";
 
 function clone<T>(value: T): T { return structuredClone(value); }
@@ -710,6 +711,11 @@ export class ProjectStore {
   async setAiPublishAssets(assets: AiPublishAssets): Promise<ProjectManifest> {
     return this.mutate((project) => {
       if (!assets || typeof assets !== "object" || !Array.isArray(assets.titles) || !Array.isArray(assets.thumbnails) || !Array.isArray(assets.chapters)) throw new Error("AI 發布素材格式無效。");
+      if (assets.titles.length > 5 || assets.titles.some((title) => !title || typeof title.text !== "string" || !title.text.trim() || youtubeTextLength(title.text.trim()) > 100)) throw new Error("YouTube 標題候選必須為 1–5 筆，且每筆不可超過 100 字元。" );
+      if (assets.thumbnails.length > 3 || assets.thumbnails.some((thumbnail) => !project.sources.some((source) => source.id === thumbnail.assetId) || !Number.isFinite(thumbnail.sourceTimeMs) || thumbnail.sourceTimeMs < 0)) throw new Error("縮圖候選必須綁定現有來源素材與有效時間碼。" );
+      const durationMs = mainRenderSelections(project).reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0);
+      if (assets.chapters.length && !isValidYoutubeChapterSet(assets.chapters, durationMs)) throw new Error("章節不符合 YouTube 規則：第一段 00:00、至少三段、時間遞增且每段至少 10 秒。" );
+      if (typeof assets.description !== "string" || assets.description.length > 5_000 || !assets.topicSnapshot || typeof assets.topicSnapshot.topic !== "string") throw new Error("AI 發布說明或主題快照格式無效。" );
       project.aiPublishAssets = structuredClone(assets);
     }, false);
   }

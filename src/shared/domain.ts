@@ -656,6 +656,7 @@ export interface ConcatRenderRequest {
   mainStartCard?: MainStartCardOptions;
   shortsPortrait?: boolean;
   shortsMaxDurationSec?: 60 | 180;
+  shortsSource?: "INTRO" | "MAIN";
 }
 
 export interface RenderClipSelection extends PreviewRange {
@@ -888,6 +889,7 @@ export interface YoutubeUploadRequest {
   description: string;
   privacyStatus: YoutubePrivacyStatus;
   madeForKids: boolean;
+  thumbnailPath?: string;
 }
 
 export interface YoutubeUploadProgress {
@@ -904,6 +906,8 @@ export interface YoutubeUploadResult {
   requestedPrivacyStatus: YoutubePrivacyStatus;
   channelId?: string;
   channelTitle?: string;
+  thumbnailStatus?: "NOT_REQUESTED" | "UPLOADED" | "FAILED";
+  thumbnailError?: string;
 }
 
 export interface PlatformUploadHandoffResult {
@@ -1037,6 +1041,7 @@ export interface AppApi {
   generateAiPublishAssets?(options: AiPublishGenerationOptions): Promise<AiPublishGenerationResult>;
   cancelAiPublishAssets?(): Promise<void>;
   choosePublishThumbnailOutput?(format: "jpg" | "png"): Promise<{ token: string; displayPath: string; format: "jpg" | "png" } | null>;
+  choosePublishThumbnailImport?(): Promise<{ path: string; format: "jpg" | "png" } | null>;
   renderPublishThumbnail?(request: ThumbnailRenderRequest): Promise<ThumbnailRenderResult>;
   onPublishProgress?(callback: (progress: PublishProgress) => void): void;
   clearPublishProgressListeners?(): void;
@@ -1076,6 +1081,7 @@ export interface AppApi {
   cancelYoutubeConnect(): Promise<void>;
   disconnectYoutube(): Promise<YoutubeSettingsSnapshot>;
   uploadYoutubeVideo(request: YoutubeUploadRequest): Promise<YoutubeUploadResult>;
+  retryYoutubeThumbnail?(videoId: string, thumbnailPath: string): Promise<{ status: "UPLOADED" }>;
   cancelYoutubeUpload(): Promise<void>;
   openYoutubeVideo(videoId: string): Promise<void>;
   openPlatformUpload(jobId: string, platform: BrowserUploadPlatform): Promise<PlatformUploadHandoffResult>;

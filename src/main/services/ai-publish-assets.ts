@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AiPublishGenerationOptions, AiPublishGenerationResult, AiPublishAssets, PublishChapterCue, PublishTitleCandidate, ThumbnailCandidate } from "../../shared/domain";
 import { buildTimelinePlan } from "../../shared/timeline-plan";
-import { validateYoutubeTitle } from "../../shared/publish-rules";
+import { isValidYoutubeChapterSet, validateYoutubeTitle } from "../../shared/publish-rules";
 import { AiStoryAnalysisService } from "./ai-story-analysis";
 import { AiSettingsStore } from "./ai-settings";
 import { ProjectStore } from "./project-store";
@@ -31,8 +31,10 @@ export class AiPublishAssetsService {
       const profile = snapshot.accounts.find((item) => item.id === snapshot.activeAccountId);
       model = profile?.visionModel;
       const diagnostic = profile ? await this.aiStory.testAccount(profile.id, signal) : undefined;
-      provider = diagnostic?.providerLabel === "CODEX_CHATGPT" ? "CODEX_CHATGPT" : "OPENAI_API";
-      warnings.push("本輪發布素材保留為可追溯候選；請人工確認事實、人物與版權，不將模型推測當成身分認定。");
+      // The account probe is diagnostic only. This service deliberately does not claim that
+      // a remote model generated the candidates until a strict publish schema response exists.
+      provider = "LOCAL_FALLBACK";
+      warnings.push(`已確認 ${diagnostic?.providerLabel ?? "AI 帳號"} 可供後續連線，但本輪採本機可追溯模板，未把連線測試冒充成 AI 生成；請人工確認事實、人物與版權。`);
     } catch (error) {
       warnings.push(`AI 連線不可用，已改用本機可追溯模板；可複製提示詞交給其他 AI：${error instanceof Error ? error.message : String(error)}`);
     }
@@ -64,7 +66,10 @@ export class AiPublishAssetsService {
       thumbnails.push({ id: `thumbnail-${index + 1}`, assetId: asset.id, sourceTimeMs: clip.inMs, sourceFileName: asset.fileName, reason: `正片時間線第 ${index + 1} 段；只使用來源畫面，不猜測真實身分。`, layout: index % 2 ? "RIGHT_TEXT" : "LEFT_TEXT", colorNote: "保留來源比例，使用輕微亮暗遮罩", previewUrl, style: { text: subject.slice(0, 18), textXPercent: index % 2 ? 66 : 8, textYPercent: 78, fontSizePx: 64, textColor: "#FFFFFF", outlineWidthPx: 3, overlayOpacityPercent: 24 } });
     }
     onProgress(80, "正在依 transition-aware timeline 建立章節草稿…");
-    const chapters: PublishChapterCue[] = plan.clips.map((clip, index) => ({ id: randomUUID(), startMs: clip.outputStartMs, title: clipLabel(assetById.get(clip.assetId)?.fileName ?? clip.assetId, index), description: `來源：${assetById.get(clip.assetId)?.fileName ?? clip.assetId}`, sourceAssetId: clip.assetId })).filter((chapter, index, all) => index === 0 || chapter.startMs - all[index - 1].startMs >= 10_000);
+    const draftChapters: PublishChapterCue[] = plan.clips.map((clip, index) => ({ id: randomUUID(), startMs: clip.outputStartMs, title: clipLabel(assetById.get(clip.assetId)?.fileName ?? clip.assetId, index), description: `來源：${assetById.get(clip.assetId)?.fileName ?? clip.assetId}`, sourceAssetId: clip.assetId })).filter((chapter, index, all) => index === 0 || chapter.startMs - all[index - 1].startMs >= 10_000);
+    const timelineDurationMs = plan.clips.reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0);
+    const chapters = isValidYoutubeChapterSet(draftChapters, timelineDurationMs) ? draftChapters : [];
+    if (!chapters.length) warnings.push("目前正片太短或章節數不足 3 段；章節草稿暫不啟用，請調整時間後再重跑或手動新增。" );
     const generatedAt = new Date().toISOString();
     const assets: AiPublishAssets = {
       schemaVersion: 1,

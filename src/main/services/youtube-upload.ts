@@ -23,6 +23,7 @@ const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
 const CHANNEL_ENDPOINT = "https://www.googleapis.com/youtube/v3/channels?part=id%2Csnippet&mine=true&maxResults=50";
 const UPLOAD_ENDPOINT = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet%2Cstatus&notifySubscribers=false";
+const THUMBNAIL_ENDPOINT = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set";
 const UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
 
 interface YoutubeSettingsFile {
@@ -430,6 +431,12 @@ export class YoutubeUploadService {
     } finally { await handle.close(); }
 
     if (!uploaded?.id || !/^[A-Za-z0-9_-]{6,20}$/.test(uploaded.id)) throw new Error("YouTube 已接收檔案，但未回傳有效的影片 ID；請到 YouTube Studio 檢查。");
+    let thumbnailStatus: YoutubeUploadResult["thumbnailStatus"] = "NOT_REQUESTED";
+    let thumbnailError: string | undefined;
+    if (request.thumbnailPath) {
+      try { await this.uploadThumbnail(uploaded.id, request.thumbnailPath, signal); thumbnailStatus = "UPLOADED"; }
+      catch (error) { thumbnailStatus = "FAILED"; thumbnailError = error instanceof Error ? error.message : String(error); }
+    }
     return {
       videoId: uploaded.id,
       videoUrl: `https://youtu.be/${uploaded.id}`,
@@ -437,7 +444,35 @@ export class YoutubeUploadService {
       requestedPrivacyStatus: request.privacyStatus,
       channelId: uploaded.snippet?.channelId ?? runtime.settings.channelId,
       channelTitle: uploaded.snippet?.channelTitle ?? runtime.settings.channelTitle,
+      thumbnailStatus,
+      thumbnailError,
     };
+  }
+
+  async retryThumbnail(videoId: string, thumbnailPath: string, signal?: AbortSignal): Promise<{ status: "UPLOADED" }> {
+    const runtime = this.settingsStore.getRuntimeClient();
+    if (!runtime.refreshToken) throw new Error("YouTube 尚未連結頻道。" );
+    const accessToken = await this.refreshAccessToken(runtime.clientId, runtime.clientSecret, runtime.refreshToken, signal);
+    await this.uploadThumbnailWithToken(videoId, thumbnailPath, accessToken, signal);
+    return { status: "UPLOADED" };
+  }
+
+  private async uploadThumbnail(videoId: string, thumbnailPath: string, signal?: AbortSignal): Promise<void> {
+    const runtime = this.settingsStore.getRuntimeClient();
+    if (!runtime.refreshToken) throw new Error("YouTube 尚未連結頻道。" );
+    const accessToken = await this.refreshAccessToken(runtime.clientId, runtime.clientSecret, runtime.refreshToken, signal);
+    await this.uploadThumbnailWithToken(videoId, thumbnailPath, accessToken, signal);
+  }
+
+  private async uploadThumbnailWithToken(videoId: string, thumbnailPath: string, accessToken: string, signal?: AbortSignal): Promise<void> {
+    if (!/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) throw new Error("YouTube 影片 ID 無效。" );
+    const extension = path.extname(thumbnailPath).toLowerCase();
+    if (extension !== ".jpg" && extension !== ".jpeg" && extension !== ".png") throw new Error("YouTube 縮圖只支援 JPG 或 PNG。" );
+    const file = await stat(thumbnailPath);
+    if (!file.isFile() || file.size <= 0) throw new Error("縮圖檔案不存在或為空。" );
+    if (file.size > 2 * 1024 * 1024) throw new Error("縮圖超過 YouTube 2 MB 上限。" );
+    const response = await this.fetcher(`${THUMBNAIL_ENDPOINT}?videoId=${encodeURIComponent(videoId)}`, { method: "POST", headers: { authorization: `Bearer ${accessToken}`, "content-type": extension === ".png" ? "image/png" : "image/jpeg", "content-length": String(file.size) }, body: await readFile(thumbnailPath), signal });
+    if (!response.ok) throw new Error(`YouTube 縮圖上傳失敗：${await this.responseError(response)}`);
   }
 
   async openVideo(videoId: string): Promise<void> {

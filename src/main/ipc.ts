@@ -439,6 +439,17 @@ export function registerIpc(
     await userPreferences.rememberDirectory("PREVIEW_OUTPUT", outputPath);
     return { token, displayPath: outputPath, format };
   });
+  ipcMain.handle("publish:thumbnail:choose-import", async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const options: Electron.OpenDialogOptions = { title: "匯入 YouTube JPG／PNG 縮圖", properties: ["openFile"], filters: [{ name: "圖片", extensions: ["jpg", "jpeg", "png"] }] };
+    const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
+    if (result.canceled || !result.filePaths[0]) return null;
+    const extension = path.extname(result.filePaths[0]).toLowerCase();
+    if (extension !== ".jpg" && extension !== ".jpeg" && extension !== ".png") throw new Error("只支援 JPG 或 PNG 縮圖。" );
+    const file = await stat(result.filePaths[0]);
+    if (file.size > 2 * 1024 * 1024) throw new Error("縮圖超過 YouTube 2 MB 上限。" );
+    return { path: result.filePaths[0], format: extension === ".png" ? "png" as const : "jpg" as const };
+  });
   ipcMain.handle("publish:thumbnail:render", async (_event, request: ThumbnailRenderRequest) => {
     if (!request || typeof request.outputToken !== "string" || typeof request.candidateId !== "string" || (request.format !== "jpg" && request.format !== "png")) throw new Error("縮圖產出要求格式無效。");
     const token = thumbnailTokens.get(request.outputToken); thumbnailTokens.delete(request.outputToken);
@@ -666,6 +677,7 @@ export function registerIpc(
     }
   });
   ipcMain.handle("youtube:cancel-upload", () => youtubeUploadController?.abort());
+  ipcMain.handle("youtube:retry-thumbnail", async (_event, videoId: string, thumbnailPath: string) => youtubeUpload.retryThumbnail(videoId, thumbnailPath));
   ipcMain.handle("youtube:open-video", (_event, videoId: string) => youtubeUpload.openVideo(videoId));
   ipcMain.handle("platform-upload:open", async (_event, jobId: string, platform: BrowserUploadPlatform) => {
     const output = typeof jobId === "string" ? await outputHistory.get(jobId) : undefined;

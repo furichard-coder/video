@@ -18,6 +18,7 @@ import { AiSettingsModal } from "./components/AiSettingsModal";
 import { DisplaySettingsModal } from "./components/DisplaySettingsModal";
 import { YoutubeSettingsModal } from "./components/YoutubeSettingsModal";
 import { OutputHistoryModal } from "./components/OutputHistoryModal";
+import { AiPublishStudio } from "./components/AiPublishStudio";
 import { MaterialEditorModal, type MaterialEditorSection } from "./components/MaterialEditorModal";
 import { formatBytes } from "./format";
 import { applyUiTextSize, applyUiZoom, readUiTextSize, readUiZoom, stepUiZoom, type UiTextSize, type UiZoomPercent } from "./ui-preferences";
@@ -28,7 +29,7 @@ function projectScopeNeedsReview(project: ProjectManifest, scope: "MAIN" | "INTR
   return timelineRevision !== reviewRevision;
 }
 
-type MainWorkspace = "SOURCES" | "INTRO" | "BGM" | "SUBTITLES" | "OUTPUTS" | "PUBLISH";
+type MainWorkspace = "SOURCES" | "INTRO" | "BGM" | "SUBTITLES" | "OUTPUTS" | "PUBLISH" | "AI_PUBLISH";
 
 const SORT_LABELS: Record<SortMode, string> = {
   MANUAL_ORDER: "自訂順序",
@@ -80,6 +81,7 @@ export function App() {
   const [showDisplaySettings, setShowDisplaySettings] = useState(false);
   const [showYoutubeSettings, setShowYoutubeSettings] = useState(false);
   const [showOutputHistory, setShowOutputHistory] = useState(false);
+  const [showAiPublish, setShowAiPublish] = useState(false);
   const [uiTextSize, setUiTextSize] = useState<UiTextSize>(() => readUiTextSize());
   const [uiZoom, setUiZoom] = useState<UiZoomPercent>(() => readUiZoom());
   const [externalAsset, setExternalAsset] = useState<SourceAsset>();
@@ -229,6 +231,7 @@ export function App() {
     setConfirmRemoveAsset(undefined); setPlacementQueue([]); setLastRemovedMainId(undefined);
     setMediaInsertionVideoState(undefined); setShowAiSettings(false); setShowYoutubeSettings(false);
     setShowOutputHistory(false);
+    setShowAiPublish(false);
   };
   const openWorkspace = (workspace: MainWorkspace) => {
     closeProjectViews(); setActiveWorkspace(workspace);
@@ -237,6 +240,7 @@ export function App() {
     else if (workspace === "SUBTITLES") setShowSubtitles(true);
     else if (workspace === "OUTPUTS") setShowOutputHistory(true);
     else if (workspace === "PUBLISH") setShowYoutubeSettings(true);
+    else if (workspace === "AI_PUBLISH") setShowAiPublish(true);
   };
 
   const runHistory = useCallback(async (direction: "UNDO" | "REDO") => {
@@ -477,7 +481,7 @@ export function App() {
       {error && <div className="notice error" role="alert">{error}</div>}
 
       <section className="library-section">
-        <nav className="workspace-nav" aria-label="主要工作區"><button className={activeWorkspace === "SOURCES" ? "active" : ""} onClick={() => openWorkspace("SOURCES")}>01 素材與順序</button><button className={activeWorkspace === "INTRO" ? "active" : ""} onClick={() => openWorkspace("INTRO")}>02 片頭</button><button className={activeWorkspace === "BGM" ? "active" : ""} onClick={() => openWorkspace("BGM")}>03 配樂</button><button className={activeWorkspace === "SUBTITLES" ? "active" : ""} onClick={() => openWorkspace("SUBTITLES")}>04 字幕</button><button className={activeWorkspace === "OUTPUTS" ? "active" : ""} onClick={() => openWorkspace("OUTPUTS")}>05 預覽輸出／成品庫</button><button className={activeWorkspace === "PUBLISH" ? "active" : ""} onClick={() => openWorkspace("PUBLISH")}>06 發布</button></nav>
+        <nav className="workspace-nav" aria-label="主要工作區"><button className={activeWorkspace === "SOURCES" ? "active" : ""} onClick={() => openWorkspace("SOURCES")}>01 素材與順序</button><button className={activeWorkspace === "INTRO" ? "active" : ""} onClick={() => openWorkspace("INTRO")}>02 片頭</button><button className={activeWorkspace === "BGM" ? "active" : ""} onClick={() => openWorkspace("BGM")}>03 配樂</button><button className={activeWorkspace === "SUBTITLES" ? "active" : ""} onClick={() => openWorkspace("SUBTITLES")}>04 字幕</button><button className={activeWorkspace === "OUTPUTS" ? "active" : ""} onClick={() => openWorkspace("OUTPUTS")}>05 預覽輸出／成品庫</button><button className={activeWorkspace === "PUBLISH" ? "active" : ""} onClick={() => openWorkspace("PUBLISH")}>06 發布設定</button><button className={activeWorkspace === "AI_PUBLISH" ? "active" : ""} onClick={() => openWorkspace("AI_PUBLISH")}>07 AI 發布素材</button></nav>
         <div className="library-toolbar">
           <div><span className="eyebrow">PROJECT SOURCE MANIFEST</span><h2>素材清單</h2></div>
           <div className="toolbar-actions">
@@ -515,6 +519,7 @@ export function App() {
       {showDisplaySettings && <DisplaySettingsModal textSize={uiTextSize} zoomPercent={uiZoom} onTextSizeChange={setUiTextSize} onZoomChange={setUiZoom} onClose={() => setShowDisplaySettings(false)} />}
       {showYoutubeSettings && <YoutubeSettingsModal onClose={() => setShowYoutubeSettings(false)} />}
       {showOutputHistory && <OutputHistoryModal onOpenYoutubeSettings={() => setShowYoutubeSettings(true)} onClose={() => setShowOutputHistory(false)} />}
+      {showAiPublish && <AiPublishStudio project={project} onProjectUpdated={setProject} onClose={() => setShowAiPublish(false)} />}
       {showAiSettings && <AiSettingsModal project={project} onProjectUpdated={setProject} onClose={() => setShowAiSettings(false)} />}
       {externalAsset && <ExternalOpenModal asset={externalAsset} onClose={() => setExternalAsset(undefined)} />}
       {volumeAsset && <VolumeSegmentsModal asset={project.sources.find((asset) => asset.id === volumeAsset.id) ?? volumeAsset} defaultVolumePercent={project.sourceAudioVolumePercent ?? 100} onClose={() => setVolumeAsset(undefined)} onAssetUpdated={updateAsset} />}

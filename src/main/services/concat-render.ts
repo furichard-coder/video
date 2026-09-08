@@ -444,8 +444,9 @@ export class ConcatRenderService {
       if (!request.shortsPortrait) throw new Error("Shorts 必須使用 9:16 直式輸出。" );
       if (request.shortsMaxDurationSec !== 60 && request.shortsMaxDurationSec !== 180) throw new Error("Shorts 長度上限只支援 60 或 180 秒。" );
       const requested = request.clipSelections;
-      const expected = mainRenderSelections(project);
-      if (!requested || requested.length !== expected.length || expected.some((clip, index) => clip.assetId !== requested[index]?.assetId || clip.inMs !== requested[index]?.inMs || clip.outMs !== requested[index]?.outMs)) throw new Error("Shorts 輸出要求與目前正片時間線不一致。" );
+      const allowed = request.shortsSource === "INTRO" ? project.introSegments : mainRenderSelections(project);
+      if (!requested?.length) throw new Error("Shorts 至少需要一段已選片段。" );
+      if (requested.some((clip) => !allowed.some((candidate) => candidate.assetId === clip.assetId && candidate.inMs === clip.inMs && candidate.outMs === clip.outMs))) throw new Error("Shorts 包含不在目前片頭／正片清單內的片段。" );
       if (request.prependIntro) throw new Error("Shorts 不會靜默串接 16:9 Intro；請在 Shorts 頁明確選擇片段。" );
     }
     if (path.extname(outputPath).toLowerCase() !== ".mp4") throw new Error("串連預覽必須輸出為 MP4。");

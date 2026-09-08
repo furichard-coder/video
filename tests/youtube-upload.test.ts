@@ -68,4 +68,22 @@ describe("secure YouTube preview upload", () => {
     await expect(new YoutubeUploadService(settings, browsers, fetcher).upload(outputPath, { jobId: "job", title: "預覽", description: "", privacyStatus: "unlisted", madeForKids: false })).rejects.toThrow(/不是目標「漫步風光」/);
     expect(fetcher).not.toHaveBeenCalled();
   });
+
+  it("reports video success separately when thumbnail upload fails", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "youtube-thumbnail-")); roots.push(root);
+    const clientPath = path.join(root, "oauth.json");
+    await writeFile(clientPath, JSON.stringify({ installed: { client_id: "12345678.apps.googleusercontent.com", client_secret: "secret-value" } }));
+    const settings = new YoutubeSettingsStore(root, protector, browsers); await settings.initialize(); await settings.importOAuthClient(clientPath); await settings.saveConnection("refresh", "channel-1", "漫步風光");
+    const outputPath = path.join(root, "preview.mp4"); const thumbnailPath = path.join(root, "thumbnail.jpg"); await writeFile(outputPath, Buffer.alloc(32, 3)); await writeFile(thumbnailPath, Buffer.alloc(128, 4));
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("oauth2.googleapis.com/token")) return new Response(JSON.stringify({ access_token: "access-token" }), { status: 200 });
+      if (url.includes("uploadType=resumable")) return new Response(null, { status: 200, headers: { location: "https://www.googleapis.com/upload/youtube/v3/videos?upload_id=test" } });
+      if (url.includes("thumbnails/set")) return new Response(JSON.stringify({ error: { message: "thumbnail denied" } }), { status: 403 });
+      return new Response(JSON.stringify({ id: "abc12345XYZ", snippet: { title: "預覽", channelId: "channel-1", channelTitle: "漫步風光" } }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const result = await new YoutubeUploadService(settings, browsers, fetcher).upload(outputPath, { jobId: "job", title: "預覽", description: "", privacyStatus: "unlisted", madeForKids: false, thumbnailPath });
+    expect(result.videoId).toBe("abc12345XYZ"); expect(result.thumbnailStatus).toBe("FAILED"); expect(result.thumbnailError).toMatch(/thumbnail denied|縮圖/);
+    expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("thumbnails/set"), expect.objectContaining({ method: "POST" }));
+  });
 });

@@ -12,6 +12,7 @@ interface Props {
 function purposeLabel(output: PreviewOutputRecord): string {
   if (output.purpose === "INTRO") return "片頭預覽";
   if (output.purpose === "CLIP") return "4K 時間段";
+  if (output.purpose === "SHORTS") return "Shorts 直式預覽";
   if (output.purpose === "CONCAT") return output.includedIntroSegmentCount ? `片頭＋正片（${output.includedIntroSegmentCount} 段片頭）` : "正片預覽";
   return "手動加入的既有 MP4";
 }
