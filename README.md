@@ -2,7 +2,14 @@
 
 這是剪接 App 的可驗收垂直切片。它負責選擇、排列及預覽影片／照片，並可產生串連或 Intro 預覽；不建立正式 Master、不做多軌 Timeline 剪輯，也不改寫或刪除來源檔。完成的正片預覽可由使用者確認後透過 YouTube 官方 API 上傳到已核對的頻道，或安全交接到 BiliBili／TikTok 官方投稿頁。只有使用者主動執行 AI 時，才會送出低解析故事板與故事背景；字幕的素材語音分析預設關閉，只有另行勾選才建立及送出短音訊。
 
-目前版本：v0.43.0。
+目前版本：v0.44.0。
+
+## v0.44.0 本輪完成
+
+- AI 發布素材現在會依序嘗試真正的 OpenAI Responses strict JSON schema、Codex／ChatGPT 登入 provider，兩者失敗才使用離線 fallback。
+- OpenAI 只送出主題、canonical timeline 摘要與三張低解析快取候選影格；請求使用 `store:false`。Codex 使用 ephemeral、read-only sandbox。
+- 外部 AI 貼回升級為完整 publish schema，會驗證標題、縮圖候選 ID、章節時間與 user-edited 保護。
+- AI 圖片生成仍未啟用；縮圖僅可用來源影格本機合成或 JPG／PNG 匯入。
 
 ## v0.43.0 本輪完成
 

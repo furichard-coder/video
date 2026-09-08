@@ -152,6 +152,14 @@ export class PreviewCache {
     }, signal);
   }
 
+  async ensureWithPath(assetId: string, variant: PreviewVariant, signal?: AbortSignal): Promise<PreviewResult & { cachePath: string }> {
+    const result = await this.ensure(assetId, variant, signal);
+    const asset = this.store.getAsset(assetId);
+    if (!asset) throw new Error("找不到來源項目。");
+    const names: Record<PreviewVariant, string> = { THUMBNAIL: "thumbnail.jpg", IMAGE_PREVIEW: "image-preview.jpg", VIDEO_PROXY: "video-preview.mp4", VIDEO_CLIP_PROXY: "video-clip-preview.mp4" };
+    return { ...result, cachePath: path.join(this.cacheDirectory(asset.previewCacheKey), names[variant]) };
+  }
+
   async ensureClip(assetId: string, inMs: number, outMs: number, signal?: AbortSignal): Promise<PreviewResult> {
     assertSafeHexId(assetId, "Asset ID");
     const startMs = Math.round(inMs); const endMs = Math.round(outMs);

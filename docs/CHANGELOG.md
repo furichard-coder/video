@@ -82,3 +82,8 @@
 
 - 修正永久嵌入字幕勾選項的可逆性：輸出前可隨時取消，已勾選狀態不再因字幕複核提示而呈現不可操作。
 - 保留啟用時的字幕確認／時間線複核 gate；取消不寫入來源、不改動已產出檔案。
+## v0.44.0 — 2026-09-09
+
+- 接上 OpenAI Responses strict `json_schema` 與 Codex／ChatGPT ephemeral read-only provider；fallback 順序為 OpenAI → Codex → LOCAL_FALLBACK。
+- AI 發布輸入限制為低解析候選影格、topic 與 canonical timeline 摘要，並加入 project／timeline revision gate。
+- 外部 AI paste-back 改為完整 publish schema 驗證。

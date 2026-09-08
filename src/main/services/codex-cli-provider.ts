@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { MusicSuggestionCandidate, StoryFrameAnalysis, StoryFrameRequest } from "./openai-provider";
 import type { AiStoryContext } from "../../shared/domain";
+import { normalizePublishResponse, PUBLISH_JSON_SCHEMA, type PublishGenerationInput, type PublishGeneratedDraft } from "./publish-generation";
 import { ProcessFailure, runProcess } from "./process-runner";
 
 const CODEX_BATCH_SIZE = 12;
@@ -198,6 +199,23 @@ export class CodexCliStoryProvider {
     const status = `${result.stdout}\n${result.stderr}`;
     if (!/logged in using chatgpt/i.test(status)) throw new Error("Codex 尚未使用 ChatGPT 登入；請先在 Codex 完成登入後重試。");
     return { checks: ["已偵測 Codex", "ChatGPT 登入可用", "唯讀／暫存工作模式"], providerLabel: "Codex／ChatGPT 登入" };
+  }
+
+  async generatePublishAssets(input: PublishGenerationInput, model: string, signal?: AbortSignal): Promise<{ draft: PublishGeneratedDraft; model: string }> {
+    const executable = this.configuredExecutable;
+    if (!executable) throw new Error("這台電腦找不到 Codex 執行程式。" );
+    await mkdir(this.cacheRoot, { recursive: true });
+    const schemaPath = path.join(this.cacheRoot, `.codex-publish-schema-${process.pid}-${Date.now()}.json`);
+    const prompt = ["你是旅遊 YouTube 發布素材編輯。不要執行工具、不要讀寫本機檔案；只依照文字與附加低解析影格回答。不得猜測人物身分或未提供的地點。", JSON.stringify({ topic: input.topic, durationMs: input.durationMs, timeline: input.timelineSummary, candidates: input.candidates.map(({ framePath: _framePath, ...candidate }) => candidate) }), "嚴格依 output schema 回傳完整 titles、description、englishSummary、hashtags、3 個縮圖概念與章節。"].join("\n\n");
+    try {
+      await writeFile(schemaPath, JSON.stringify(PUBLISH_JSON_SCHEMA), { encoding: "utf8", flag: "wx" });
+      const args = ["exec", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only", "--skip-git-repo-check", "--model", model, "-C", this.cacheRoot, "--image", ...input.candidates.map((candidate) => candidate.framePath), "--output-schema", schemaPath, "--json", "-"];
+      let output;
+      try { output = await this.processRunner(executable, args, combinedSignal(signal), { cwd: this.cacheRoot, input: prompt }); }
+      catch (error) { if (error instanceof Error && error.name === "AbortError") throw error; const detail = error instanceof ProcessFailure ? error.stderr.slice(-500) : error instanceof Error ? error.message : String(error); throw new Error(`Codex／ChatGPT 發布素材失敗：${detail}`); }
+      let parsed: unknown; try { parsed = JSON.parse(finalAgentMessage(output.stdout)); } catch (error) { throw new Error(`Codex 發布素材 JSON 無法解析：${error instanceof Error ? error.message : String(error)}`); }
+      return { draft: normalizePublishResponse(parsed, input), model };
+    } finally { await rm(schemaPath, { force: true }); }
   }
 
   async analyzeStoryFramesBatch(requests: CodexStoryRequest[], model: string, signal?: AbortSignal): Promise<Map<string, StoryFrameAnalysis>> {

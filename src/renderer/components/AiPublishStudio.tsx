@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AiPublishAssets, ProjectManifest, PublishTopicSnapshot } from "../../shared/domain";
-import { chapterText, isValidYoutubeChapterSet, publishAssetsNeedReview, validateYoutubeTitle, youtubeTextLength } from "../../shared/publish-rules";
+import { chapterText, isValidYoutubeChapterSet, publishAssetsNeedReview, validateExternalPublishPayload, validateYoutubeTitle, youtubeTextLength } from "../../shared/publish-rules";
 import { formatDuration } from "../format";
 
 interface Props { project: ProjectManifest; onProjectUpdated(project: ProjectManifest): void; onClose(): void; }
@@ -19,7 +19,7 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
   const requestClose = () => dirty ? setClosePrompt(true) : onClose();
   const prompt = useMemo(() => JSON.stringify({ task: "YouTube publishing assets", topic, constraints: { titleMaxCharacters: 100, chapterRules: "00:00 first, >=3, increasing, >=10s" } }, null, 2), [topic]);
   return <div className="modal-backdrop" role="presentation"><section className="editor-modal publish-assets-modal" role="dialog" aria-modal="true" aria-label="AI 發布素材">
-    <header className="modal-header"><div><span className="eyebrow">AI PUBLISHING ASSETS · v0.43</span><h2>AI 發布素材</h2><p>主題與候選都可人工修改；AI 結果只作草稿。</p></div><button className="icon-button" onClick={requestClose} aria-label="關閉">×</button></header>
+    <header className="modal-header"><div><span className="eyebrow">AI PUBLISHING ASSETS · v0.44</span><h2>AI 發布素材</h2><p>按下產生後，優先使用 OpenAI API；失敗再用 Codex／ChatGPT 登入，兩者不可用才使用離線範本。所有結果仍可人工修改。</p></div><button className="icon-button" onClick={requestClose} aria-label="關閉">×</button></header>
     <div className="publish-assets-body">
       <section className="setting-block"><h3>01 主題與觀眾承諾</h3><div className="publish-topic-grid"><label>主題<input value={topic.topic} onChange={(e) => setTopic({ ...topic, topic: e.target.value })} /></label><label>地點<input value={topic.locations.join(", ")} onChange={(e) => setTopic({ ...topic, locations: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) })} /></label><label>故事／特色<textarea value={topic.storySummary} onChange={(e) => setTopic({ ...topic, storySummary: e.target.value })} /></label><label>觀眾承諾<textarea value={topic.audiencePromise} onChange={(e) => setTopic({ ...topic, audiencePromise: e.target.value })} /></label></div><div className="concat-footer-actions"><button className="ai-intro-button" disabled={busy} onClick={() => void generate()}>✦ 產生／重跑</button>{busy && <button className="cancel-button" onClick={() => void window.sourceApp.cancelAiPublishAssets?.()}>取消</button>}{progress && <span>{progress.percent}% · {progress.detail}</span>}</div></section>
       {error && <p className="inline-error" role="alert">{error}</p>}{notice && <p className="inline-notice" role="status">{notice}</p>}

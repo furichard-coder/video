@@ -784,3 +784,12 @@ npm start
 | TypeScript | PASS；`npm run typecheck` |
 | Vitest | PASS；35 suites / 235 tests |
 | 來源保護 | PASS；本輪只修改 UI 判斷、測試期望 schema 15 與文件，未修改來源媒體。 |
+## v0.44.0 增量驗證（2026-09-09）
+
+| 項目 | 結果 |
+|---|---|
+| OpenAI publish contract | PASS；mock 覆蓋 Responses、`store:false`、strict schema、低解析 image inputs 與 invalid candidate rejection。 |
+| Codex publish contract | PASS；mock 覆蓋 ephemeral、ignore-user-config、read-only sandbox、output schema、schema cleanup。 |
+| Provider honesty | PASS；只有真正 provider 成功才標示 OPENAI_API／CODEX_CHATGPT，否則 LOCAL_FALLBACK 並保留失敗原因。 |
+| Full publish schema | PASS；titles、description、English summary、hashtags、thumbnail candidate IDs、chapters、warnings 驗證。 |
+| 完整測試 | PASS；39 suites／243 tests。 |

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AiAccountProfile, AiStoryContext, SubtitleRenderLanguage } from "../../shared/domain";
+import { PUBLISH_JSON_SCHEMA, normalizePublishResponse, type PublishGenerationInput, type PublishGeneratedDraft } from "./publish-generation";
 
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 
@@ -136,6 +137,19 @@ function outputText(value: unknown): string {
 
 export class OpenAiProvider {
   constructor(private readonly fetcher: FetchLike = fetch) {}
+
+  async generatePublishAssets(input: PublishGenerationInput, account: AiAccountProfile & { apiKey: string }, signal?: AbortSignal): Promise<{ draft: PublishGeneratedDraft; model: string; requestId?: string }> {
+    const content: Array<Record<string, unknown>> = [{ type: "input_text", text: ["為旅遊 YouTube 影片產生發布素材。只能依下列主題、時間線摘要與提供的低解析候選影格；不得猜測人物身分或未提供的地點。", JSON.stringify({ topic: input.topic, durationMs: input.durationMs, timeline: input.timelineSummary, candidates: input.candidates.map(({ framePath: _framePath, ...candidate }) => candidate) }), "嚴格依 JSON schema 回傳 3–5 個標題、說明、hashtags、3 個縮圖概念與合法章節。"].join("\n\n") }];
+    for (const candidate of input.candidates) {
+      const bytes = await readFile(candidate.framePath);
+      content.push({ type: "input_image", image_url: `data:image/jpeg;base64,${Buffer.from(bytes).toString("base64")}`, detail: "low" });
+    }
+    const response = await this.fetcher(`${OPENAI_BASE_URL}/responses`, { method: "POST", headers: { Authorization: `Bearer ${account.apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: account.visionModel, store: false, input: [{ role: "user", content }], text: { format: { type: "json_schema", name: "youtube_publish_assets", strict: true, schema: PUBLISH_JSON_SCHEMA } } }), signal: requestSignal(signal) });
+    if (!response.ok) throw await responseError(response);
+    const body = await response.json(); const resultText = outputText(body); let parsed: unknown;
+    try { parsed = JSON.parse(resultText); } catch { throw new Error("OpenAI 發布素材回傳不是有效 JSON。" ); }
+    return { draft: normalizePublishResponse(parsed, input), model: account.visionModel, requestId: response.headers.get("x-request-id") ?? undefined };
+  }
 
   async testStoryConnection(account: AiAccountProfile & { apiKey: string }, signal?: AbortSignal): Promise<OpenAiConnectionDiagnostic> {
     const requestIds: string[] = [];
