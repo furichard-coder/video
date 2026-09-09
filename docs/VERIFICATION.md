@@ -1,5 +1,15 @@
 # 第一階段驗證紀錄
 
+## v0.47.0 增量驗證（2026-09-09）
+
+| 項目 | 結果 |
+|---|---|
+| 字幕頁預設收折 | PASS；進入字幕頁只顯示精簡切換列，共用預覽清單不占用同步影片區域。 |
+| 展開／收起 | PASS；`aria-expanded` 與可見內容同步，展開後可再次收起。 |
+| 共用功能保留 | PASS；展開時仍使用既有 `OutputLibrary`，片頭頁顯示方式不變。 |
+
+完整驗證：TypeScript PASS；Vitest 39 個測試檔／248 個測試 PASS；production build PASS；Electron smoke PASS；Windows packaged smoke PASS；`npm audit --audit-level=high` 0 vulnerabilities。封裝 EXE 大小 `244441088` bytes，SHA-256 `4960B3F17D56A8EF8623C378A1C6B9E305FB2F07AA7B07DB6C218D265587B971`。
+
 ## v0.46.0 增量驗證（2026-09-09）
 
 | 項目 | 結果 |

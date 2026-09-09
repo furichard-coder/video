@@ -1315,6 +1315,23 @@ describe("App source workflow", () => {
     await waitFor(() => expect(api.exportSubtitles).toHaveBeenCalledWith("srt-token", ["MAIN"]));
   });
 
+  it("keeps the shared preview history collapsed on the subtitle page until requested", async () => {
+    const cue = { id: "folded-history", startMs: 0, endMs: 1_000, text: "預覽不被遮住", timelineScope: "MAIN" as const, origin: "MANUAL" as const, reviewStatus: "CONFIRMED" as const };
+    const api = mockApi({ ...structuredClone(project), subtitleCues: [cue] });
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api }); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /CC 字幕/ }));
+    const dialog = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
+    const expand = within(dialog).getByRole("button", { name: "展開片頭頁／字幕頁共用預覽" });
+    expect(expand).toHaveAttribute("aria-expanded", "false");
+    expect(within(dialog).queryByLabelText("片頭頁／字幕頁共用預覽")).not.toBeInTheDocument();
+    fireEvent.click(expand);
+    const collapse = within(dialog).getByRole("button", { name: "收起片頭頁／字幕頁共用預覽" });
+    expect(collapse).toHaveAttribute("aria-expanded", "true");
+    expect(await within(dialog).findByLabelText("片頭頁／字幕頁共用預覽")).toBeInTheDocument();
+    fireEvent.click(collapse);
+    expect(within(dialog).queryByLabelText("片頭頁／字幕頁共用預覽")).not.toBeInTheDocument();
+  });
+
   it("targets Intro subtitles, builds a 480P synchronized preview, and persists overlay styling", async () => {
     const segment = { id: "subtitle-intro", assetId: video.id, fileName: video.fileName, inMs: 0, outMs: 3_000, score: 90, reasons: ["人物事件"] };
     const introCue = { id: "intro-ai", startMs: 0, endMs: 2_000, text: "河內人物故事開場", timelineScope: "INTRO" as const, origin: "AI_VISUAL" as const, reviewStatus: "CONFIRMED" as const, sourceAssetId: video.id, sourceInMs: 0, sourceOutMs: 2_000 };

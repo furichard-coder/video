@@ -2,6 +2,14 @@
 
 本檔案是每次可交付功能變更的簡短索引。完成一個階段後，必須同步更新本檔案、`README.md` 與 `VERIFICATION.md`；只有通過建置／測試的內容才可標記為完成。
 
+## v0.47.0 — 2026-09-09
+
+- 字幕頁的片頭／字幕共用預覽紀錄改為預設收起，可明確展開或再次收起，不再壓縮上方同步影片預覽。
+- 展開後沿用同一個 `OutputLibrary` 與播放／開啟位置／複製路徑動作；片頭頁呈現不變。
+- 新增字幕頁預設收起、展開、再次收起的 UI 回歸測試。
+- 驗證：39 個測試檔／248 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke、`npm audit` 全部通過。
+- 交付：`release/v0.47.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer.exe`；SHA-256 `4960B3F17D56A8EF8623C378A1C6B9E305FB2F07AA7B07DB6C218D265587B971`。
+
 ## v0.46.0 — 2026-09-09
 
 - AI 字幕產出後維持全部 `CONFIRMED`，不再要求逐筆確認才能使用。

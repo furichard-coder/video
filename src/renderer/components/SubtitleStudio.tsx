@@ -405,7 +405,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
           </section>}
         </main>
       </div>
-      <SharedIntroPreviewHistory refreshKey={previewHistoryRevision} title="片頭頁／字幕頁共用預覽" />
+      <SharedIntroPreviewHistory refreshKey={previewHistoryRevision} title="片頭頁／字幕頁共用預覽" collapsible defaultCollapsed />
       {notice && <div className="subtitle-result-notice" role="status">{notice}</div>}
       <footer className="settings-footer"><p>片頭與正片字幕使用各自時間基準；480P 只供同步檢視，來源保持唯讀且代理不可作正式 Master。</p><div>{exporting && <button className="cancel-button" onClick={() => void window.sourceApp.cancelSubtitleExport()}>取消匯出</button>}<button className="secondary-button" disabled={busy || generating || buildingPreview} onClick={() => void save()}>保存字幕</button><button className="primary-button" disabled={busy || generating || buildingPreview || !counts.confirmed} onClick={() => void exportFile()}>匯出 {counts.confirmed} 筆已確認 SRT</button></div></footer>
       {closePrompt && <div className="inline-close-guard" role="alertdialog" aria-label="字幕未保存"><strong>字幕有未保存修改</strong><p>要先保存再離開，還是放棄這次修改？</p><button className="primary-button" disabled={busy} onClick={async () => { if (await save()) { setClosePrompt(false); onClose(); } }}>保存並離開</button><button className="danger-secondary-button" disabled={busy} onClick={() => { setLocalDirty(false); setClosePrompt(false); onClose(); }}>放棄並離開</button><button className="secondary-button" disabled={busy} onClick={() => setClosePrompt(false)}>返回編輯</button></div>}

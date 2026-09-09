@@ -1011,3 +1011,9 @@ button.danger-text,.danger-text { color: var(--danger); }
 .output-library-compact li strong, .output-library-compact li > div > button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .output-library-compact li > div > button { border: 0; padding: 0; background: none; color: var(--accent); text-align: left; cursor: pointer; font: inherit; }
 .output-library-compact nav, .output-library-compact .output-record-actions { display: flex; gap: 5px; }
+.shared-preview-history { margin: 10px 14px; border: 1px solid rgba(120,215,221,.18); border-radius: 10px; background: rgba(10,21,28,.72); overflow: hidden; }
+.shared-preview-history-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 0; color: var(--text); background: rgba(120,215,221,.045); cursor: pointer; text-align: left; }
+.shared-preview-history-toggle > span { min-width: 0; display: grid; gap: 3px; }.shared-preview-history-toggle strong { font-size: .625rem; }.shared-preview-history-toggle small { color: var(--muted); font-size: .5rem; }
+.shared-preview-history-toggle em { flex: 0 0 auto; color: var(--cyan); font-size: .5rem; font-style: normal; }
+.shared-preview-history.is-expanded .shared-preview-history-toggle { border-bottom: 1px solid rgba(120,215,221,.14); }
+.shared-preview-history > .output-library-compact { margin: 0; border: 0; border-radius: 0; background: transparent; }

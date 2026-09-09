@@ -1,4 +1,4 @@
-# Current Product Spec — v0.46.0
+# Current Product Spec — v0.47.0
 
 ## Scope
 
@@ -27,6 +27,8 @@ Windows-first read-only source organizer. The first visible workflow remains sou
 All millisecond fields use the shared minute/second/millisecond editor. The renderer exposes autosave state and protects dirty Subtitle/BGM drafts when a canonical project snapshot arrives from another window or background job.
 
 The main screen exposes seven primary workspaces: sources/order, Intro, BGM, subtitles, preview/output library, publishing settings, and AI publishing assets. Per-material edits enter a single Material Editor workspace before opening the detailed safe editor. Output pages use the shared compact OutputLibrary provider for recent files and actions. As of v0.41.0, `useOutputLibrary` and `OutputRecordActions` are the shared query/action layer for Concat, Intro, subtitle and global output views; global registration/removal and platform handoff remain owned by OutputHistoryModal.
+
+On the Subtitle workspace, the shared Intro preview history is collapsible and defaults to collapsed so it cannot consume the synchronized video review area. The Intro workspace keeps the history expanded as before. Expanding the Subtitle history mounts the same shared `OutputLibrary`, so playback, reveal and copy actions remain canonical.
 
 ## v0.42.0 incremental fix
 
