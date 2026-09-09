@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   buildConcatFilterGraph,
+  buildWatermarkFilterChain,
   ConcatRenderService,
   runFfmpegWithProgress,
   validateMainStartCardOptions,
@@ -175,6 +176,7 @@ describe("concat preview integration", () => {
     expect(outputInfo.videoCodec).toBe("h264");
     expect(outputInfo.audioCodec).toBe("aac");
     expect(result.expectedDurationMs).toBeGreaterThan(2_500);
+    expect(result.watermarkApplied).toBe(true);
     expect(Math.abs(outputInfo.durationMs! - result.expectedDurationMs)).toBeLessThanOrEqual(120);
     expect(progressPhases).toContain("PREPARING");
     expect(progressPhases).toContain("RENDERING");

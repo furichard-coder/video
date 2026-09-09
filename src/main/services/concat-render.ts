@@ -17,6 +17,7 @@ import type {
   ZoomSegment,
   ZoomEnhancementPreset,
   MainStartCardOptions,
+  WatermarkSettings,
 } from "../../shared/domain";
 import { DEFAULT_MAIN_START_CARD_OPTIONS, DEFAULT_ZOOM_ENHANCEMENT_PRESET } from "../../shared/domain";
 import { colorPreset } from "../../shared/color-presets";
@@ -30,6 +31,7 @@ import { imageDurationMs, mainRenderSelections } from "../../shared/editing-rule
 import { introSegmentsForOutput } from "../../shared/intro-duration";
 import { buildSubtitleAss, escapeFfmpegFilterPath, validateSubtitleBurnInOptions, writeSubtitleAss } from "./subtitle-burn-in";
 import type { SubtitleTranslationService } from "./subtitle-translation";
+import { normalizeWatermarkSettings, watermarkAppliesToPurpose, watermarkRenderedText } from "../../shared/watermark";
 
 export interface ConcatInput {
   sourcePath: string;
@@ -60,6 +62,13 @@ export interface ConcatFilterPlan {
   expectedDurationMs: number;
   width: number;
   height: number;
+}
+
+export interface WatermarkRenderResources {
+  chineseTextFilePath: string;
+  englishTextFilePath: string;
+  chineseFontFilePath: string;
+  englishFontFilePath: string;
 }
 
 const RESOLUTIONS: Record<PreviewResolution, { width: number; height: number }> = {
@@ -97,8 +106,47 @@ function resolveMainStartCardFont(): string {
   return selected;
 }
 
+function resolveWatermarkFonts(): { chinese: string; english: string } {
+  const windowsRoot = process.env.WINDIR || "C:\\Windows";
+  const chinese = ["msjhbd.ttc", "msjh.ttc", "msyhbd.ttc", "msyh.ttc", "arial.ttf"].map((name) => path.join(windowsRoot, "Fonts", name)).find(existsSync);
+  const english = ["arial.ttf", "segoeuib.ttf", "msjhbd.ttc", "msjh.ttc"].map((name) => path.join(windowsRoot, "Fonts", name)).find(existsSync);
+  if (!chinese || !english) throw new Error("找不到可用的 Windows 浮水印字型，已阻擋輸出。");
+  return { chinese, english };
+}
+
 function ffmpegNumber(value: number): string {
   return Number(value.toFixed(6)).toString();
+}
+
+function watermarkAlphaExpression(settings: WatermarkSettings): string {
+  const phase = `mod(t-${ffmpegNumber(settings.startSeconds)},${ffmpegNumber(settings.intervalSeconds)})`;
+  const visible = ffmpegNumber(settings.visibleDurationSeconds);
+  const fadeIn = settings.fadeInSeconds;
+  const fadeOut = settings.fadeOutSeconds;
+  let envelope = "1";
+  if (fadeIn > 0 && fadeOut > 0) envelope = `if(lt(${phase},${ffmpegNumber(fadeIn)}),${phase}/${ffmpegNumber(fadeIn)},if(lt(${phase},${ffmpegNumber(settings.visibleDurationSeconds - fadeOut)}),1,(${visible}-${phase})/${ffmpegNumber(fadeOut)}))`;
+  else if (fadeIn > 0) envelope = `if(lt(${phase},${ffmpegNumber(fadeIn)}),${phase}/${ffmpegNumber(fadeIn)},1)`;
+  else if (fadeOut > 0) envelope = `if(lt(${phase},${ffmpegNumber(settings.visibleDurationSeconds - fadeOut)}),1,(${visible}-${phase})/${ffmpegNumber(fadeOut)})`;
+  return `${ffmpegNumber(settings.textOpacityPercent / 100)}*${envelope}`;
+}
+
+export function buildWatermarkFilterChain(settings: WatermarkSettings, width: number, height: number, resources: WatermarkRenderResources): string {
+  if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) throw new Error("浮水印輸出解析度無效。");
+  const normalized = normalizeWatermarkSettings(settings);
+  const scale = height / 1080;
+  const margin = Math.max(6, Math.round(normalized.safeMargin1080p * scale));
+  const boxBorder = Math.max(4, Math.round(18 * scale));
+  const shadow = Math.max(1, Math.round(3 * scale));
+  const phase = `mod(t-${ffmpegNumber(normalized.startSeconds)},${ffmpegNumber(normalized.intervalSeconds)})`;
+  const enable = `gte(t,${ffmpegNumber(normalized.startSeconds)})*lt(${phase},${ffmpegNumber(normalized.visibleDurationSeconds)})`;
+  const alpha = watermarkAlphaExpression(normalized);
+  const draw = (item: WatermarkSettings["chinese"], textFilePath: string, fontFilePath: string, shadowOpacity: number) => {
+    const x = item.position === "LOWER_LEFT" ? margin.toString() : `w-text_w-${margin}`;
+    const fontSize = Math.max(10, Math.round(item.fontSize1080p * scale));
+    const lineSpacing = item.layout === "STACKED_TWO_LINES" ? Math.round(-15 * scale) : 0;
+    return `drawtext=fontfile='${escapeFfmpegFilterPath(fontFilePath)}':textfile='${escapeFfmpegFilterPath(textFilePath)}':reload=0:fontcolor=white:fontsize=${fontSize}:line_spacing=${lineSpacing}:x=${x}:y=h-text_h-${margin}:box=1:boxcolor=black@${ffmpegNumber(normalized.boxOpacityPercent / 100)}:boxborderw=${boxBorder}:shadowcolor=black@${ffmpegNumber(shadowOpacity)}:shadowx=${shadow}:shadowy=${shadow}:alpha='${alpha}':enable='${enable}'`;
+  };
+  return `${draw(normalized.chinese, resources.chineseTextFilePath, resources.chineseFontFilePath, 0.65)},${draw(normalized.english, resources.englishTextFilePath, resources.englishFontFilePath, 0.55)}`;
 }
 
 function samePath(left: string, right: string): boolean {
@@ -459,6 +507,12 @@ export class ConcatRenderService {
       line1: path.join(parsed.dir, `.${parsed.name}.${renderId}.main-start-line1.txt`),
       line2: path.join(parsed.dir, `.${parsed.name}.${renderId}.main-start-line2.txt`),
     } : undefined;
+    const watermarkSettings = normalizeWatermarkSettings(project.watermarkSettings);
+    const watermarkActive = watermarkAppliesToPurpose(watermarkSettings, purpose);
+    const watermarkTextPaths = watermarkActive ? {
+      chinese: path.join(parsed.dir, `.${parsed.name}.${renderId}.watermark-zh.txt`),
+      english: path.join(parsed.dir, `.${parsed.name}.${renderId}.watermark-en.txt`),
+    } : undefined;
 
     onProgress({ phase: "PREPARING", percent: 0, outTimeMs: 0, expectedDurationMs: 0 });
     const assetsById = new Map<string, SourceAsset>();
@@ -594,6 +648,17 @@ export class ConcatRenderService {
       subtitleBurnedLanguages = ass.languages;
       subtitleTranslationProviders = translated.providers;
     }
+    if (watermarkActive && watermarkTextPaths) {
+      const fonts = resolveWatermarkFonts();
+      const watermarkFilter = buildWatermarkFilterChain(watermarkSettings, plan.width, plan.height, {
+        chineseTextFilePath: watermarkTextPaths.chinese,
+        englishTextFilePath: watermarkTextPaths.english,
+        chineseFontFilePath: fonts.chinese,
+        englishFontFilePath: fonts.english,
+      });
+      filterGraph = `${filterGraph};[${videoOutputLabel}]${watermarkFilter}[vwatermark]`;
+      videoOutputLabel = "vwatermark";
+    }
     const args = [
       "-hide_banner",
       "-loglevel",
@@ -648,6 +713,12 @@ export class ConcatRenderService {
           writeFile(mainStartTextPaths.line2, mainStartCard.line2, { encoding: "utf8", flag: "wx" }),
         ]);
       }
+      if (watermarkTextPaths) {
+        await Promise.all([
+          writeFile(watermarkTextPaths.chinese, watermarkRenderedText(watermarkSettings.chinese), { encoding: "utf8", flag: "wx" }),
+          writeFile(watermarkTextPaths.english, watermarkRenderedText(watermarkSettings.english), { encoding: "utf8", flag: "wx" }),
+        ]);
+      }
       await writeFile(filterScriptPath, filterGraph, { encoding: "utf8", flag: "wx" });
       const runResult = await this.ffmpegRunner(this.ffmpegExecutable, args, plan.expectedDurationMs, signal, onProgress);
       const cancelled = Boolean(runResult && runResult.cancelled);
@@ -688,6 +759,7 @@ export class ConcatRenderService {
         subtitleTranslationProviders,
         colorPresetId: project.colorSettings.introPresetId,
         colorAppliedToMain: purpose === "CONCAT" && project.colorSettings.applyToMain,
+        watermarkApplied: watermarkActive,
         mainStartCardDurationSeconds: mainStartCard?.durationSeconds,
         shortsPortrait: purpose === "SHORTS" ? true : undefined,
         aspectRatio: purpose === "SHORTS" ? "PORTRAIT_9_16" : "LANDSCAPE_16_9",
@@ -705,6 +777,7 @@ export class ConcatRenderService {
     } finally {
       await rm(filterScriptPath, { force: true });
       if (mainStartTextPaths) await Promise.all([rm(mainStartTextPaths.line1, { force: true }), rm(mainStartTextPaths.line2, { force: true })]);
+      if (watermarkTextPaths) await Promise.all([rm(watermarkTextPaths.chinese, { force: true }), rm(watermarkTextPaths.english, { force: true })]);
       await subtitleCleanup?.();
     }
   }

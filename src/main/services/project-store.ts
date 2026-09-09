@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { DEFAULT_BGM_VOLUME_PERCENT, DEFAULT_IMAGE_DURATION_MS, DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS, DEFAULT_INTRO_TARGET_DURATION_MS, DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT, DEFAULT_ZOOM_ENHANCEMENT_PRESET, DUNES_SHUTTER_EFFECT_ID, DUNES_SHUTTER_EFFECT_SHA256, INTRO_MAX_SEGMENT_MS, INTRO_MAX_SEGMENTS, INTRO_MIN_SEGMENT_MS, MANIFEST_SCHEMA_VERSION, MAX_IMAGE_DURATION_MS, MAX_MIX_VOLUME_PERCENT, MIN_IMAGE_DURATION_MS, PREVIEWER_VERSION, type AiPublishAssets, type AiStoryContext, type BgmTrack, type ImageDurationUpdateResult, type IntroAnalysisResult, type IntroSuggestion, type MainExclusionRange, type MainExclusionRangeUpdateResult, type MediaInsertion, type MusicSuggestionResult, type PlacementRequest, type PreviewRange, type PreviewRangeUpdateResult, type ProjectChangeSection, type ProjectChangedEvent, type ProjectColorSettings, type ProjectFileResult, type ProjectFileState, type ProjectHistoryState, type ProjectManifest, type RemovedIntroSegment, type RemovedMainAsset, type SortMode, type SourceAsset, type SubtitleCue, type SubtitleTimelineScope, type VolumeSegment, type ZoomEnhancementPreset, type ZoomSegment, type ZoomSegmentUpdateResult } from "../../shared/domain";
+import { DEFAULT_BGM_VOLUME_PERCENT, DEFAULT_IMAGE_DURATION_MS, DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS, DEFAULT_INTRO_TARGET_DURATION_MS, DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT, DEFAULT_ZOOM_ENHANCEMENT_PRESET, DUNES_SHUTTER_EFFECT_ID, DUNES_SHUTTER_EFFECT_SHA256, INTRO_MAX_SEGMENT_MS, INTRO_MAX_SEGMENTS, INTRO_MIN_SEGMENT_MS, MANIFEST_SCHEMA_VERSION, MAX_IMAGE_DURATION_MS, MAX_MIX_VOLUME_PERCENT, MIN_IMAGE_DURATION_MS, PREVIEWER_VERSION, type AiPublishAssets, type AiStoryContext, type BgmTrack, type ImageDurationUpdateResult, type IntroAnalysisResult, type IntroSuggestion, type MainExclusionRange, type MainExclusionRangeUpdateResult, type MediaInsertion, type MusicSuggestionResult, type PlacementRequest, type PreviewRange, type PreviewRangeUpdateResult, type ProjectChangeSection, type ProjectChangedEvent, type ProjectColorSettings, type ProjectFileResult, type ProjectFileState, type ProjectHistoryState, type ProjectManifest, type RemovedIntroSegment, type RemovedMainAsset, type SortMode, type SourceAsset, type SubtitleCue, type SubtitleTimelineScope, type VolumeSegment, type WatermarkSettings, type ZoomEnhancementPreset, type ZoomSegment, type ZoomSegmentUpdateResult } from "../../shared/domain";
 import { clipMainExclusionRanges, clipVolumeSegments, clipZoomSegments, imageDurationMs, mainRenderSelections, normalizeMainExclusionRanges, validateBgmTrack, validateImageDurationMs, validateMediaInsertion, validatePercent, validateSubtitleCues, validateVolumeSegments, validateZoomSegments } from "../../shared/editing-rules";
 import { sortAssets } from "../../shared/sorting";
 import { DEFAULT_PROJECT_COLOR_SETTINGS, normalizeProjectColorSettings } from "../../shared/color-presets";
 import { balanceIntroSegments, normalizeIntroSegmentMaxDuration } from "../../shared/intro-duration";
 import { buildTimelinePlan } from "../../shared/timeline-plan";
 import { isValidYoutubeChapterSet, youtubeTextLength } from "../../shared/publish-rules";
+import { DEFAULT_WATERMARK_SETTINGS, normalizeWatermarkSettings } from "../../shared/watermark";
 import { finalizePartialOutput } from "./atomic-output";
 
 function clone<T>(value: T): T { return structuredClone(value); }
@@ -65,7 +66,7 @@ function createProject(): ProjectManifest {
     schemaVersion: MANIFEST_SCHEMA_VERSION, id: randomUUID(), name: "我的素材專案",
     sourcePolicy: "READ_ONLY", previewPolicy: "DERIVED_CACHE_ONLY_NOT_MASTER", previewerVersion: PREVIEWER_VERSION,
     sortMode: "SMART_SEQUENCE", createdAt: now, updatedAt: now, sources: [], timelineOrder: [], pendingAssetIds: [],
-    excludedMainAssetIds: [], recentMainRemovals: [], introSegments: [], introTargetDurationMs: DEFAULT_INTRO_TARGET_DURATION_MS, introSegmentMaxDurationMs: DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS, colorSettings: DEFAULT_PROJECT_COLOR_SETTINGS, introExcludedSegmentIds: [], recentIntroRemovals: [],
+    excludedMainAssetIds: [], recentMainRemovals: [], introSegments: [], introTargetDurationMs: DEFAULT_INTRO_TARGET_DURATION_MS, introSegmentMaxDurationMs: DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS, colorSettings: DEFAULT_PROJECT_COLOR_SETTINGS, watermarkSettings: structuredClone(DEFAULT_WATERMARK_SETTINGS), introExcludedSegmentIds: [], recentIntroRemovals: [],
     placementDecisions: [], mediaInsertions: [], photoSoundEffect: defaultPhotoSoundEffect(), bgmTracks: [], sourceAudioVolumePercent: DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT, aiStoryContext: defaultAiStoryContext(), subtitleCues: [], timelineRevision: 0, subtitleTimelineRevision: 0, mainTimelineRevision: 0, introTimelineRevision: 0, mainSubtitleReviewRevision: 0, introSubtitleReviewRevision: 0,
     audioMixPolicy: "ORIGINAL_PLUS_BGM_LIMITED_0_95",
   };
@@ -74,7 +75,7 @@ function createProject(): ProjectManifest {
 function looksLikeProject(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
-  return (candidate.schemaVersion === 1 || candidate.schemaVersion === 2 || candidate.schemaVersion === 3 || candidate.schemaVersion === 4 || candidate.schemaVersion === 5 || candidate.schemaVersion === 6 || candidate.schemaVersion === 7 || candidate.schemaVersion === 8 || candidate.schemaVersion === 9 || candidate.schemaVersion === 10 || candidate.schemaVersion === 11 || candidate.schemaVersion === 12 || candidate.schemaVersion === 13 || candidate.schemaVersion === 14 || candidate.schemaVersion === 15) && candidate.sourcePolicy === "READ_ONLY" && candidate.previewPolicy === "DERIVED_CACHE_ONLY_NOT_MASTER" && Array.isArray(candidate.sources);
+  return (candidate.schemaVersion === 1 || candidate.schemaVersion === 2 || candidate.schemaVersion === 3 || candidate.schemaVersion === 4 || candidate.schemaVersion === 5 || candidate.schemaVersion === 6 || candidate.schemaVersion === 7 || candidate.schemaVersion === 8 || candidate.schemaVersion === 9 || candidate.schemaVersion === 10 || candidate.schemaVersion === 11 || candidate.schemaVersion === 12 || candidate.schemaVersion === 13 || candidate.schemaVersion === 14 || candidate.schemaVersion === 15 || candidate.schemaVersion === 16) && candidate.sourcePolicy === "READ_ONLY" && candidate.previewPolicy === "DERIVED_CACHE_ONLY_NOT_MASTER" && Array.isArray(candidate.sources);
 }
 
 function normalizeZoomEnhancementPreset(value: unknown): ZoomEnhancementPreset {
@@ -168,7 +169,7 @@ function migrateProject(raw: Record<string, unknown>): ProjectManifest {
   return {
     ...(raw as unknown as ProjectManifest), schemaVersion: MANIFEST_SCHEMA_VERSION, previewerVersion: PREVIEWER_VERSION, sources,
     timelineOrder: order, pendingAssetIds: pending,
-    excludedMainAssetIds, recentMainRemovals, introSegments, introTargetDurationMs: (() => { try { return normalizeIntroTargetDuration(raw.introTargetDurationMs ?? DEFAULT_INTRO_TARGET_DURATION_MS); } catch { return DEFAULT_INTRO_TARGET_DURATION_MS; } })(), introSegmentMaxDurationMs, colorSettings: normalizeProjectColorSettings(raw.colorSettings), introExcludedSegmentIds, recentIntroRemovals,
+    excludedMainAssetIds, recentMainRemovals, introSegments, introTargetDurationMs: (() => { try { return normalizeIntroTargetDuration(raw.introTargetDurationMs ?? DEFAULT_INTRO_TARGET_DURATION_MS); } catch { return DEFAULT_INTRO_TARGET_DURATION_MS; } })(), introSegmentMaxDurationMs, colorSettings: normalizeProjectColorSettings(raw.colorSettings), watermarkSettings: normalizeWatermarkSettings(raw.watermarkSettings), introExcludedSegmentIds, recentIntroRemovals,
     placementDecisions: Array.isArray(raw.placementDecisions) ? raw.placementDecisions as ProjectManifest["placementDecisions"] : [],
     mediaInsertions,
     photoSoundEffect: defaultPhotoSoundEffect(),
@@ -210,7 +211,7 @@ export class ProjectStore {
       if (!looksLikeProject(parsed)) throw new Error("manifest schema 不相容");
       const migrated = parsed.schemaVersion !== MANIFEST_SCHEMA_VERSION || parsed.previewerVersion !== PREVIEWER_VERSION ||
         !Array.isArray(parsed.excludedMainAssetIds) || !Array.isArray(parsed.recentMainRemovals) ||
-        !Array.isArray(parsed.introSegments) || !Number.isFinite(parsed.introTargetDurationMs) || !Number.isFinite(parsed.introSegmentMaxDurationMs) || !parsed.colorSettings || !Array.isArray(parsed.introExcludedSegmentIds) || !Array.isArray(parsed.recentIntroRemovals) ||
+        !Array.isArray(parsed.introSegments) || !Number.isFinite(parsed.introTargetDurationMs) || !Number.isFinite(parsed.introSegmentMaxDurationMs) || !parsed.colorSettings || !parsed.watermarkSettings || !Array.isArray(parsed.introExcludedSegmentIds) || !Array.isArray(parsed.recentIntroRemovals) ||
         !Array.isArray(parsed.mediaInsertions) || !parsed.photoSoundEffect || !parsed.aiStoryContext || !Number.isFinite(parsed.sourceAudioVolumePercent) ||
         (parsed.sources as Partial<SourceAsset>[]).some((asset) => !Array.isArray(asset.zoomSegments) || asset.zoomSegments.some((segment) => !segment.enhancementPreset));
       this.current = migrateProject(parsed);
@@ -387,6 +388,12 @@ export class ProjectStore {
     return this.mutate((project) => {
       project.colorSettings = normalizeProjectColorSettings(settings);
       this.bumpTimeline(project, project.colorSettings.applyToMain ? "BOTH" : "INTRO");
+    });
+  }
+
+  async setWatermarkSettings(settings: WatermarkSettings): Promise<ProjectManifest> {
+    return this.mutate((project) => {
+      project.watermarkSettings = normalizeWatermarkSettings(settings);
     });
   }
 
@@ -771,7 +778,7 @@ export class ProjectStore {
       ["BGM", ["bgmTracks", "sourceAudioVolumePercent", "musicSuggestionResult"]],
       ["SUBTITLES", ["subtitleCues", "subtitleTimelineRevision", "mainSubtitleReviewRevision", "introSubtitleReviewRevision"]],
       ["AI_CONTEXT", ["aiStoryContext", "introAnalysisResult", "aiPublishAssets"]],
-      ["SETTINGS", ["colorSettings", "audioMixPolicy"]],
+      ["SETTINGS", ["colorSettings", "watermarkSettings", "audioMixPolicy"]],
       ["OUTPUTS", []],
     ];
     const sections = forcedSections ?? sectionKeys.filter(([, keys]) => keys.some((key) => JSON.stringify((previous as unknown as Record<string, unknown>)[key]) !== JSON.stringify((next as unknown as Record<string, unknown>)[key]))).map(([section]) => section);

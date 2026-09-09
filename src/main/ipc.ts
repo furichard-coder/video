@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell as electronShell } from "electron";
-import type { AiAccountSaveInput, AiPublishGenerationOptions, AiStoryContext, AiSubtitleGenerationOptions, BackgroundJobKind, BackgroundJobSnapshot, BackgroundJobStatus, BgmTrack, BrowserUploadPlatform, ConcatRenderRequest, ExternalMediaTarget, ExternalPlayerId, ExternalPlayerSettingsUpdate, IntroSuggestion, MainExclusionRange, MusicSuggestionRequest, PlacementRequest, PreviewVariant, ProjectColorSettings, SortMode, SubtitleCue, SubtitleTimelineScope, ThumbnailRenderRequest, TranslationSettingsUpdate, UserPreferencesUpdate, VoiceInputRequest, VolumeSegment, YoutubeSettingsUpdate, YoutubeUploadRequest, ZoomSegment } from "../shared/domain";
+import type { AiAccountSaveInput, AiPublishGenerationOptions, AiStoryContext, AiSubtitleGenerationOptions, BackgroundJobKind, BackgroundJobSnapshot, BackgroundJobStatus, BgmTrack, BrowserUploadPlatform, ConcatRenderRequest, ExternalMediaTarget, ExternalPlayerId, ExternalPlayerSettingsUpdate, IntroSuggestion, MainExclusionRange, MusicSuggestionRequest, PlacementRequest, PreviewVariant, ProjectColorSettings, SortMode, SubtitleCue, SubtitleTimelineScope, ThumbnailRenderRequest, TranslationSettingsUpdate, UserPreferencesUpdate, VoiceInputRequest, VolumeSegment, WatermarkSettings, YoutubeSettingsUpdate, YoutubeUploadRequest, ZoomSegment } from "../shared/domain";
 import { ConcatRenderService } from "./services/concat-render";
 import { IntroAnalyzer } from "./services/intro-analyzer";
 import { PreviewCache } from "./services/preview-cache";
@@ -193,6 +193,7 @@ export function registerIpc(
   ipcMain.handle("intro:set-target-duration", (_event, durationMs: number) => store.setIntroTargetDuration(durationMs));
   ipcMain.handle("intro:set-segment-max-duration", (_event, durationMs: number) => store.setIntroSegmentMaxDuration(durationMs));
   ipcMain.handle("project:set-color-settings", (_event, settings: ProjectColorSettings) => store.setProjectColorSettings(settings));
+  ipcMain.handle("project:set-watermark-settings", (_event, settings: WatermarkSettings) => store.setWatermarkSettings(settings));
   ipcMain.handle("intro:remove-segment", (_event, segmentId: string) => store.removeIntroSegment(segmentId));
   ipcMain.handle("intro:restore-segment", (_event, segmentId: string) => store.restoreIntroSegment(segmentId));
   ipcMain.handle("source:set-preview-range", (_event, assetId: string, inMs: number, outMs: number) =>

@@ -1,4 +1,4 @@
-export const MANIFEST_SCHEMA_VERSION = 15 as const;
+export const MANIFEST_SCHEMA_VERSION = 16 as const;
 export const PREVIEWER_VERSION = "preview-v3" as const;
 export const CLIP_PREVIEWER_VERSION = "clip-preview-v1" as const;
 export const DEFAULT_IMAGE_DURATION_MS = 5_000 as const;
@@ -59,6 +59,8 @@ export type SubtitleRenderLanguage = "zh-TW" | "zh-CN" | "en" | "ja" | "ko";
 export type SubtitleRenderPosition = "TOP" | "MIDDLE" | "BOTTOM";
 export type SubtitleTranslationProvider = "ORIGINAL" | "OPENAI" | "GOOGLE_CLOUD";
 export type ColorPresetId = "NATURAL" | "WARM_GOLDEN" | "COOL_CLEAR" | "VIVID_TRAVEL" | "WARM_VIVID";
+export type WatermarkCorner = "LOWER_LEFT" | "LOWER_RIGHT";
+export type WatermarkTextLayout = "STACKED_TWO_LINES" | "SINGLE_LINE";
 export type ZoomEnhancementPreset = "OFF" | "BALANCED" | "DETAIL" | "DENOISE";
 export type MusicSuggestionPlatform = "YOUTUBE" | "TIKTOK";
 export type MusicSuggestionProvider = "OPENAI_API" | "CODEX_CHATGPT";
@@ -499,6 +501,32 @@ export interface ProjectColorSettings {
   applyToMain: boolean;
 }
 
+export interface WatermarkTextSettings {
+  text: string;
+  position: WatermarkCorner;
+  layout: WatermarkTextLayout;
+  fontSize1080p: number;
+}
+
+export interface WatermarkSettings {
+  enabled: boolean;
+  chinese: WatermarkTextSettings;
+  english: WatermarkTextSettings;
+  /** Seconds from output start to the first appearance. */
+  startSeconds: number;
+  /** Seconds from one appearance start to the next appearance start. */
+  intervalSeconds: number;
+  visibleDurationSeconds: number;
+  fadeInSeconds: number;
+  fadeOutSeconds: number;
+  textOpacityPercent: number;
+  boxOpacityPercent: number;
+  safeMargin1080p: number;
+  applyToMain: boolean;
+  applyToIntro: boolean;
+  applyToShorts: boolean;
+}
+
 export interface AiSubtitleGenerationOptions {
   includeSpeechTranscription: boolean;
   scopes?: SubtitleTimelineScope[];
@@ -535,6 +563,7 @@ export interface ProjectManifest {
   introTargetDurationMs: number;
   introSegmentMaxDurationMs: number;
   colorSettings: ProjectColorSettings;
+  watermarkSettings?: WatermarkSettings;
   introExcludedSegmentIds: string[];
   recentIntroRemovals: RemovedIntroSegment[];
   placementDecisions: PlacementDecision[];
@@ -689,6 +718,7 @@ export interface ConcatRenderResult {
   subtitleTranslationProviders?: SubtitleTranslationProvider[];
   colorPresetId?: ColorPresetId;
   colorAppliedToMain?: boolean;
+  watermarkApplied?: boolean;
   mainStartCardDurationSeconds?: number;
   shortsPortrait?: boolean;
   aspectRatio?: "PORTRAIT_9_16" | "LANDSCAPE_16_9";
@@ -1048,6 +1078,7 @@ export interface AppApi {
   buildSubtitleIntroPreview(includeBgm?: boolean): Promise<SubtitlePreviewResult>;
   cancelSubtitleIntroPreview(): Promise<void>;
   setProjectColorSettings(settings: ProjectColorSettings): Promise<ProjectManifest>;
+  setWatermarkSettings(settings: WatermarkSettings): Promise<ProjectManifest>;
   cancelAiSubtitles(): Promise<void>;
   getExternalPlayerSettings(): Promise<ExternalPlayerSettingsSnapshot>;
   updateExternalPlayerSettings(update: ExternalPlayerSettingsUpdate): Promise<ExternalPlayerSettingsSnapshot>;

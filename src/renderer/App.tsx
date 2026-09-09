@@ -20,6 +20,7 @@ import { YoutubeSettingsModal } from "./components/YoutubeSettingsModal";
 import { OutputHistoryModal } from "./components/OutputHistoryModal";
 import { AiPublishStudio } from "./components/AiPublishStudio";
 import { MaterialEditorModal, type MaterialEditorSection } from "./components/MaterialEditorModal";
+import { WatermarkSettingsModal } from "./components/WatermarkSettingsModal";
 import { formatBytes } from "./format";
 import { applyUiTextSize, applyUiZoom, readUiTextSize, readUiZoom, stepUiZoom, type UiTextSize, type UiZoomPercent } from "./ui-preferences";
 
@@ -29,7 +30,7 @@ function projectScopeNeedsReview(project: ProjectManifest, scope: "MAIN" | "INTR
   return timelineRevision !== reviewRevision;
 }
 
-type MainWorkspace = "SOURCES" | "INTRO" | "BGM" | "SUBTITLES" | "OUTPUTS" | "PUBLISH" | "AI_PUBLISH";
+type MainWorkspace = "SOURCES" | "INTRO" | "BGM" | "SUBTITLES" | "WATERMARK" | "OUTPUTS" | "PUBLISH" | "AI_PUBLISH";
 
 const SORT_LABELS: Record<SortMode, string> = {
   MANUAL_ORDER: "自訂順序",
@@ -82,6 +83,7 @@ export function App() {
   const [showYoutubeSettings, setShowYoutubeSettings] = useState(false);
   const [showOutputHistory, setShowOutputHistory] = useState(false);
   const [showAiPublish, setShowAiPublish] = useState(false);
+  const [showWatermarkSettings, setShowWatermarkSettings] = useState(false);
   const [uiTextSize, setUiTextSize] = useState<UiTextSize>(() => readUiTextSize());
   const [uiZoom, setUiZoom] = useState<UiZoomPercent>(() => readUiZoom());
   const [externalAsset, setExternalAsset] = useState<SourceAsset>();
@@ -136,7 +138,7 @@ export function App() {
     window.sourceApp.onProjectChanged((change) => {
       setProject((current) => {
         if (!current || current.id !== change.projectId) {
-          setSelectedAsset(undefined); setShowPlaylist(false); setShowConcatRender(false); setShowIntroStudio(false); setShowBgm(false); setShowSubtitles(false);
+          setSelectedAsset(undefined); setShowPlaylist(false); setShowConcatRender(false); setShowIntroStudio(false); setShowBgm(false); setShowSubtitles(false); setShowWatermarkSettings(false);
         }
         return structuredClone(change.project);
       });
@@ -232,12 +234,14 @@ export function App() {
     setMediaInsertionVideoState(undefined); setShowAiSettings(false); setShowYoutubeSettings(false);
     setShowOutputHistory(false);
     setShowAiPublish(false);
+    setShowWatermarkSettings(false);
   };
   const openWorkspace = (workspace: MainWorkspace) => {
     closeProjectViews(); setActiveWorkspace(workspace);
     if (workspace === "INTRO") setShowIntroStudio(true);
     else if (workspace === "BGM") setShowBgm(true);
     else if (workspace === "SUBTITLES") setShowSubtitles(true);
+    else if (workspace === "WATERMARK") setShowWatermarkSettings(true);
     else if (workspace === "OUTPUTS") setShowOutputHistory(true);
     else if (workspace === "PUBLISH") setShowYoutubeSettings(true);
     else if (workspace === "AI_PUBLISH") setShowAiPublish(true);
@@ -481,7 +485,7 @@ export function App() {
       {error && <div className="notice error" role="alert">{error}</div>}
 
       <section className="library-section">
-        <nav className="workspace-nav" aria-label="主要工作區"><button className={activeWorkspace === "SOURCES" ? "active" : ""} onClick={() => openWorkspace("SOURCES")}>01 素材與順序</button><button className={activeWorkspace === "INTRO" ? "active" : ""} onClick={() => openWorkspace("INTRO")}>02 片頭</button><button className={activeWorkspace === "BGM" ? "active" : ""} onClick={() => openWorkspace("BGM")}>03 配樂</button><button className={activeWorkspace === "SUBTITLES" ? "active" : ""} onClick={() => openWorkspace("SUBTITLES")}>04 字幕</button><button className={activeWorkspace === "OUTPUTS" ? "active" : ""} onClick={() => openWorkspace("OUTPUTS")}>05 預覽輸出／成品庫</button><button className={activeWorkspace === "PUBLISH" ? "active" : ""} onClick={() => openWorkspace("PUBLISH")}>06 發布設定</button><button className={activeWorkspace === "AI_PUBLISH" ? "active" : ""} onClick={() => openWorkspace("AI_PUBLISH")}>07 AI 發布素材</button></nav>
+        <nav className="workspace-nav" aria-label="主要工作區"><button className={activeWorkspace === "SOURCES" ? "active" : ""} onClick={() => openWorkspace("SOURCES")}>01 素材與順序</button><button className={activeWorkspace === "INTRO" ? "active" : ""} onClick={() => openWorkspace("INTRO")}>02 片頭</button><button className={activeWorkspace === "BGM" ? "active" : ""} onClick={() => openWorkspace("BGM")}>03 配樂</button><button className={activeWorkspace === "SUBTITLES" ? "active" : ""} onClick={() => openWorkspace("SUBTITLES")}>04 字幕</button><button className={activeWorkspace === "WATERMARK" ? "active" : ""} onClick={() => openWorkspace("WATERMARK")}>05 浮水印</button><button className={activeWorkspace === "OUTPUTS" ? "active" : ""} onClick={() => openWorkspace("OUTPUTS")}>06 預覽輸出／成品庫</button><button className={activeWorkspace === "PUBLISH" ? "active" : ""} onClick={() => openWorkspace("PUBLISH")}>07 發布設定</button><button className={activeWorkspace === "AI_PUBLISH" ? "active" : ""} onClick={() => openWorkspace("AI_PUBLISH")}>08 AI 發布素材</button></nav>
         <div className="library-toolbar">
           <div><span className="eyebrow">PROJECT SOURCE MANIFEST</span><h2>素材清單</h2></div>
           <div className="toolbar-actions">
@@ -520,6 +524,7 @@ export function App() {
       {showYoutubeSettings && <YoutubeSettingsModal onClose={() => setShowYoutubeSettings(false)} />}
       {showOutputHistory && <OutputHistoryModal onOpenYoutubeSettings={() => setShowYoutubeSettings(true)} onClose={() => setShowOutputHistory(false)} />}
       {showAiPublish && <AiPublishStudio project={project} onProjectUpdated={setProject} onClose={() => setShowAiPublish(false)} />}
+      {showWatermarkSettings && <WatermarkSettingsModal project={project} onProjectUpdated={setProject} onClose={() => setShowWatermarkSettings(false)} />}
       {showAiSettings && <AiSettingsModal project={project} onProjectUpdated={setProject} onClose={() => setShowAiSettings(false)} />}
       {externalAsset && <ExternalOpenModal asset={externalAsset} onClose={() => setExternalAsset(undefined)} />}
       {volumeAsset && <VolumeSegmentsModal asset={project.sources.find((asset) => asset.id === volumeAsset.id) ?? volumeAsset} defaultVolumePercent={project.sourceAudioVolumePercent ?? 100} onClose={() => setVolumeAsset(undefined)} onAssetUpdated={updateAsset} />}

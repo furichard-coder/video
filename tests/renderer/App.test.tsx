@@ -136,6 +136,7 @@ function mockApi(initialProject: ProjectManifest = project): AppApi {
     setIntroTargetDuration: vi.fn(async (introTargetDurationMs) => { currentIntroTargetDurationMs = introTargetDurationMs; return { ...structuredClone(initialProject), introSegments: structuredClone(currentIntroSegments), introTargetDurationMs }; }),
     setIntroSegmentMaxDuration: vi.fn(async (introSegmentMaxDurationMs) => ({ ...structuredClone(initialProject), introSegments: structuredClone(currentIntroSegments), introSegmentMaxDurationMs })),
     setProjectColorSettings: vi.fn(async (colorSettings) => ({ ...structuredClone(initialProject), colorSettings })),
+    setWatermarkSettings: vi.fn(async (watermarkSettings) => ({ ...structuredClone(initialProject), watermarkSettings })),
     removeIntroSegment: vi.fn(async (segmentId) => ({ ...structuredClone(initialProject), introSegments: initialProject.introSegments.filter((item) => item.id !== segmentId) })),
     restoreIntroSegment: vi.fn(async () => structuredClone(initialProject)),
     setPreviewRange: vi.fn(async (_assetId, range) => ({ asset: { ...structuredClone(video), previewRange: range }, adjustedVolumeSegmentCount: 0, adjustedMainExclusionRangeCount: 0, adjustedZoomSegmentCount: 0, project: { ...structuredClone(initialProject), sources: [{ ...structuredClone(video), previewRange: range }] } })),
@@ -1578,5 +1579,52 @@ describe("App source workflow", () => {
     expect(within(dialog).getByRole("button", { name: "繼續剪輯" })).toHaveFocus();
     fireEvent.click(within(dialog).getByRole("button", { name: "確定關閉" }));
     expect(api.confirmAppClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows generated AI titles and composed Intro-first thumbnail results immediately", async () => {
+    const generatedAssets: AiPublishAssets = {
+      schemaVersion: 1,
+      topicSnapshot: { topic: "草漯沙丘", locations: ["桃園"], storySummary: "片頭先看到海岸沙丘", audiencePromise: "理解地景特色", capturedAt: "2026-09-10T00:00:00.000Z" },
+      titles: [1, 2, 3].map((index) => ({ id: `ai-title-${index}`, text: `草漯沙丘片頭故事 ${index} #Taiwan`, charCount: 24, reason: "依片頭畫面與影片內容" })),
+      description: "草漯沙丘的地景旅程。", englishSummary: "A journey through Caota Sand Dunes.", hashtags: ["#草漯沙丘", "#Taiwan"],
+      thumbnails: [1, 2, 3].map((index) => ({ id: `thumbnail-${index}`, assetId: video.id, sourceTimeMs: index * 1_000, sourceFileName: video.fileName, reason: "已選片頭畫面", layout: "LEFT_TEXT" as const, colorNote: "自然", previewUrl: `preview-media://publish-thumbnail/thumbnail-${index}`, outputPath: `C:\\Cache\\thumbnail-${index}.jpg`, style: { text: `沙丘故事 ${index}`, textXPercent: 28, textYPercent: 78, fontSizePx: 64, textColor: "#FFFFFF", outlineWidthPx: 3, overlayOpacityPercent: 24 } })),
+      chapters: [], selectedTitleId: "ai-title-1", selectedThumbnailId: "thumbnail-1", provider: "OPENAI_API", model: "gpt-test", analyzerVersion: "publish-assets-v2-intro-first", generatedAt: "2026-09-10T00:00:00.000Z", mainTimelineRevision: 1, introTimelineRevision: 1, stale: false, userEdited: false, warnings: [],
+    };
+    const api = mockApi();
+    api.getAiPublishAssets = vi.fn(async () => null);
+    api.generateAiPublishAssets = vi.fn(async () => ({ project: { ...structuredClone(project), aiPublishAssets: generatedAssets }, assets: generatedAssets, provider: "OPENAI_API" as const, model: "gpt-test" }));
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "08 AI 發布素材" }));
+    const dialog = await screen.findByRole("dialog", { name: "AI 發布素材" });
+    fireEvent.click(within(dialog).getByRole("button", { name: /產生／重跑/ }));
+    const result = await within(dialog).findByLabelText("AI 標題與縮圖產生結果");
+    expect(result).toHaveTextContent("已產生 3 個標題＋3 張縮圖");
+    expect(result).toHaveTextContent("草漯沙丘片頭故事 1");
+    expect(within(result).getByAltText("目前選用的 AI 縮圖結果")).toHaveAttribute("src", "preview-media://publish-thumbnail/thumbnail-1");
+    expect(within(dialog).getAllByAltText(/AI 縮圖候選/)).toHaveLength(3);
+  });
+
+  it("opens the dedicated watermark page, previews the dunes defaults, and saves a custom schedule", async () => {
+    const api = mockApi();
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "05 浮水印" }));
+    const dialog = await screen.findByRole("dialog", { name: "浮水印設定" });
+    expect(within(dialog).getByLabelText("16:9 浮水印位置預覽")).toHaveTextContent("漫步");
+    expect(within(dialog).getByLabelText("16:9 浮水印位置預覽")).toHaveTextContent("SceneryWalker");
+    expect(within(dialog).getByLabelText("浮水印顯示週期秒數")).toHaveValue(360);
+    expect(within(dialog).getByLabelText("浮水印顯示時間秒數")).toHaveValue(15);
+    fireEvent.change(within(dialog).getByLabelText("浮水印顯示週期秒數"), { target: { value: "180" } });
+    fireEvent.change(within(dialog).getByLabelText("浮水印顯示時間秒數"), { target: { value: "10" } });
+    fireEvent.change(within(dialog).getByLabelText("中文浮水印文字"), { target: { value: "山海漫步" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存浮水印設定" }));
+    await waitFor(() => expect(api.setWatermarkSettings).toHaveBeenCalledWith(expect.objectContaining({
+      intervalSeconds: 180,
+      visibleDurationSeconds: 10,
+      chinese: expect.objectContaining({ text: "山海漫步", position: "LOWER_LEFT", layout: "STACKED_TWO_LINES" }),
+      english: expect.objectContaining({ text: "SceneryWalker", position: "LOWER_RIGHT" }),
+    })));
+    expect(await within(dialog).findByText(/浮水印設定已保存/)).toBeInTheDocument();
   });
 });

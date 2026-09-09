@@ -1,5 +1,20 @@
 # 第一階段驗證紀錄
 
+## v0.48.0 增量驗證（2026-09-10）
+
+| 項目 | 結果 |
+|---|---|
+| 草漯沙丘浮水印預設 | PASS；中文左下兩行、英文右下，排程 0／360／15 秒、淡入淡出 1 秒，1080p 字級 51／41 px與邊距 63 px。 |
+| 專案設定與遷移 | PASS；Manifest schema 16 保存完整設定，舊 schema 補入預設，錯誤時間、字級、透明度或重疊角落由 Main process 阻擋。 |
+| 實際浮水印輸出 | PASS；360p 真實 H.264/AAC 串連輸出回報 `watermarkApplied=true`，4K filter 轉換為 102／82 px、126 px 邊距；來源 SHA-256 前後不變。 |
+| 片頭優先 AI 畫面 | PASS；已選 Intro 中點先列入，再由 canonical Main timeline 補足；候選帶 `INTRO`／`MAIN` 與實際來源時間。 |
+| AI 標題／縮圖顯示 | PASS；結果容器可捲動，產生後顯示 3 個標題、三張 1280×720 本機合成縮圖、選定結果、provider 與警告。 |
+| AI provider 合約 | PASS；OpenAI `store:false` strict schema 與 Codex ephemeral/read-only prompt 都包含片頭摘要及候選來源；遠端不可用時保留 honest local fallback。 |
+| 嵌入式字幕修改邊界 | PASS（規格）；已燒入 MP4 的文字不可直接替換，字幕修改須建立不覆寫的新版本；SRT 可直接修改另存。 |
+| 來源與既有交付 | PASS；根目錄 SOP、來源媒體及 v0.47.0 以前 release 未修改。 |
+
+完整驗證：TypeScript PASS；Vitest 41 個測試檔／255 個測試 PASS；production build PASS；Electron smoke PASS；Windows packaged smoke PASS；`npm audit --audit-level=high` 0 vulnerabilities。封裝 EXE 大小 `244441088` bytes，資料夾大小 `392468831` bytes，SHA-256 `0EFD15D90B3F316137695004C820B0848E6052A12DA6FC018B459E34F45B25D4`。
+
 ## v0.47.0 增量驗證（2026-09-09）
 
 | 項目 | 結果 |

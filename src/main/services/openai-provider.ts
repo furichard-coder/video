@@ -139,7 +139,7 @@ export class OpenAiProvider {
   constructor(private readonly fetcher: FetchLike = fetch) {}
 
   async generatePublishAssets(input: PublishGenerationInput, account: AiAccountProfile & { apiKey: string }, signal?: AbortSignal): Promise<{ draft: PublishGeneratedDraft; model: string; requestId?: string }> {
-    const content: Array<Record<string, unknown>> = [{ type: "input_text", text: ["為旅遊 YouTube 影片產生發布素材。只能依下列主題、時間線摘要與提供的低解析候選影格；不得猜測人物身分或未提供的地點。", JSON.stringify({ topic: input.topic, durationMs: input.durationMs, timeline: input.timelineSummary, candidates: input.candidates.map(({ framePath: _framePath, ...candidate }) => candidate) }), "嚴格依 JSON schema 回傳 3–5 個標題、說明、hashtags、3 個縮圖概念與合法章節。"].join("\n\n") }];
+    const content: Array<Record<string, unknown>> = [{ type: "input_text", text: ["為旅遊 YouTube 影片產生發布素材。先理解主題、故事與正片內容，再優先判讀已選片頭的實際候選畫面，讓標題與縮圖呈現影片開場承諾。只能依提供的資料與低解析影格；不得猜測人物身分或未提供的地點。", JSON.stringify({ topic: input.topic, durationMs: input.durationMs, intro: input.introSummary, timeline: input.timelineSummary, candidates: input.candidates.map(({ framePath: _framePath, ...candidate }) => candidate) }), "標題須延伸影片內容與片頭畫面，嚴格依 JSON schema 回傳 3–5 個標題、說明、hashtags、3 個可追溯縮圖概念與合法章節。縮圖概念應優先選用 origin=INTRO 的候選，除非該畫面明顯不適合。"].join("\n\n") }];
     for (const candidate of input.candidates) {
       const bytes = await readFile(candidate.framePath);
       content.push({ type: "input_image", image_url: `data:image/jpeg;base64,${Buffer.from(bytes).toString("base64")}`, detail: "low" });

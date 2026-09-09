@@ -1,5 +1,11 @@
 # Phase 0｜架構、範圍與驗收
 
+## v0.48.0 增量範圍（2026-09-10）
+
+- Manifest schema 16 新增經 Main process 正規化的專案浮水印設定；正片完成輸出與獨立片頭在字幕後套用週期 drawtext，Shorts 明確選用，固定片段檢查不套用。完整決策見 `docs/adr/0039-periodic-project-watermark.md`。
+- AI 發布候選先取已確認片頭的實際來源時間，再由 canonical Main timeline 補足；分析影格、縮圖結果與來源時間一致，結果區可捲動並在完成後顯示標題與三張本機合成縮圖。完整決策見 `docs/adr/0040-intro-first-ai-publish-results.md`。
+- 已嵌入 MP4 的字幕屬畫面像素，字幕修改時必須由乾淨影片或唯讀來源建立新版本；SRT 可直接修改後另存。完整決策見 `docs/adr/0041-burned-subtitle-revision-boundary.md`。
+
 ## v0.30.0 增量範圍（2026-09-08）
 
 - Windows FFmpeg 串接改用唯一、可清理的 filter script，避免 Intro＋Main 或字幕燒錄把 graph 放進命令列而觸發 `spawn ENAMETOOLONG`。

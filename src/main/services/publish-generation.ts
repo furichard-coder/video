@@ -1,8 +1,14 @@
 import type { AiPublishAssets, PublishChapterCue, PublishTitleCandidate, ThumbnailCandidate } from "../../shared/domain";
 import { isValidYoutubeChapterSet, validateYoutubeTitle, youtubeTextLength } from "../../shared/publish-rules";
 
-export interface PublishCandidateFrame { candidateId: string; assetId: string; sourceTimeMs: number; sourceFileName: string; framePath: string; }
-export interface PublishGenerationInput { topic: { topic: string; locations: string[]; storySummary: string; audiencePromise: string }; durationMs: number; timelineSummary: Array<{ assetId: string; fileName: string; startMs: number; endMs: number }>; candidates: PublishCandidateFrame[]; }
+export interface PublishCandidateFrame { candidateId: string; assetId: string; sourceTimeMs: number; sourceFileName: string; framePath: string; origin: "INTRO" | "MAIN"; }
+export interface PublishGenerationInput {
+  topic: { topic: string; locations: string[]; storySummary: string; audiencePromise: string };
+  durationMs: number;
+  introSummary: Array<{ assetId: string; fileName: string; sourceInMs: number; sourceOutMs: number; order: number }>;
+  timelineSummary: Array<{ assetId: string; fileName: string; startMs: number; endMs: number }>;
+  candidates: PublishCandidateFrame[];
+}
 
 export interface PublishGeneratedDraft { titles: PublishTitleCandidate[]; description: string; englishSummary: string; hashtags: string[]; thumbnails: ThumbnailCandidate[]; chapters: PublishChapterCue[]; warnings: string[]; }
 

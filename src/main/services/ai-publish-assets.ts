@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
 import type { AiPublishGenerationOptions, AiPublishGenerationResult, AiPublishAssets, PublishChapterCue, PublishTitleCandidate, ThumbnailCandidate } from "../../shared/domain";
 import { buildTimelinePlan } from "../../shared/timeline-plan";
 import { isValidYoutubeChapterSet, validateYoutubeTitle } from "../../shared/publish-rules";
@@ -11,16 +12,78 @@ import { AiSettingsStore } from "./ai-settings";
 import { ProjectStore } from "./project-store";
 import { SourceService } from "./source-service";
 import { PreviewCache } from "./preview-cache";
+import { renderThumbnail } from "./thumbnail-render";
 
-export const PUBLISH_ANALYZER_VERSION = "publish-assets-v1";
+export const PUBLISH_ANALYZER_VERSION = "publish-assets-v2-intro-first";
 
 function clipLabel(fileName: string, index: number): string {
   const stem = fileName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
   return stem || `第 ${index + 1} 段`;
 }
 
+export interface PublishVisualSelection {
+  candidateId: string;
+  assetId: string;
+  sourceTimeMs: number;
+  sourceFileName: string;
+  origin: "INTRO" | "MAIN";
+}
+
+export function selectPublishVisualCandidates(project: ReturnType<ProjectStore["getProject"]>): PublishVisualSelection[] {
+  const plan = buildTimelinePlan(project, { transitionSeconds: 0.3 });
+  const assetById = new Map(project.sources.map((asset) => [asset.id, asset]));
+  const selected: Array<Omit<PublishVisualSelection, "candidateId">> = [];
+  const add = (assetId: string, sourceTimeMs: number, origin: "INTRO" | "MAIN") => {
+    const asset = assetById.get(assetId);
+    if (!asset) return;
+    const normalizedTimeMs = asset.kind === "IMAGE" ? 0 : Math.max(0, Math.round(sourceTimeMs));
+    if (selected.some((item) => item.assetId === assetId && Math.abs(item.sourceTimeMs - normalizedTimeMs) < 500)) return;
+    selected.push({ assetId, sourceTimeMs: normalizedTimeMs, sourceFileName: asset.fileName, origin });
+  };
+  for (const segment of project.introSegments) {
+    add(segment.assetId, segment.inMs + (segment.outMs - segment.inMs) * 0.5, "INTRO");
+    if (selected.length >= 3) break;
+  }
+  for (const clip of plan.clips) {
+    if (selected.length >= 3) break;
+    add(clip.assetId, clip.inMs + (clip.outMs - clip.inMs) * 0.5, "MAIN");
+  }
+  const ranges = project.introSegments.length
+    ? project.introSegments.map((item) => ({ assetId: item.assetId, inMs: item.inMs, outMs: item.outMs, origin: "INTRO" as const }))
+    : plan.clips.map((item) => ({ assetId: item.assetId, inMs: item.inMs, outMs: item.outMs, origin: "MAIN" as const }));
+  for (const fraction of [0.25, 0.75, 0.1, 0.9]) {
+    for (const range of ranges) {
+      if (selected.length >= 3) break;
+      add(range.assetId, range.inMs + (range.outMs - range.inMs) * fraction, range.origin);
+    }
+  }
+  const uniqueCount = selected.length;
+  for (let index = 0; selected.length > 0 && selected.length < 3; index += 1) selected.push({ ...selected[index % uniqueCount] });
+  return selected.slice(0, 3).map((item, index) => ({ ...item, candidateId: `thumbnail-${index + 1}` }));
+}
+
 export class AiPublishAssetsService {
   constructor(private readonly store: ProjectStore, private readonly sources: SourceService, private readonly previews: PreviewCache, private readonly aiStory: AiStoryAnalysisService, private readonly aiSettings: AiSettingsStore, private readonly openAi = new OpenAiProvider(), private readonly codex = new CodexCliStoryProvider(path.join(previews.cacheRoot, "codex-publish"))) {}
+
+  private async materializeThumbnailPreviews(assets: AiPublishAssets, signal: AbortSignal | undefined, onProgress: (percent: number, detail: string) => void): Promise<void> {
+    const directory = path.join(this.previews.cacheRoot, "publish-thumbnails");
+    await mkdir(directory, { recursive: true });
+    for (const [index, candidate] of assets.thumbnails.entries()) {
+      if (signal?.aborted) throw new DOMException("AI 發布素材分析已取消。", "AbortError");
+      const asset = this.store.getAsset(candidate.assetId);
+      if (!asset) { assets.warnings.push(`縮圖候選來源已不存在：${candidate.sourceFileName}`); continue; }
+      const cacheKey = createHash("sha256").update(JSON.stringify({ analyzer: PUBLISH_ANALYZER_VERSION, source: asset.previewCacheKey, candidate })).digest("hex");
+      const outputPath = path.join(directory, `${cacheKey}.jpg`);
+      onProgress(86 + index * 4, `正在合成縮圖候選 ${index + 1}／${assets.thumbnails.length}…`);
+      try {
+        await renderThumbnail(asset, candidate, outputPath, "jpg");
+        candidate.outputPath = outputPath;
+        candidate.previewUrl = `preview-media://publish-thumbnail/${encodeURIComponent(candidate.id)}?key=${cacheKey}`;
+      } catch (error) {
+        assets.warnings.push(`縮圖候選 ${index + 1} 無法合成：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
 
   async generate(options: AiPublishGenerationOptions, signal?: AbortSignal, onProgress: (percent: number, detail: string) => void = () => undefined): Promise<AiPublishGenerationResult> {
     const project = this.store.getProject();
@@ -49,29 +112,41 @@ export class AiPublishAssetsService {
     });
     const plan = buildTimelinePlan(project, { transitionSeconds: 0.3 });
     const assetById = new Map(project.sources.map((asset) => [asset.id, asset]));
+    const visualSelections = selectPublishVisualCandidates(project);
+    if (!visualSelections.length) throw new Error("目前沒有可追溯的片頭或正片畫面，無法產生標題與縮圖建議。");
     const thumbnails: ThumbnailCandidate[] = [];
-    for (const [index, clip] of plan.clips.slice(0, 3).entries()) {
+    for (const [index, selection] of visualSelections.entries()) {
       if (signal?.aborted) throw new DOMException("AI 發布素材分析已取消。", "AbortError");
-      const asset = assetById.get(clip.assetId);
+      const asset = assetById.get(selection.assetId);
       if (!asset) continue;
-      onProgress(35 + index * 15, `正在準備 ${asset.fileName} 的可追溯縮圖候選…`);
+      onProgress(35 + index * 12, `正在擷取${selection.origin === "INTRO" ? "片頭" : "正片"}畫面：${asset.fileName}…`);
       let previewUrl: string | undefined;
       try { previewUrl = (await this.previews.ensure(asset.id, "THUMBNAIL", signal)).url; } catch (error) { warnings.push(`縮圖候選 ${asset.fileName} 無法建立預覽：${error instanceof Error ? error.message : String(error)}`); }
-      thumbnails.push({ id: `thumbnail-${index + 1}`, assetId: asset.id, sourceTimeMs: clip.inMs, sourceFileName: asset.fileName, reason: `正片時間線第 ${index + 1} 段；只使用來源畫面，不猜測真實身分。`, layout: index % 2 ? "RIGHT_TEXT" : "LEFT_TEXT", colorNote: "保留來源比例，使用輕微亮暗遮罩", previewUrl, style: { text: subject.slice(0, 18), textXPercent: index % 2 ? 66 : 8, textYPercent: 78, fontSizePx: 64, textColor: "#FFFFFF", outlineWidthPx: 3, overlayOpacityPercent: 24 } });
+      thumbnails.push({ id: selection.candidateId, assetId: asset.id, sourceTimeMs: selection.sourceTimeMs, sourceFileName: asset.fileName, reason: `${selection.origin === "INTRO" ? "已選片頭" : "正片時間線"}畫面；只使用來源內容，不猜測真實身分。`, layout: index % 2 ? "RIGHT_TEXT" : "LEFT_TEXT", colorNote: "保留來源比例，使用輕微亮暗遮罩", previewUrl, style: { text: subject.slice(0, 18), textXPercent: index % 2 ? 66 : 28, textYPercent: 78, fontSizePx: 64, textColor: "#FFFFFF", outlineWidthPx: 3, overlayOpacityPercent: 24 } });
     }
     const candidates: PublishGenerationInput["candidates"] = [];
-    for (const [index, clip] of plan.clips.slice(0, 3).entries()) {
-      const asset = assetById.get(clip.assetId); if (!asset) continue;
-      try { const preview = await this.previews.ensureWithPath(asset.id, "THUMBNAIL", signal); candidates.push({ candidateId: `thumbnail-${index + 1}`, assetId: asset.id, sourceTimeMs: clip.inMs, sourceFileName: asset.fileName, framePath: preview.cachePath }); }
+    const analysisFrameDirectory = path.join(this.previews.cacheRoot, "publish-analysis-frames");
+    await mkdir(analysisFrameDirectory, { recursive: true });
+    for (const selection of visualSelections) {
+      const asset = assetById.get(selection.assetId); if (!asset) continue;
+      const candidate = thumbnails.find((item) => item.id === selection.candidateId);
+      if (!candidate) continue;
+      const frameKey = createHash("sha256").update(`${PUBLISH_ANALYZER_VERSION}\0${asset.previewCacheKey}\0${selection.sourceTimeMs}`).digest("hex");
+      const framePath = path.join(analysisFrameDirectory, `${frameKey}.jpg`);
+      try {
+        await renderThumbnail(asset, { ...candidate, style: { ...candidate.style, text: "", overlayOpacityPercent: 0 } }, framePath, "jpg");
+        candidates.push({ ...selection, framePath });
+      }
       catch (error) { warnings.push(`AI 候選影格無法建立：${asset.fileName}；${error instanceof Error ? error.message : String(error)}`); }
     }
     const timelineDurationMs = plan.clips.reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0);
-    const generationInput: PublishGenerationInput = { topic: { topic: topic.topic.trim(), locations: topic.locations, storySummary: topic.storySummary.trim(), audiencePromise: topic.audiencePromise.trim() }, durationMs: timelineDurationMs, timelineSummary: plan.clips.map((clip) => ({ assetId: clip.assetId, fileName: assetById.get(clip.assetId)?.fileName ?? clip.assetId, startMs: clip.outputStartMs, endMs: clip.outputStartMs + clip.outMs - clip.inMs })), candidates };
+    const generationInput: PublishGenerationInput = { topic: { topic: topic.topic.trim(), locations: topic.locations, storySummary: topic.storySummary.trim(), audiencePromise: topic.audiencePromise.trim() }, durationMs: timelineDurationMs, introSummary: project.introSegments.map((segment, order) => ({ assetId: segment.assetId, fileName: assetById.get(segment.assetId)?.fileName ?? segment.fileName, sourceInMs: segment.inMs, sourceOutMs: segment.outMs, order: order + 1 })), timelineSummary: plan.clips.map((clip) => ({ assetId: clip.assetId, fileName: assetById.get(clip.assetId)?.fileName ?? clip.assetId, startMs: clip.outputStartMs, endMs: clip.outputStartMs + clip.outMs - clip.inMs })), candidates };
     try {
       const account = this.aiSettings.getRuntimeAccount(); onProgress(55, "正在呼叫 OpenAI Responses（store:false）…");
       const generated = await this.openAi.generatePublishAssets(generationInput, account, signal); const generatedAt = new Date().toISOString();
       const generatedAssets = applyGeneratedDraft(project.aiPublishAssets, generated.draft, { topicSnapshot: { ...topic, capturedAt: generatedAt }, provider: "OPENAI_API", model: generated.model, analyzerVersion: PUBLISH_ANALYZER_VERSION, generatedAt, mainTimelineRevision: project.mainTimelineRevision ?? project.timelineRevision, introTimelineRevision: project.introTimelineRevision });
       for (const thumbnail of generatedAssets.thumbnails) thumbnail.previewUrl = thumbnails.find((item) => item.assetId === thumbnail.assetId && item.sourceTimeMs === thumbnail.sourceTimeMs)?.previewUrl;
+      await this.materializeThumbnailPreviews(generatedAssets, signal, onProgress);
       const latest = this.store.getProject(); if (latest.id !== project.id || (latest.mainTimelineRevision ?? latest.timelineRevision) !== (project.mainTimelineRevision ?? project.timelineRevision)) throw new Error("專案或正片時間線在 AI 生成期間已變更，結果未套用，請重新產生。" );
       const updated = await this.store.setAiPublishAssets(generatedAssets); onProgress(100, "OpenAI 發布素材已保存"); return { project: updated, assets: generatedAssets, provider: "OPENAI_API" as const, model: generated.model };
     } catch (openAiError) {
@@ -81,6 +156,7 @@ export class AiPublishAssetsService {
         const generated = await this.codex.generatePublishAssets(generationInput, model, signal); const generatedAt = new Date().toISOString();
         const generatedAssets = applyGeneratedDraft(project.aiPublishAssets, generated.draft, { topicSnapshot: { ...topic, capturedAt: generatedAt }, provider: "CODEX_CHATGPT", model: generated.model, analyzerVersion: PUBLISH_ANALYZER_VERSION, generatedAt, mainTimelineRevision: project.mainTimelineRevision ?? project.timelineRevision, introTimelineRevision: project.introTimelineRevision });
         for (const thumbnail of generatedAssets.thumbnails) thumbnail.previewUrl = thumbnails.find((item) => item.assetId === thumbnail.assetId && item.sourceTimeMs === thumbnail.sourceTimeMs)?.previewUrl;
+        await this.materializeThumbnailPreviews(generatedAssets, signal, onProgress);
         const latest = this.store.getProject(); if (latest.id !== project.id || (latest.mainTimelineRevision ?? latest.timelineRevision) !== (project.mainTimelineRevision ?? project.timelineRevision)) throw new Error("專案或正片時間線在 AI 生成期間已變更，結果未套用，請重新產生。" );
         const updated = await this.store.setAiPublishAssets(generatedAssets); onProgress(100, "Codex／ChatGPT 發布素材已保存"); return { project: updated, assets: generatedAssets, provider: "CODEX_CHATGPT" as const, model: generated.model };
       } catch (codexError) {
@@ -97,6 +173,7 @@ export class AiPublishAssetsService {
       topicSnapshot: { ...topic, topic: topic.topic.trim(), storySummary: topic.storySummary.trim(), audiencePromise: topic.audiencePromise.trim(), capturedAt: generatedAt },
       titles, description: `${topic.storySummary.trim() || `${subject}的旅程紀錄。`}\n\n${topic.audiencePromise.trim() || "用畫面認識這段旅程的特色與故事。"}`, englishSummary: `A visual journey through ${subject}.`, hashtags: ["#旅遊", `#${subject.replace(/\s+/g, "")}`].slice(0, 5), thumbnails, chapters, selectedTitleId: titles[0]?.id, selectedThumbnailId: thumbnails[0]?.id, provider, model, analyzerVersion: PUBLISH_ANALYZER_VERSION, generatedAt, mainTimelineRevision: project.mainTimelineRevision ?? project.timelineRevision, introTimelineRevision: project.introTimelineRevision, stale: false, userEdited: false, warnings,
     };
+    await this.materializeThumbnailPreviews(assets, signal, onProgress);
     const updated = await this.store.setAiPublishAssets(assets);
     onProgress(100, "發布素材候選已保存");
     return { project: updated, assets, provider, model };

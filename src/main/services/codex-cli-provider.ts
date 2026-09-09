@@ -206,7 +206,7 @@ export class CodexCliStoryProvider {
     if (!executable) throw new Error("這台電腦找不到 Codex 執行程式。" );
     await mkdir(this.cacheRoot, { recursive: true });
     const schemaPath = path.join(this.cacheRoot, `.codex-publish-schema-${process.pid}-${Date.now()}.json`);
-    const prompt = ["你是旅遊 YouTube 發布素材編輯。不要執行工具、不要讀寫本機檔案；只依照文字與附加低解析影格回答。不得猜測人物身分或未提供的地點。", JSON.stringify({ topic: input.topic, durationMs: input.durationMs, timeline: input.timelineSummary, candidates: input.candidates.map(({ framePath: _framePath, ...candidate }) => candidate) }), "嚴格依 output schema 回傳完整 titles、description、englishSummary、hashtags、3 個縮圖概念與章節。"].join("\n\n");
+    const prompt = ["你是旅遊 YouTube 發布素材編輯。先理解主題、故事與正片內容，再優先判讀已選片頭的實際候選畫面，讓標題與縮圖呈現影片開場承諾。不要執行工具、不要讀寫本機檔案；只依照文字與附加低解析影格回答。不得猜測人物身分或未提供的地點。", JSON.stringify({ topic: input.topic, durationMs: input.durationMs, intro: input.introSummary, timeline: input.timelineSummary, candidates: input.candidates.map(({ framePath: _framePath, ...candidate }) => candidate) }), "標題須延伸影片內容與片頭畫面；嚴格依 output schema 回傳完整 titles、description、englishSummary、hashtags、3 個可追溯縮圖概念與章節。縮圖概念應優先選用 origin=INTRO 的候選，除非該畫面明顯不適合。"].join("\n\n");
     try {
       await writeFile(schemaPath, JSON.stringify(PUBLISH_JSON_SCHEMA), { encoding: "utf8", flag: "wx" });
       const args = ["exec", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only", "--skip-git-repo-check", "--model", model, "-C", this.cacheRoot, "--image", ...input.candidates.map((candidate) => candidate.framePath), "--output-schema", schemaPath, "--json", "-"];

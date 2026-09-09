@@ -1,4 +1,4 @@
-# Current Product Spec — v0.47.0
+# Current Product Spec — v0.48.0
 
 ## Scope
 
@@ -6,7 +6,7 @@ Windows-first read-only source organizer. The first visible workflow remains sou
 
 ## Canonical project state
 
-- `ProjectManifest` is the persisted source of truth; schema 14 migrates older manifests without dropping fields.
+- `ProjectManifest` is the persisted source of truth; schema 16 migrates older manifests without dropping fields.
 - Main and Intro timeline revisions and subtitle review revisions are tracked independently.
 - `ProjectStore` emits `project:changed` after every persisted mutation. Renderer state replaces only the canonical snapshot; changing project while a background job is running is blocked with an owning-project message.
 - Background jobs carry `projectId`, project name and timeline revision for auditability.
@@ -16,6 +16,7 @@ Windows-first read-only source organizer. The first visible workflow remains sou
 - AI knowledge subtitles use Codex/ChatGPT login fallback when OpenAI API billing is unavailable; speech transcription remains opt-in.
 - AI regeneration modes: fill blanks, preserve human edits, or replace AI cues in the selected scope. Manual/imported/user-edited cues are protected.
 - Subtitle burn-in is per-output and opt-in. The checkbox can always be cancelled before render; enabling still requires confirmed, current Main cues.
+- Burned-in subtitles are video pixels and are never edited in place. Subtitle-only corrections create a new output from a clean no-subtitle video or the read-only sources; old MP4 outputs are not overwritten. SRT or a future soft-subtitle track may be replaced without video re-encoding.
 - AI-generated subtitle cues are persisted as `CONFIRMED` immediately. The subtitle review page offers a visible all-scope confirm/unconfirm toggle, selected-cue confirm/unconfirm/delete actions, and a per-cue delete button. Shift selects a contiguous range for batch actions; deleting a cue only removes it from the manifest.
 
 ## Timeline and output
@@ -26,7 +27,7 @@ Windows-first read-only source organizer. The first visible workflow remains sou
 
 All millisecond fields use the shared minute/second/millisecond editor. The renderer exposes autosave state and protects dirty Subtitle/BGM drafts when a canonical project snapshot arrives from another window or background job.
 
-The main screen exposes seven primary workspaces: sources/order, Intro, BGM, subtitles, preview/output library, publishing settings, and AI publishing assets. Per-material edits enter a single Material Editor workspace before opening the detailed safe editor. Output pages use the shared compact OutputLibrary provider for recent files and actions. As of v0.41.0, `useOutputLibrary` and `OutputRecordActions` are the shared query/action layer for Concat, Intro, subtitle and global output views; global registration/removal and platform handoff remain owned by OutputHistoryModal.
+The main screen exposes eight primary workspaces: sources/order, Intro, BGM, subtitles, project watermark, preview/output library, publishing settings, and AI publishing assets. Per-material edits enter a single Material Editor workspace before opening the detailed safe editor. Output pages use the shared compact OutputLibrary provider for recent files and actions. As of v0.41.0, `useOutputLibrary` and `OutputRecordActions` are the shared query/action layer for Concat, Intro, subtitle and global output views; global registration/removal and platform handoff remain owned by OutputHistoryModal.
 
 On the Subtitle workspace, the shared Intro preview history is collapsible and defaults to collapsed so it cannot consume the synchronized video review area. The Intro workspace keeps the history expanded as before. Expanding the Subtitle history mounts the same shared `OutputLibrary`, so playback, reveal and copy actions remain canonical.
 
@@ -47,6 +48,12 @@ OpenAI Responses (`store:false`, active vision model, strict `json_schema`) now 
 ## v0.45.0 YouTube final review gate
 
 The upload payload is composed once from the selected title, Chinese description, English summary, chapter time codes and hashtags. Chapter text and hashtags are reserved ahead of prose when enforcing YouTube's 5,000-character description limit. The upload workflow has a separate final-review step that streams only the selected OutputHistory MP4 and the current manifest's selected thumbnail. It displays the exact text payload, channel, privacy, audience setting and chapter status, and requires an explicit human review checkbox before `youtube:upload` can be invoked. YouTube transcoding, copyright and community checks remain authoritative in YouTube Studio.
+
+## v0.48.0 project watermark and visible AI publishing results
+
+Watermark settings are canonical project state in schema 16. The verified Caota Sand Dunes default is Chinese `漫步\n風光` at lower-left and `SceneryWalker` at lower-right, scaled from a 1080p baseline of 51/41 px and 63 px safe margins. The default cadence starts at 0 seconds, repeats every 360 seconds, stays visible for 15 seconds and fades in/out for 1 second. Text and box opacity default to 82% and 24%. Main-complete output and standalone Intro are enabled by default; Shorts is explicit opt-in. Main-process normalization requires distinct lower corners and validates every timing/opacity/size limit. The final drawtext pass is applied only to new output after optional subtitle composition.
+
+AI publishing visual candidates now prioritize the exact midpoint of selected Intro ranges, then fill from the canonical Main timeline. Candidate extraction creates three traceable, low-resolution analysis frames at their declared source time codes. OpenAI/Codex prompts include the topic, story promise, Intro order, Main timeline and candidate origin, and explicitly ask titles and thumbnail concepts to reflect the opening visuals. After any provider result—including honest local fallback—the App builds three local 1280×720 thumbnail previews from the referenced source frames. The scrolling result summary immediately shows provider, selected title and selected thumbnail; remote AI image fabrication remains out of scope.
 
 ## Verification baseline
 
