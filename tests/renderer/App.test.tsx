@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PHOTO_SOUND_PREVIEW_URL, type AppApi, type ExternalPlayerSettingsSnapshot, type ProjectManifest, type SourceAsset } from "../../src/shared/domain";
+import { PHOTO_SOUND_PREVIEW_URL, type AiPublishAssets, type AppApi, type ExternalPlayerSettingsSnapshot, type ProjectManifest, type SourceAsset } from "../../src/shared/domain";
 import { App } from "../../src/renderer/App";
 import { UI_TEXT_SIZE_STORAGE_KEY, UI_ZOOM_STORAGE_KEY } from "../../src/renderer/ui-preferences";
 
@@ -670,11 +670,51 @@ describe("App source workflow", () => {
     const upload = await screen.findByRole("dialog", { name: "上傳正片預覽到 YouTube" });
     expect(within(upload).getByRole("radio", { name: /不公開（預設）/ })).toBeChecked();
     fireEvent.click(within(upload).getByRole("radio", { name: "不是兒童內容" }));
-    fireEvent.click(within(upload).getByRole("button", { name: "確認並開始上傳" }));
+    fireEvent.click(within(upload).getByRole("button", { name: "檢查上傳內容" }));
+    expect(within(upload).getByLabelText("YouTube 上傳影片預覽")).toHaveAttribute("src", "preview-media://output/render-job");
+    const finalConfirm = within(upload).getByRole("checkbox", { name: /我已播放檢查影片/ });
+    expect(within(upload).getByRole("button", { name: "確認內容並開始上傳" })).toBeDisabled();
+    fireEvent.click(finalConfirm);
+    fireEvent.click(within(upload).getByRole("button", { name: "確認內容並開始上傳" }));
     await waitFor(() => expect(api.uploadYoutubeVideo).toHaveBeenCalledWith(expect.objectContaining({ jobId: "render-job", privacyStatus: "unlisted", madeForKids: false })));
     expect(await within(upload).findByText("影片已交給 YouTube 處理")).toBeInTheDocument();
     fireEvent.click(within(upload).getByRole("button", { name: "用設定的瀏覽器觀看" }));
     expect(api.openYoutubeVideo).toHaveBeenCalledWith("abc12345");
+  });
+
+  it("loads saved publishing assets, includes chapters, and requires the visual review gate", async () => {
+    const publishAssets: AiPublishAssets = {
+      schemaVersion: 1,
+      topicSnapshot: { topic: "大雪山", locations: ["台中"], storySummary: "森林漫步", audiencePromise: "看見森林", capturedAt: "2026-09-09T00:00:00.000Z" },
+      titles: [{ id: "title-1", text: "大雪山森林漫步 #Taiwan", charCount: 16, reason: "AI" }],
+      description: "大雪山森林旅程。",
+      englishSummary: "A walk through Dasyueshan.",
+      hashtags: ["#大雪山", "#Taiwan"],
+      thumbnails: [{ id: "thumb-1", assetId: video.id, sourceTimeMs: 0, sourceFileName: video.fileName, reason: "森林開場", layout: "LEFT_TEXT", colorNote: "自然", previewUrl: "preview-media://cache/a/thumbnail", outputPath: "C:\\Output\\thumb.jpg", style: { text: "大雪山", textXPercent: 8, textYPercent: 78, fontSizePx: 64, textColor: "#FFFFFF", outlineWidthPx: 3, overlayOpacityPercent: 24 } }],
+      chapters: [0, 10_000, 20_000].map((startMs, index) => ({ id: `chapter-${index}`, startMs, title: `旅程 ${index + 1}`, description: "" })),
+      selectedTitleId: "title-1", selectedThumbnailId: "thumb-1", provider: "OPENAI_API", analyzerVersion: "publish-v2", generatedAt: "2026-09-09T00:00:00.000Z", mainTimelineRevision: 1, stale: false, userEdited: false, warnings: [],
+    };
+    const api = mockApi();
+    api.getAiPublishAssets = vi.fn(async () => publishAssets);
+    vi.mocked(api.startConcatRender).mockImplementation(async (request) => ({ jobId: "render-job", outputPath: "C:\\Output\\preview.mp4", sizeBytes: 456_789, expectedDurationMs: 40_000, transitionSeconds: request.transitionSeconds, resolution: request.resolution, purpose: request.purpose ?? "CONCAT" }));
+    vi.mocked(api.getYoutubeSettings).mockResolvedValue({ schemaVersion: 1, preferredBrowser: "CHROME", targetChannelName: "漫步風光", clientConfigured: true, connected: true, encryptionAvailable: true, channelId: "channel", channelTitle: "漫步風光", browsers: [{ id: "CHROME", label: "Google Chrome", available: true }, { id: "EDGE", label: "Microsoft Edge", available: true }] });
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /產出串連預覽/ }));
+    fireEvent.click(screen.getByRole("button", { name: /選擇儲存位置/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "OK，開始產出" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "OK，開始產出" }));
+    fireEvent.click(await screen.findByRole("button", { name: "上傳 YouTube 預覽" }));
+    const upload = await screen.findByRole("dialog", { name: "上傳正片預覽到 YouTube" });
+    await waitFor(() => expect(within(upload).getByLabelText(/^影片標題/)).toHaveValue("大雪山森林漫步 #Taiwan"));
+    expect((within(upload).getByLabelText(/^說明/) as HTMLTextAreaElement).value).toContain("0:00 旅程 1");
+    fireEvent.click(within(upload).getByRole("radio", { name: "不是兒童內容" }));
+    fireEvent.click(within(upload).getByRole("button", { name: "檢查上傳內容" }));
+    expect(within(upload).getByAltText("YouTube 最終縮圖預覽")).toHaveAttribute("src", expect.stringContaining("preview-media://publish-thumbnail/thumb-1"));
+    expect(within(upload).getByText("3 段已帶入")).toBeInTheDocument();
+    fireEvent.click(within(upload).getByRole("checkbox", { name: /我已播放檢查影片/ }));
+    fireEvent.click(within(upload).getByRole("button", { name: "確認內容並開始上傳" }));
+    await waitFor(() => expect(api.uploadYoutubeVideo).toHaveBeenCalledWith(expect.objectContaining({ title: "大雪山森林漫步 #Taiwan", description: expect.stringContaining("0:20 旅程 3"), thumbnailPath: "C:\\Output\\thumb.jpg" })));
   });
 
   it("can cancel the default 60-second YouTube preparation without removing the completed MP4", async () => {

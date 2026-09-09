@@ -1,5 +1,17 @@
 # 第一階段驗證紀錄
 
+## v0.45.0 增量驗證（2026-09-09）
+
+| 項目 | 結果 |
+|---|---|
+| YouTube description composition | PASS；中文、英文、章節及 hashtags 使用同一個實際 upload payload，長文優先保留章節與 hashtags。 |
+| 集中人工確認 gate | PASS；未進入確認頁或未勾選檢查聲明時不能呼叫 upload。 |
+| 影片／縮圖唯讀預覽 | PASS；只接受 OutputHistory job ID 與目前 manifest 的 thumbnail candidate ID，不接受 Renderer 任意路徑。 |
+| 頻道／標題／章節／觀眾／可見度摘要 | PASS；集中確認頁逐項顯示。 |
+| 真實頻道發布 | 本輪未執行；避免測試自動建立 YouTube 影片，需使用者在 App 最後確認頁另行驗收。 |
+
+完整驗證：TypeScript PASS；Vitest 39 files／246 tests PASS；production build PASS；Electron smoke PASS；Windows packaged smoke PASS；`npm audit` 0 vulnerabilities。封裝 EXE 大小 `244441088` bytes，SHA-256 `48173E3ADC5114898B787656D4A3264578D07EF51AC9665110A6256E9C482DF9`。
+
 ## v0.43.0 增量驗證（2026-09-09）
 
 | 項目 | 結果 |

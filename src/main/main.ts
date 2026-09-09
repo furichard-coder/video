@@ -149,7 +149,9 @@ void app.whenReady().then(async () => {
   const concatRenderer = new ConcatRenderService(store, sources, undefined, undefined, photoSoundPath, subtitleTranslation, path.join(app.getPath("userData"), "cache", "subtitle-burnin"));
   const subtitlePreviews = new SubtitlePreviewService(path.join(app.getPath("userData"), "cache", "subtitle-preview"), store, concatRenderer);
   await subtitlePreviews.initialize();
-  registerPreviewProtocol(previews, store, photoSoundPath, subtitlePreviews);
+  const outputHistory = new OutputHistoryStore(app.getPath("userData"));
+  await outputHistory.initialize();
+  registerPreviewProtocol(previews, store, photoSoundPath, subtitlePreviews, outputHistory);
   const youtubeBrowsers = new WindowsYoutubeBrowserLauncher((url) => shell.openExternal(url));
   const youtubeSettings = new YoutubeSettingsStore(app.getPath("userData"), {
     isAvailable: () => safeStorage.isEncryptionAvailable(),
@@ -159,8 +161,6 @@ void app.whenReady().then(async () => {
   await youtubeSettings.initialize();
   const youtubeUpload = new YoutubeUploadService(youtubeSettings, youtubeBrowsers);
   const platformUploadHandoff = new PlatformUploadHandoffService({ openExternal: (url) => shell.openExternal(url), showItemInFolder: (filePath) => shell.showItemInFolder(filePath), copyText: (value) => clipboard.writeText(value) });
-  const outputHistory = new OutputHistoryStore(app.getPath("userData"));
-  await outputHistory.initialize();
   const userPreferences = new UserPreferencesStore(app.getPath("userData"));
   await userPreferences.initialize();
   const aiStory = new AiStoryAnalysisService(path.join(app.getPath("userData"), "cache", "ai-story"), store, sources, aiSettings);

@@ -15,6 +15,7 @@ import type {
 } from "../../shared/domain";
 import type { CredentialProtector } from "./ai-settings";
 import { finalizePartialOutput } from "./atomic-output";
+import { validateYoutubeTitle } from "../../shared/publish-rules";
 
 const YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload";
 const YOUTUBE_READ_SCOPE = "https://www.googleapis.com/auth/youtube.readonly";
@@ -345,9 +346,8 @@ export class YoutubeUploadService {
 
   async upload(outputPath: string, request: YoutubeUploadRequest, signal?: AbortSignal, onProgress: (progress: YoutubeUploadProgress) => void = () => undefined): Promise<YoutubeUploadResult> {
     assertNotAborted(signal);
-    const title = request?.title?.trim();
+    const title = validateYoutubeTitle(request?.title ?? "").value;
     const description = request?.description?.trim() ?? "";
-    if (!title || title.length > 100) throw new Error("YouTube 標題必須介於 1 到 100 個字元。");
     if (description.length > 5_000) throw new Error("YouTube 說明不可超過 5,000 個字元。");
     if (request.privacyStatus !== "unlisted" && request.privacyStatus !== "private") throw new Error("為避免意外公開，本版只允許不公開或私人影片。");
     if (typeof request.madeForKids !== "boolean") throw new Error("請確認這支影片是否為兒童內容。");

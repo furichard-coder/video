@@ -7,6 +7,7 @@ import { PreviewCache } from "./preview-cache";
 import { ProjectStore } from "./project-store";
 import path from "node:path";
 import type { SubtitlePreviewService } from "./subtitle-preview";
+import type { OutputHistoryStore } from "./output-history";
 
 const VARIANTS: Record<string, PreviewVariant> = {
   thumbnail: "THUMBNAIL",
@@ -48,10 +49,29 @@ function sourceMimeType(filePath: string): string {
   }
 }
 
-export function registerPreviewProtocol(cache: PreviewCache, store: ProjectStore, photoSoundPath?: string, subtitlePreviews?: SubtitlePreviewService): void {
+export function registerPreviewProtocol(cache: PreviewCache, store: ProjectStore, photoSoundPath?: string, subtitlePreviews?: SubtitlePreviewService, outputHistory?: OutputHistoryStore): void {
   protocol.handle("preview-media", async (request) => {
     try {
       const url = new URL(request.url);
+      if (url.hostname === "output" && outputHistory) {
+        const jobId = decodeURIComponent(url.pathname.split("/").filter(Boolean)[0] ?? "");
+        const output = await outputHistory.get(jobId);
+        const fileStat = await stat(output.outputPath);
+        const range = parseRange(request.headers.get("range"), fileStat.size);
+        const baseHeaders = { "Accept-Ranges": "bytes", "Content-Type": "video/mp4", "Cache-Control": "private, no-store" };
+        if (range) return new Response(streamBody(output.outputPath, range.start, range.end), { status: 206, headers: { ...baseHeaders, "Content-Range": `bytes ${range.start}-${range.end}/${fileStat.size}`, "Content-Length": String(range.end - range.start + 1) } });
+        return new Response(streamBody(output.outputPath), { headers: { ...baseHeaders, "Content-Length": String(fileStat.size) } });
+      }
+      if (url.hostname === "publish-thumbnail") {
+        const candidateId = decodeURIComponent(url.pathname.split("/").filter(Boolean)[0] ?? "");
+        const candidate = store.getProject().aiPublishAssets?.thumbnails.find((item) => item.id === candidateId);
+        const filePath = candidate?.outputPath;
+        const extension = filePath ? path.extname(filePath).toLowerCase() : "";
+        if (!filePath || ![".jpg", ".jpeg", ".png"].includes(extension)) return new Response("Not found", { status: 404 });
+        const fileStat = await stat(filePath);
+        if (!fileStat.isFile() || fileStat.size <= 0) return new Response("Not found", { status: 404 });
+        return new Response(streamBody(filePath), { headers: { "Content-Length": String(fileStat.size), "Content-Type": extension === ".png" ? "image/png" : "image/jpeg", "Cache-Control": "private, no-store" } });
+      }
       if (url.hostname === "asset" && url.pathname === "/dunes-shutter.mp3" && photoSoundPath) {
         const fileStat = await stat(photoSoundPath);
         const range = parseRange(request.headers.get("range"), fileStat.size);

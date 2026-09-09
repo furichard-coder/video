@@ -35,6 +35,33 @@ export function chapterText(chapters: PublishChapterCue[]): string {
   }).join("\n");
 }
 
+export interface YoutubeDescriptionDraft {
+  text: string;
+  chaptersIncluded: boolean;
+  truncated: boolean;
+}
+
+/**
+ * Build the exact YouTube description that will be sent by the upload dialog.
+ * Chapters and hashtags are reserved first so a long prose draft cannot silently
+ * push the time codes past YouTube's 5,000-character limit.
+ */
+export function buildYoutubeDescription(assets: Pick<AiPublishAssets, "description" | "englishSummary" | "hashtags" | "chapters">, maxLength = 5_000): YoutubeDescriptionDraft {
+  const chapters = chapterText(assets.chapters).trim();
+  const hashtags = assets.hashtags.map((item) => item.trim()).filter(Boolean).join(" ");
+  const reserved = [chapters, hashtags].filter(Boolean).join("\n\n");
+  const prose = [assets.description.trim(), assets.englishSummary.trim()].filter(Boolean).join("\n\n");
+  const separatorLength = prose && reserved ? 2 : 0;
+  const proseBudget = Math.max(0, maxLength - reserved.length - separatorLength);
+  const trimmedProse = prose.slice(0, proseBudget).trimEnd();
+  const text = [trimmedProse, reserved].filter(Boolean).join("\n\n").slice(0, maxLength);
+  return {
+    text,
+    chaptersIncluded: Boolean(chapters) && text.includes(chapters),
+    truncated: trimmedProse.length < prose.length || text.length < [prose, reserved].filter(Boolean).join("\n\n").length,
+  };
+}
+
 export function mergePublishTitles(existing: PublishTitleCandidate[], generated: PublishTitleCandidate[], mode: "FILL_BLANKS" | "PRESERVE_USER_EDITED" | "REPLACE_AI_DRAFTS"): PublishTitleCandidate[] {
   if (mode === "REPLACE_AI_DRAFTS") return generated;
   const protectedTitles = existing.filter((item) => item.userEdited);
