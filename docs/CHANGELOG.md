@@ -2,6 +2,14 @@
 
 本檔案是每次可交付功能變更的簡短索引。完成一個階段後，必須同步更新本檔案、`README.md` 與 `VERIFICATION.md`；只有通過建置／測試的內容才可標記為完成。
 
+## v0.46.0 — 2026-09-09
+
+- AI 字幕產出後維持全部 `CONFIRMED`，不再要求逐筆確認才能使用。
+- 字幕頁新增全部確認／全部取消確認、確認選取／取消確認／刪除選取與每筆獨立刪除；Shift 連續選取可套用批量操作。
+- 刪除仍以安全確認保護，且只移除 manifest 字幕項，不觸碰來源媒體或代理快取。
+- 驗證：39 個測試檔／247 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke、`npm audit` 全部通過。
+- 交付：`release/v0.46.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer.exe`；SHA-256 `23C36C69FFD0AF4FAD6DDDDF03795C219A59C929C9FA4BD04B45C4320366BADA`。
+
 ## v0.45.0 — 2026-09-09
 
 - YouTube 說明自動整合中文說明、English summary、有效章節時間與 hashtags；5,000 字上限會優先保留章節及 hashtags。

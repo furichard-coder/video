@@ -1,5 +1,17 @@
 # 第一階段驗證紀錄
 
+## v0.46.0 增量驗證（2026-09-09）
+
+| 項目 | 結果 |
+|---|---|
+| AI 字幕預設狀態 | PASS；AI 產出 cue 維持 `CONFIRMED`，可直接編輯與匯出。 |
+| 全部確認／取消確認 | PASS；依目前顯示範圍切換所有非排除 cue，並保留待保存狀態。 |
+| Shift 複選與批量操作 | PASS；可連續多選後確認、取消確認或刪除。 |
+| 單筆刪除 | PASS；清單每筆旁可獨立刪除，安全確認後只更新 manifest。 |
+| 來源保護 | PASS；刪除字幕不移除影片、照片、來源檔或代理快取。 |
+
+完整驗證：TypeScript PASS；Vitest 39 個測試檔／247 個測試 PASS；production build PASS；Electron smoke PASS；Windows packaged smoke PASS；`npm audit --audit-level=high` 0 vulnerabilities。封裝 EXE SHA-256 `23C36C69FFD0AF4FAD6DDDDF03795C219A59C929C9FA4BD04B45C4320366BADA`。
+
 ## v0.45.0 增量驗證（2026-09-09）
 
 | 項目 | 結果 |

@@ -101,6 +101,8 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     confirmed: visibleCues.filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED").length,
     rejected: visibleCues.filter((cue) => cue.reviewStatus === "REJECTED").length,
   }), [visibleCues]);
+  const reviewableVisibleCues = useMemo(() => visibleCues.filter((cue) => cue.reviewStatus !== "REJECTED"), [visibleCues]);
+  const allVisibleConfirmed = reviewableVisibleCues.length > 0 && reviewableVisibleCues.every((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED");
 
   const sourceSelection = useMemo(() => {
     if (!selected || useIntroTimelinePreview) return undefined;
@@ -183,6 +185,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   };
 
   const setStatus = (id: string, reviewStatus: SubtitleCueReviewStatus) => {
+    setLocalDirty(true);
     setCues((current) => current.map((cue) => cue.id === id ? { ...cue, reviewStatus } : cue));
     setNotice(reviewStatus === "CONFIRMED" ? "已標記為確認；請保存字幕以寫入專案。" : reviewStatus === "REJECTED" ? "已排除這筆草稿；不會匯出到 SRT。" : "已改回待確認草稿。");
   };
@@ -274,39 +277,49 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     setCues((current) => [...current, cue].sort((a, b) => cueScope(a).localeCompare(cueScope(b)) || a.startMs - b.startMs)); setSelectedId(cue.id);
   };
 
-  const deleteSelectedCue = async () => {
-    if (!selected || busy || generating || buildingPreview) return;
-    if (!window.confirm(`刪除這筆${cueScope(selected) === "INTRO" ? "片頭" : "正片"}字幕？\n只會從專案字幕清單移除，不會刪除任何影片或代理檔。`)) return;
-    const next = cues.filter((cue) => cue.id !== selected.id);
-    const nextSelected = visibleCues.find((cue) => cue.id !== selected.id);
+  const deleteCueIds = async (ids: Set<string>, label: string) => {
+    if (!ids.size || busy || generating || buildingPreview) return;
+    if (!window.confirm(`刪除${label}？\n只會從專案字幕清單移除，不會刪除任何影片或代理檔。`)) return;
+    const next = cues.filter((cue) => !ids.has(cue.id));
+    const nextSelected = visibleCues.find((cue) => !ids.has(cue.id));
     setBusy(true); setError(undefined);
     try {
       const updated = await window.sourceApp.setSubtitleCues(next);
       onProjectUpdated(updated); setCues(structuredClone(updated.subtitleCues)); setSelectedId(nextSelected?.id); setSelectedIds(nextSelected ? new Set([nextSelected.id]) : new Set()); selectionAnchorId.current = nextSelected?.id;
-      setNotice("已刪除該筆字幕並保存；影片、照片與代理檔保持不變。");
+      setNotice(`${ids.size === 1 ? "已刪除該筆字幕" : `已刪除${label}`}並保存；影片、照片與代理檔保持不變。`);
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBusy(false); }
+  };
+
+  const deleteSelectedCue = async () => {
+    if (!selected) return;
+    await deleteCueIds(new Set([selected.id]), `這筆${cueScope(selected) === "INTRO" ? "片頭" : "正片"}字幕`);
   };
 
   const cancelConfirmation = () => {
     if (!selectedIds.size || busy || generating || buildingPreview) return;
+    setLocalDirty(true);
     setCues((current) => current.map((cue) => selectedIds.has(cue.id) ? { ...cue, reviewStatus: "DRAFT" as const } : cue));
     setNotice(`已取消 ${selectedIds.size} 筆字幕的確認狀態；內容仍保留，請保存字幕以寫入專案。`);
   };
 
-  const deleteSelectedCues = async () => {
+  const confirmSelected = () => {
     if (!selectedIds.size || busy || generating || buildingPreview) return;
-    if (!window.confirm(`刪除選取的 ${selectedIds.size} 筆字幕？\n只會從專案字幕清單移除，不會刪除任何影片或代理檔。`)) return;
-    const next = cues.filter((cue) => !selectedIds.has(cue.id));
-    setBusy(true); setError(undefined);
-    try {
-      const updated = await window.sourceApp.setSubtitleCues(next);
-      onProjectUpdated(updated); setCues(structuredClone(updated.subtitleCues));
-      const nextSelected = updated.subtitleCues.find((cue) => selectedScopes.includes(cueScope(cue)));
-      setSelectedId(nextSelected?.id); setSelectedIds(nextSelected ? new Set([nextSelected.id]) : new Set()); selectionAnchorId.current = nextSelected?.id;
-      setNotice(`已刪除 ${selectedIds.size} 筆字幕並保存；影片、照片與代理檔保持不變。`);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-    finally { setBusy(false); }
+    setLocalDirty(true);
+    setCues((current) => current.map((cue) => selectedIds.has(cue.id) ? { ...cue, reviewStatus: "CONFIRMED" as const } : cue));
+    setNotice(`已確認 ${selectedIds.size} 筆字幕；請保存字幕以寫入專案。`);
+  };
+
+  const toggleAllConfirmation = () => {
+    if (!reviewableVisibleCues.length || busy || generating || buildingPreview) return;
+    const nextStatus: SubtitleCueReviewStatus = allVisibleConfirmed ? "DRAFT" : "CONFIRMED";
+    setLocalDirty(true);
+    setCues((current) => current.map((cue) => reviewableVisibleCues.some((visible) => visible.id === cue.id) ? { ...cue, reviewStatus: nextStatus } : cue));
+    setNotice(nextStatus === "CONFIRMED" ? `已全部確認目前範圍的 ${reviewableVisibleCues.length} 筆字幕；請保存字幕。` : `已全部取消確認目前範圍的 ${reviewableVisibleCues.length} 筆字幕；請保存字幕。`);
+  };
+
+  const deleteSelectedCues = async () => {
+    await deleteCueIds(selectedIds, `選取的 ${selectedIds.size} 筆字幕`);
   };
 
   useEffect(() => {
@@ -367,8 +380,9 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
       <div className="subtitle-review-layout">
         <aside className="subtitle-cue-list">
           {!visibleCues.length && <div className="empty-mini"><strong>所選範圍還沒有字幕</strong><p>可匯入 UTF-8 SRT、設定故事背景後建立 AI 草稿，或人工新增。</p></div>}
-          {selectedIds.size > 0 && <div className="subtitle-selection-actions" role="toolbar" aria-label="字幕批次操作"><span>已選 {selectedIds.size} 筆</span><button type="button" disabled={busy || generating || buildingPreview} onClick={cancelConfirmation}>取消確認</button><button type="button" className="danger-text" disabled={busy || generating || buildingPreview} onClick={() => void deleteSelectedCues()}>刪除選取</button></div>}
-          {visibleCues.map((cue, index) => <button type="button" key={cue.id} className={`${selectedIds.has(cue.id) ? "is-selected" : ""} status-${cue.reviewStatus ?? "CONFIRMED"}`} aria-pressed={selectedIds.has(cue.id)} onClick={(event) => selectCue(cue, event)}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{cue.text}</strong><small>{cueScope(cue) === "INTRO" ? "片頭" : "正片"} · {formatDuration(cue.startMs)} → {formatDuration(cue.endMs)} · <span>{cueOrigin(cue)}</span></small></div><em>{statusLabel(cue.reviewStatus)}</em></button>)}
+          {reviewableVisibleCues.length > 0 && <div className="subtitle-selection-actions subtitle-global-actions" role="toolbar" aria-label="字幕全部操作"><span>目前範圍 {reviewableVisibleCues.length} 筆</span><button type="button" disabled={busy || generating || buildingPreview} onClick={toggleAllConfirmation}>{allVisibleConfirmed ? "全部取消確認" : "全部確認"}</button></div>}
+          {selectedIds.size > 0 && <div className="subtitle-selection-actions" role="toolbar" aria-label="字幕批次操作"><span>已選 {selectedIds.size} 筆</span><button type="button" disabled={busy || generating || buildingPreview} onClick={confirmSelected}>確認選取</button><button type="button" disabled={busy || generating || buildingPreview} onClick={cancelConfirmation}>取消確認</button><button type="button" className="danger-text" disabled={busy || generating || buildingPreview} onClick={() => void deleteSelectedCues()}>刪除選取</button></div>}
+          {visibleCues.map((cue, index) => <div className="subtitle-cue-row" key={cue.id}><button type="button" className={`subtitle-cue-select ${selectedIds.has(cue.id) ? "is-selected" : ""} status-${cue.reviewStatus ?? "CONFIRMED"}`} aria-pressed={selectedIds.has(cue.id)} onClick={(event) => selectCue(cue, event)}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{cue.text}</strong><small>{cueScope(cue) === "INTRO" ? "片頭" : "正片"} · {formatDuration(cue.startMs)} → {formatDuration(cue.endMs)} · <span>{cueOrigin(cue)}</span></small></div><em>{statusLabel(cue.reviewStatus)}</em></button><button type="button" className="subtitle-cue-row-delete danger-text" aria-label="刪除這筆字幕" title={`刪除字幕：${cue.text}`} disabled={busy || generating || buildingPreview} onClick={() => void deleteCueIds(new Set([cue.id]), `這筆${cueScope(cue) === "INTRO" ? "片頭" : "正片"}字幕`)}>刪除</button></div>)}
           <button className="add-cue-button" type="button" disabled={selectedTimelineDurationMs <= 0} onClick={add}>＋ 在 {formatDuration(cursor)} 新增人工字幕</button>
         </aside>
         <main className="subtitle-review-main">

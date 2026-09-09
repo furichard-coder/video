@@ -1,4 +1,4 @@
-# Current Product Spec — v0.45.0
+# Current Product Spec — v0.46.0
 
 ## Scope
 
@@ -16,6 +16,7 @@ Windows-first read-only source organizer. The first visible workflow remains sou
 - AI knowledge subtitles use Codex/ChatGPT login fallback when OpenAI API billing is unavailable; speech transcription remains opt-in.
 - AI regeneration modes: fill blanks, preserve human edits, or replace AI cues in the selected scope. Manual/imported/user-edited cues are protected.
 - Subtitle burn-in is per-output and opt-in. The checkbox can always be cancelled before render; enabling still requires confirmed, current Main cues.
+- AI-generated subtitle cues are persisted as `CONFIRMED` immediately. The subtitle review page offers a visible all-scope confirm/unconfirm toggle, selected-cue confirm/unconfirm/delete actions, and a per-cue delete button. Shift selects a contiguous range for batch actions; deleting a cue only removes it from the manifest.
 
 ## Timeline and output
 

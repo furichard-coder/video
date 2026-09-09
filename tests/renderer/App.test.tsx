@@ -1365,6 +1365,11 @@ describe("App source workflow", () => {
     Object.defineProperty(window, "sourceApp", { configurable: true, value: api }); render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /CC 字幕/ }));
     const dialog = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
+    const allActions = within(dialog).getByRole("toolbar", { name: "字幕全部操作" });
+    expect(within(allActions).getByRole("button", { name: "全部取消確認" })).toBeEnabled();
+    fireEvent.click(within(allActions).getByRole("button", { name: "全部取消確認" }));
+    expect(within(allActions).getByRole("button", { name: "全部確認" })).toBeEnabled();
+    fireEvent.click(within(allActions).getByRole("button", { name: "全部確認" }));
     const first = within(dialog).getByRole("button", { name: /第一筆/ });
     const third = within(dialog).getByRole("button", { name: /第三筆/ });
     fireEvent.click(first);
@@ -1377,6 +1382,24 @@ describe("App source workflow", () => {
     ])));
     fireEvent.click(within(dialog).getByRole("button", { name: "刪除選取" }));
     await waitFor(() => expect(api.setSubtitleCues).toHaveBeenCalledWith([]));
+  });
+
+  it("offers a visible per-cue delete action", async () => {
+    const cues = [
+      { id: "row-delete-1", startMs: 0, endMs: 500, text: "保留字幕", timelineScope: "MAIN" as const, origin: "MANUAL" as const, reviewStatus: "CONFIRMED" as const },
+      { id: "row-delete-2", startMs: 600, endMs: 1_100, text: "刪除字幕", timelineScope: "MAIN" as const, origin: "MANUAL" as const, reviewStatus: "CONFIRMED" as const },
+    ];
+    const api = mockApi({ ...structuredClone(project), subtitleCues: cues });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(api.setSubtitleCues).mockImplementation(async (next) => ({ ...structuredClone(project), subtitleCues: next }));
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api }); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /CC 字幕/ }));
+    const dialog = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
+    const rowDeleteButtons = within(dialog).getAllByRole("button", { name: "刪除這筆字幕" });
+    expect(rowDeleteButtons).toHaveLength(2);
+    fireEvent.click(rowDeleteButtons[1]);
+    await waitFor(() => expect(api.setSubtitleCues).toHaveBeenCalledWith([expect.objectContaining({ id: "row-delete-1" })]));
+    expect(await within(dialog).findByText(/已刪除該筆字幕並保存/)).toBeInTheDocument();
   });
 
   it("makes an exhausted API project unmistakable and explains why local Intro selection could still work", async () => {
