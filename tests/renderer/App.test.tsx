@@ -562,6 +562,8 @@ describe("App source workflow", () => {
       ],
       transitionSeconds: 0.5,
       resolution: "360P",
+      videoCodec: "H265",
+      includeWatermark: true,
       purpose: "CONCAT",
       prependIntro: false,
       subtitleBurnIn: { enabled: false, tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }], styleProfile: { verticalPositionPercent: 82, fontSizePx: 28, textColor: "#FFFFFF", shadowEnabled: true, outlineWidthPx: 2 } },

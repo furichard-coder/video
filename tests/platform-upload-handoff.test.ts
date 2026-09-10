@@ -50,4 +50,17 @@ describe("PlatformUploadHandoffService", () => {
     await expect(service.open(wrong, "UNKNOWN" as never)).rejects.toThrow(/不支援/);
     expect(adapter.openExternal).not.toHaveBeenCalled(); expect(adapter.copyText).not.toHaveBeenCalled(); expect(adapter.showItemInFolder).not.toHaveBeenCalled();
   });
+
+  it("prepares the completed MP4 for the default Chrome YouTube drag-and-drop handoff without changing it", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "youtube-drag-")); roots.push(root);
+    const outputPath = path.join(root, "最新 正片.mp4"); await writeFile(outputPath, "completed-youtube-mp4"); const before = await sha256(outputPath);
+    const adapter = { openExternal: vi.fn(async () => undefined), openYoutubeInChrome: vi.fn(async () => undefined), showItemInFolder: vi.fn(), copyText: vi.fn() };
+    const result = await new PlatformUploadHandoffService(adapter).openYoutubeChrome(outputPath);
+    expect(result).toMatchObject({ platform: "YOUTUBE", outputPath: path.resolve(outputPath), uploadUrl: "https://www.youtube.com/upload" });
+    expect(adapter.openYoutubeInChrome).toHaveBeenCalledWith("https://www.youtube.com/upload");
+    expect(adapter.showItemInFolder).toHaveBeenCalledWith(path.resolve(outputPath));
+    expect(adapter.copyText).toHaveBeenCalledWith(path.resolve(outputPath));
+    expect(result.message).toMatch(/拖到 Chrome/);
+    expect(await sha256(outputPath)).toBe(before);
+  });
 });

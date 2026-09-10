@@ -35,6 +35,7 @@ export type CacheStatus = "HIT" | "CREATED" | "INVALIDATED";
 export type TransitionDurationSec = 0.3 | 0.5 | 0.7;
 export type MainStartCardTransition = "DISSOLVE" | "FADE_BLACK" | "HARD_CUT";
 export type PreviewResolution = "360P" | "480P" | "720P" | "4K";
+export type RenderVideoCodec = "H265" | "H264";
 export type ConcatRenderPhase = "PREPARING" | "TRANSLATING_SUBTITLES" | "RENDERING" | "FINALIZING";
 export type PreviewRenderPurpose = "CONCAT" | "INTRO" | "CLIP" | "SHORTS";
 export type IntroAnalysisPhase = "PREPARING" | "ANALYZING" | "RANKING";
@@ -50,6 +51,7 @@ export type SubtitleTimelineScope = "INTRO" | "MAIN";
 export type AiAnalysisPhase = "PREPARING" | "EXTRACTING_AUDIO" | "TRANSCRIBING" | "SAMPLING_FRAMES" | "MATCHING_STORY" | "SAVING_DRAFTS";
 export type YoutubeBrowser = "CHROME" | "EDGE";
 export type YoutubePrivacyStatus = "unlisted" | "private";
+export type YoutubeHandoffMode = "CHROME_DRAG_DROP" | "OFFICIAL_API";
 export type YoutubeUploadPhase = "AUTHORIZING" | "STARTING" | "UPLOADING" | "FINALIZING";
 export type BrowserUploadPlatform = "BILIBILI" | "TIKTOK";
 export type PreviewOutputOrigin = "APP_RENDERED" | "IMPORTED_EXISTING";
@@ -107,6 +109,10 @@ export interface UserPreferences {
   renderDefaults: {
     transitionSeconds: TransitionDurationSec;
     resolution: PreviewResolution;
+    /** Optional only for preferences written by versions before v0.49; the store fills defaults. */
+    videoCodec?: RenderVideoCodec;
+    includeWatermark?: boolean;
+    youtubeHandoffMode?: YoutubeHandoffMode;
     prependIntro: boolean;
     autoUpload: boolean;
     introPreviewIncludeBgm: boolean;
@@ -384,6 +390,8 @@ export interface SubtitleCue {
   eventSummary?: string;
   peopleSummary?: string[];
   locationSummary?: string[];
+  animalSpecies?: string[];
+  speciesExplanation?: string;
   topicRelevanceScore?: number;
   transcriptVisualMatchScore?: number;
   aiConfidence?: number;
@@ -403,6 +411,16 @@ export interface AiStoryContext {
 }
 
 export type PublishAiProvider = "OPENAI_API" | "CODEX_CHATGPT" | "MANUAL" | "LOCAL_FALLBACK";
+export interface GeminiPublishReview {
+  enabled: boolean;
+  status: "REVIEWED" | "NOT_CONFIGURED" | "FAILED";
+  model: string;
+  summary: string;
+  recommendedTitleId?: string;
+  recommendedThumbnailId?: string;
+  warnings: string[];
+  reviewedAt?: string;
+}
 export type PublishRegenerationMode = "FILL_BLANKS" | "PRESERVE_USER_EDITED" | "REPLACE_AI_DRAFTS";
 export interface PublishTopicSnapshot {
   topic: string;
@@ -469,6 +487,7 @@ export interface AiPublishAssets {
   stale: boolean;
   userEdited: boolean;
   warnings: string[];
+  geminiReview?: GeminiPublishReview;
 }
 export interface AiPublishGenerationOptions {
   topic: PublishTopicSnapshot;
@@ -676,6 +695,10 @@ export interface ConcatRenderRequest {
   clipSelections?: RenderClipSelection[];
   transitionSeconds: TransitionDurationSec;
   resolution: PreviewResolution;
+  /** Defaults to H264 only for legacy callers. The current UI explicitly prefers H265. */
+  videoCodec?: RenderVideoCodec;
+  /** Per-render switch. Project watermark settings still control text, schedule and destinations. */
+  includeWatermark?: boolean;
   purpose?: PreviewRenderPurpose;
   prependIntro?: boolean;
   subtitleBurnIn?: SubtitleBurnInOptions;
@@ -707,6 +730,7 @@ export interface ConcatRenderResult {
   expectedDurationMs: number;
   transitionSeconds: TransitionDurationSec;
   resolution: PreviewResolution;
+  videoCodec?: RenderVideoCodec;
   purpose: PreviewRenderPurpose;
   bgmAppliedCount?: number;
   photoShutterAppliedCount?: number;
@@ -734,6 +758,7 @@ export interface PreviewOutputRecord {
   sizeBytes: number;
   durationMs?: number;
   resolution?: PreviewResolution;
+  videoCodec?: RenderVideoCodec;
   cancelled?: boolean;
   includedIntroSegmentCount?: number;
   projectName?: string;
@@ -847,6 +872,18 @@ export interface AiSettingsSnapshot {
   accounts: AiAccountProfile[];
   encryptionAvailable: boolean;
   codexLoginReusable: boolean;
+  geminiReview?: {
+    enabled: boolean;
+    model: string;
+    credentialStatus: AiCredentialStatus;
+  };
+}
+
+export interface GeminiReviewSettingsUpdate {
+  enabled: boolean;
+  model: string;
+  apiKey?: string;
+  clearApiKey?: boolean;
 }
 
 export interface AiAccountSaveInput {
@@ -941,7 +978,7 @@ export interface YoutubeUploadResult {
 }
 
 export interface PlatformUploadHandoffResult {
-  platform: BrowserUploadPlatform;
+  platform: BrowserUploadPlatform | "YOUTUBE";
   outputPath: string;
   uploadUrl: string;
   message: string;
@@ -1056,6 +1093,7 @@ export interface AppApi {
   cancelIntroAnalysis(): Promise<void>;
   getAiSettings(): Promise<AiSettingsSnapshot>;
   saveAiAccount(input: AiAccountSaveInput): Promise<AiSettingsSnapshot>;
+  saveGeminiReviewSettings?(input: GeminiReviewSettingsUpdate): Promise<AiSettingsSnapshot>;
   setActiveAiAccount(accountId: string): Promise<AiSettingsSnapshot>;
   removeAiAccount(accountId: string): Promise<AiSettingsSnapshot>;
   testAiAccount(accountId: string): Promise<AiConnectionTestResult>;
@@ -1115,6 +1153,7 @@ export interface AppApi {
   retryYoutubeThumbnail?(videoId: string, thumbnailPath: string): Promise<{ status: "UPLOADED" }>;
   cancelYoutubeUpload(): Promise<void>;
   openYoutubeVideo(videoId: string): Promise<void>;
+  prepareYoutubeChromeHandoff?(jobId: string): Promise<PlatformUploadHandoffResult>;
   openPlatformUpload(jobId: string, platform: BrowserUploadPlatform): Promise<PlatformUploadHandoffResult>;
   openPlatformPortal(platform: BrowserUploadPlatform): Promise<PlatformPortalResult>;
   onImportProgress(callback: (progress: ImportProgress) => void): void;

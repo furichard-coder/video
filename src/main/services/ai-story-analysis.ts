@@ -12,7 +12,7 @@ import { runProcess } from "./process-runner";
 import { SourceService } from "./source-service";
 import { finalizePartialOutput } from "./atomic-output";
 
-export const AI_STORY_ANALYZER_VERSION = "story-match-v2-codex-fallback";
+export const AI_STORY_ANALYZER_VERSION = "story-match-v3-animal-species";
 const MAX_AUDIO_CHUNK_MS = 240_000;
 const MAX_GENERATED_CUES = 100;
 const MAX_VOICE_INPUT_BYTES = 25 * 1024 * 1024;
@@ -242,6 +242,8 @@ export class AiStoryAnalysisService {
         eventSummary: analysis.eventSummary,
         peopleSummary: analysis.peopleSummary,
         locationSummary: analysis.locationSummary,
+        animalSpecies: analysis.animalSpecies ?? [],
+        speciesExplanation: analysis.speciesExplanation ?? "",
         topicRelevanceScore: analysis.topicRelevanceScore,
         transcriptVisualMatchScore: analysis.transcriptVisualMatchScore,
         aiConfidence: analysis.confidence,

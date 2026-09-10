@@ -438,6 +438,23 @@ describe("concat preview integration", () => {
     expect(info.videoCodec).toBe("h264");
   }, 60_000);
 
+  it("renders the preferred H.265 MP4 and honors the per-render watermark opt-out", async () => {
+    const beforeHashes = await Promise.all([sha256(firstPath), sha256(secondPath)]);
+    const h265Output = path.join(root, "joined-preview-h265.mp4");
+    const result = await new ConcatRenderService(store, sources).render({
+      outputToken: "service-h265-token",
+      ...currentMainRequest(),
+      transitionSeconds: 0.3,
+      resolution: "360P",
+      videoCodec: "H265",
+      includeWatermark: false,
+    }, h265Output);
+    const outputInfo = await new MediaProbe().probe(h265Output);
+    expect(outputInfo).toMatchObject({ width: 640, height: 360, videoCodec: "hevc", audioCodec: "aac" });
+    expect(result).toMatchObject({ videoCodec: "H265", watermarkApplied: false });
+    expect(await Promise.all([sha256(firstPath), sha256(secondPath)])).toEqual(beforeHashes);
+  }, 60_000);
+
   it("renders a photo for its persisted three-to-seven-second duration without changing the image or video source", async () => {
     const photoPath = path.join(root, "直式照片.jpg");
     await runProcess("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=yellow:s=540x960", "-frames:v", "1", "-y", photoPath]);

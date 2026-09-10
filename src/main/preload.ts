@@ -13,6 +13,7 @@ import type {
   ExternalMediaTarget,
   ExternalPlayerId,
   ExternalPlayerSettingsUpdate,
+  GeminiReviewSettingsUpdate,
   BgmTrack,
   MusicSuggestionRequest,
   BrowserUploadPlatform,
@@ -110,6 +111,7 @@ const api: AppApi = {
   cancelIntroAnalysis: () => ipcRenderer.invoke("intro:cancel-analysis"),
   getAiSettings: () => ipcRenderer.invoke("ai:get-settings"),
   saveAiAccount: (input: AiAccountSaveInput) => ipcRenderer.invoke("ai:save-account", input),
+  saveGeminiReviewSettings: (input: GeminiReviewSettingsUpdate) => ipcRenderer.invoke("ai:save-gemini-review", input),
   setActiveAiAccount: (accountId: string) => ipcRenderer.invoke("ai:set-active-account", accountId),
   removeAiAccount: (accountId: string) => ipcRenderer.invoke("ai:remove-account", accountId),
   testAiAccount: (accountId: string) => ipcRenderer.invoke("ai:test-account", accountId),
@@ -168,6 +170,7 @@ const api: AppApi = {
   retryYoutubeThumbnail: (videoId: string, thumbnailPath: string) => ipcRenderer.invoke("youtube:retry-thumbnail", videoId, thumbnailPath),
   cancelYoutubeUpload: () => ipcRenderer.invoke("youtube:cancel-upload"),
   openYoutubeVideo: (videoId: string) => ipcRenderer.invoke("youtube:open-video", videoId),
+  prepareYoutubeChromeHandoff: (jobId: string) => ipcRenderer.invoke("youtube:prepare-chrome-handoff", jobId),
   openPlatformUpload: (jobId: string, platform: BrowserUploadPlatform) => ipcRenderer.invoke("platform-upload:open", jobId, platform),
   openPlatformPortal: (platform: BrowserUploadPlatform) => ipcRenderer.invoke("platform-upload:open-portal", platform),
   onImportProgress: (callback: (progress: ImportProgress) => void) => {

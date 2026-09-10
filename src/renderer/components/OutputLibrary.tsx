@@ -36,12 +36,13 @@ interface OutputRecordActionsProps {
   onError?(message?: string): void;
   onCopySuccess?(): void;
   onYoutube?(): void;
+  onYoutubeApi?(): void;
   onPlatform?(platform: BrowserUploadPlatform): Promise<void>;
   showPublish?: boolean;
 }
 
 /** One shared implementation of playback, reveal, copy and optional publish actions. */
-export function OutputRecordActions({ output, onError, onCopySuccess, onYoutube, onPlatform, showPublish = false }: OutputRecordActionsProps) {
+export function OutputRecordActions({ output, onError, onCopySuccess, onYoutube, onYoutubeApi, onPlatform, showPublish = false }: OutputRecordActionsProps) {
   const [busy, setBusy] = useState(false);
   const run = async (action: "PLAY" | "REVEAL" | "COPY" | BrowserUploadPlatform) => {
     setBusy(true); onError?.(undefined);
@@ -58,7 +59,8 @@ export function OutputRecordActions({ output, onError, onCopySuccess, onYoutube,
     <button type="button" disabled={disabled} onClick={() => void run("PLAY")}>▶ 播放</button>
     <button type="button" disabled={disabled} onClick={() => void run("REVEAL")}>開啟位置</button>
     <button type="button" disabled={disabled} onClick={() => void run("COPY")}>複製路徑</button>
-    {showPublish && onYoutube && <button className="youtube-connect-button" type="button" disabled={disabled} onClick={onYoutube}>上傳 YouTube</button>}
+    {showPublish && onYoutube && <button className="youtube-connect-button" type="button" disabled={disabled} onClick={onYoutube}>Chrome 拖放（預設）</button>}
+    {showPublish && onYoutubeApi && <button type="button" disabled={disabled} onClick={onYoutubeApi}>YouTube API</button>}
     {showPublish && onPlatform && <><button className="bilibili-upload-button" type="button" disabled={disabled} onClick={() => void run("BILIBILI")}>BiliBili</button><button className="tiktok-upload-button" type="button" disabled={disabled} onClick={() => void run("TIKTOK")}>TikTok</button></>}
   </div>;
 }

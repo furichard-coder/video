@@ -11,6 +11,7 @@ export interface PlatformHandoffAdapter {
   openExternal(url: string): Promise<void>;
   showItemInFolder(filePath: string): void;
   copyText(text: string): void;
+  openYoutubeInChrome?(url: string): Promise<void>;
 }
 
 export class PlatformUploadHandoffService {
@@ -40,6 +41,24 @@ export class PlatformUploadHandoffService {
       outputPath: resolved,
       uploadUrl,
       message: `已開啟 ${label} 官方投稿頁、在檔案總管選取成品，並將完整路徑複製到剪貼簿。請在平台頁面自行確認標題、版權、隱私及最後發布。`,
+    };
+  }
+
+  async openYoutubeChrome(outputPath: string): Promise<PlatformUploadHandoffResult> {
+    const resolved = path.resolve(outputPath);
+    if (path.extname(resolved).toLowerCase() !== ".mp4") throw new Error("YouTube 拖放只接受已完成的 MP4。");
+    const info = await stat(resolved).catch(() => undefined);
+    if (!info?.isFile() || info.size < 1) throw new Error("找不到可上傳的完成檔，請重新產出正片預覽。");
+    const uploadUrl = "https://www.youtube.com/upload";
+    if (this.adapter.openYoutubeInChrome) await this.adapter.openYoutubeInChrome(uploadUrl);
+    else await this.adapter.openExternal(uploadUrl);
+    this.adapter.copyText(resolved);
+    this.adapter.showItemInFolder(resolved);
+    return {
+      platform: "YOUTUBE",
+      outputPath: resolved,
+      uploadUrl,
+      message: "已在 Chrome 開啟 YouTube Studio 上傳頁，並在檔案總管選取最新 MP4。請用滑鼠把已選取的檔案拖到 Chrome 上傳區；檔案路徑也已複製。",
     };
   }
 }

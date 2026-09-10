@@ -18,6 +18,8 @@ export interface StoryFrameAnalysis {
   eventSummary: string;
   peopleSummary: string[];
   locationSummary: string[];
+  animalSpecies?: string[];
+  speciesExplanation?: string;
   topicRelevanceScore: number;
   transcriptVisualMatchScore: number;
   confidence: number;
@@ -139,7 +141,7 @@ export class OpenAiProvider {
   constructor(private readonly fetcher: FetchLike = fetch) {}
 
   async generatePublishAssets(input: PublishGenerationInput, account: AiAccountProfile & { apiKey: string }, signal?: AbortSignal): Promise<{ draft: PublishGeneratedDraft; model: string; requestId?: string }> {
-    const content: Array<Record<string, unknown>> = [{ type: "input_text", text: ["為旅遊 YouTube 影片產生發布素材。先理解主題、故事與正片內容，再優先判讀已選片頭的實際候選畫面，讓標題與縮圖呈現影片開場承諾。只能依提供的資料與低解析影格；不得猜測人物身分或未提供的地點。", JSON.stringify({ topic: input.topic, durationMs: input.durationMs, intro: input.introSummary, timeline: input.timelineSummary, candidates: input.candidates.map(({ framePath: _framePath, ...candidate }) => candidate) }), "標題須延伸影片內容與片頭畫面，嚴格依 JSON schema 回傳 3–5 個標題、說明、hashtags、3 個可追溯縮圖概念與合法章節。縮圖概念應優先選用 origin=INTRO 的候選，除非該畫面明顯不適合。"].join("\n\n") }];
+    const content: Array<Record<string, unknown>> = [{ type: "input_text", text: ["為旅遊 YouTube 影片產生發布素材。先理解主題、故事與正片內容，再優先判讀已選片頭的實際候選畫面，讓標題與縮圖呈現影片開場承諾。只能依提供的資料與低解析影格；不得猜測人物身分或未提供的地點。", JSON.stringify({ topic: input.topic, durationMs: input.durationMs, intro: input.introSummary, timeline: input.timelineSummary, candidates: input.candidates.map(({ framePath: _framePath, ...candidate }) => candidate) }), "標題須延伸影片內容與片頭畫面，嚴格依 JSON schema 回傳 3–5 個標題、說明、hashtags、3 個可追溯縮圖概念與合法章節。縮圖概念應優先選用 origin=INTRO 的候選，除非該畫面明顯不適合。", "品質要求：標題彼此角度要有明顯差異、避免制式空話，必須具體呼應可見主體或片頭情境，總長不超過 100 字；可自然加入一個英文關鍵片語或 hashtag，但不可堆砌。縮圖顯示文字應精簡、通常不超過 12 個中文字，與標題互補而非重複，並依候選畫面的主體位置選擇左右版面、避免遮住重要景物。說明與章節只能使用有來源依據的資訊。"].join("\n\n") }];
     for (const candidate of input.candidates) {
       const bytes = await readFile(candidate.framePath);
       content.push({ type: "input_image", image_url: `data:image/jpeg;base64,${Buffer.from(bytes).toString("base64")}`, detail: "low" });
@@ -319,6 +321,7 @@ export class OpenAiProvider {
       contextText,
       "只能根據提供的畫面、語音與專案背景作答。不得因臉孔外觀辨識真實身分；人物姓名只有在語音或專案背景足以支持時才能使用。",
       "地點不確定時使用一般描述並加入警告，不得猜測地標；知識無法由畫面與已知背景合理支持時，寧可留空並提出警告，不可捏造。繁體中文自然、簡潔，避免劇透與誇大。",
+      "若畫面可見動物，請辨識可由外觀支持的物種或較安全的類群，animalSpecies 填常用中文名，speciesExplanation 提供一句與當下畫面相關的棲地、行為或生態說明，並讓 suggestedSubtitle 自然帶入。無法可靠辨識到物種時必須寫『疑似』或只寫較廣類群、降低 confidence 並加入 warnings；畫面沒有動物時兩欄留空。",
     ].join("\n\n");
     const body = {
       model: account.visionModel,
@@ -344,12 +347,14 @@ export class OpenAiProvider {
               eventSummary: { type: "string" },
               peopleSummary: { type: "array", items: { type: "string" } },
               locationSummary: { type: "array", items: { type: "string" } },
+              animalSpecies: { type: "array", items: { type: "string" } },
+              speciesExplanation: { type: "string" },
               topicRelevanceScore: { type: "integer", minimum: 0, maximum: 100 },
               transcriptVisualMatchScore: { type: "integer", minimum: 0, maximum: 100 },
               confidence: { type: "integer", minimum: 0, maximum: 100 },
               warnings: { type: "array", items: { type: "string" } },
             },
-            required: ["suggestedSubtitle", "visualSummary", "eventSummary", "peopleSummary", "locationSummary", "topicRelevanceScore", "transcriptVisualMatchScore", "confidence", "warnings"],
+            required: ["suggestedSubtitle", "visualSummary", "eventSummary", "peopleSummary", "locationSummary", "animalSpecies", "speciesExplanation", "topicRelevanceScore", "transcriptVisualMatchScore", "confidence", "warnings"],
           },
         },
       },
@@ -372,6 +377,8 @@ export class OpenAiProvider {
       eventSummary: typeof parsed.eventSummary === "string" ? parsed.eventSummary.trim() : "",
       peopleSummary: stringArray(parsed.peopleSummary),
       locationSummary: stringArray(parsed.locationSummary),
+      animalSpecies: stringArray(parsed.animalSpecies),
+      speciesExplanation: typeof parsed.speciesExplanation === "string" ? parsed.speciesExplanation.trim() : "",
       topicRelevanceScore: score(parsed.topicRelevanceScore),
       transcriptVisualMatchScore: score(parsed.transcriptVisualMatchScore),
       confidence: score(parsed.confidence),

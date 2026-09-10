@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { AiAccountProfile, AiAccountSaveInput, AiSettingsSnapshot } from "../../shared/domain";
+import type { AiAccountProfile, AiAccountSaveInput, AiSettingsSnapshot, GeminiReviewSettingsUpdate } from "../../shared/domain";
 import { finalizePartialOutput } from "./atomic-output";
 import { findCodexExecutableSync } from "./codex-cli-provider";
 
 export const DEFAULT_AI_ACCOUNT_ID = "openai-default";
 export const DEFAULT_VISION_MODEL = "gpt-5.6-terra";
 export const DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-transcribe-diarize";
+export const GEMINI_REVIEW_CREDENTIAL_ID = "gemini-publish-review";
+export const DEFAULT_GEMINI_REVIEW_MODEL = "gemini-2.5-flash";
 
 interface StoredAccount {
   id: string;
@@ -22,6 +24,7 @@ interface SettingsFile {
   schemaVersion: 1;
   activeAccountId: string;
   accounts: StoredAccount[];
+  geminiReview?: { enabled: boolean; model: string };
 }
 
 interface CredentialFile {
@@ -73,7 +76,7 @@ function looksLikeCredentials(value: unknown): value is CredentialFile {
 export class AiSettingsStore {
   readonly settingsPath: string;
   readonly credentialsPath: string;
-  private settings: SettingsFile = { schemaVersion: 1, activeAccountId: DEFAULT_AI_ACCOUNT_ID, accounts: [defaultAccount()] };
+  private settings: SettingsFile = { schemaVersion: 1, activeAccountId: DEFAULT_AI_ACCOUNT_ID, accounts: [defaultAccount()], geminiReview: { enabled: false, model: DEFAULT_GEMINI_REVIEW_MODEL } };
   private credentials: CredentialFile = { schemaVersion: 1, encryptedKeys: {} };
   private writeChain: Promise<void> = Promise.resolve();
 
@@ -82,6 +85,7 @@ export class AiSettingsStore {
     private readonly protector: CredentialProtector,
     private readonly environmentApiKey = process.env.OPENAI_API_KEY?.trim() || "",
     private readonly codexLoginReusable = Boolean(findCodexExecutableSync()),
+    private readonly environmentGeminiApiKey = process.env.GEMINI_API_KEY?.trim() || "",
   ) {
     this.settingsPath = path.join(dataRoot, "settings", "ai-providers.json");
     this.credentialsPath = path.join(dataRoot, "settings", "ai-credentials.encrypted.json");
@@ -95,13 +99,13 @@ export class AiSettingsStore {
       this.settings = this.sanitizeSettings(parsed);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof SyntaxError) && !String(error).includes("不相容")) throw error;
-      this.settings = { schemaVersion: 1, activeAccountId: DEFAULT_AI_ACCOUNT_ID, accounts: [defaultAccount()] };
+      this.settings = { schemaVersion: 1, activeAccountId: DEFAULT_AI_ACCOUNT_ID, accounts: [defaultAccount()], geminiReview: { enabled: false, model: DEFAULT_GEMINI_REVIEW_MODEL } };
       await this.writeJson(this.settingsPath, this.settings);
     }
     try {
       const parsed: unknown = JSON.parse(await readFile(this.credentialsPath, "utf8"));
       if (!looksLikeCredentials(parsed)) throw new Error("AI 憑證格式不相容");
-      this.credentials = { schemaVersion: 1, encryptedKeys: Object.fromEntries(Object.entries(parsed.encryptedKeys).filter(([id, value]) => this.settings.accounts.some((account) => account.id === id) && typeof value === "string" && value.length > 0)) };
+      this.credentials = { schemaVersion: 1, encryptedKeys: Object.fromEntries(Object.entries(parsed.encryptedKeys).filter(([id, value]) => (this.settings.accounts.some((account) => account.id === id) || id === GEMINI_REVIEW_CREDENTIAL_ID) && typeof value === "string" && value.length > 0)) };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof SyntaxError) && !String(error).includes("不相容")) throw error;
       this.credentials = { schemaVersion: 1, encryptedKeys: {} };
@@ -123,7 +127,40 @@ export class AiSettingsStore {
       })),
       encryptionAvailable: this.protector.isAvailable(),
       codexLoginReusable: this.codexLoginReusable,
+      geminiReview: {
+        enabled: this.settings.geminiReview?.enabled === true,
+        model: this.settings.geminiReview?.model ?? DEFAULT_GEMINI_REVIEW_MODEL,
+        credentialStatus: this.credentials.encryptedKeys[GEMINI_REVIEW_CREDENTIAL_ID] ? "SAVED_ENCRYPTED" : this.environmentGeminiApiKey ? "ENVIRONMENT" : "MISSING",
+      },
     };
+  }
+
+  async saveGeminiReviewSettings(input: GeminiReviewSettingsUpdate): Promise<AiSettingsSnapshot> {
+    if (!input || typeof input !== "object") throw new Error("Gemini 輔助設定格式無效。");
+    const model = assertModel(input.model || DEFAULT_GEMINI_REVIEW_MODEL, "Gemini 模型");
+    const rawApiKey = input.apiKey?.trim();
+    if (rawApiKey) {
+      if (rawApiKey.length < 20 || rawApiKey.length > 500 || /\s/.test(rawApiKey)) throw new Error("Gemini API Key 格式無效。");
+      if (!this.protector.isAvailable()) throw new Error("Windows 安全儲存目前不可用；為避免明文落盤，App 拒絕保存 Gemini API Key。");
+    }
+    await this.mutate(() => {
+      this.settings.geminiReview = { enabled: Boolean(input.enabled), model };
+      if (rawApiKey) this.credentials.encryptedKeys[GEMINI_REVIEW_CREDENTIAL_ID] = this.protector.protect(rawApiKey);
+      if (input.clearApiKey) delete this.credentials.encryptedKeys[GEMINI_REVIEW_CREDENTIAL_ID];
+    });
+    return this.getSnapshot();
+  }
+
+  getRuntimeGeminiReview(): { enabled: boolean; model: string; apiKey?: string } {
+    const enabled = this.settings.geminiReview?.enabled === true;
+    const model = this.settings.geminiReview?.model ?? DEFAULT_GEMINI_REVIEW_MODEL;
+    let apiKey = this.environmentGeminiApiKey;
+    const encrypted = this.credentials.encryptedKeys[GEMINI_REVIEW_CREDENTIAL_ID];
+    if (encrypted) {
+      if (!this.protector.isAvailable()) return { enabled, model };
+      try { apiKey = this.protector.unprotect(encrypted); } catch { return { enabled, model }; }
+    }
+    return { enabled, model, ...(apiKey ? { apiKey } : {}) };
   }
 
   async saveAccount(input: AiAccountSaveInput): Promise<AiSettingsSnapshot> {
@@ -202,7 +239,12 @@ export class AiSettingsStore {
       } catch { /* discard malformed account */ }
     }
     if (!accounts.length) accounts.push(defaultAccount());
-    return { schemaVersion: 1, accounts, activeAccountId: accounts.some((account) => account.id === value.activeAccountId) ? value.activeAccountId : accounts[0].id };
+    let geminiReview = { enabled: false, model: DEFAULT_GEMINI_REVIEW_MODEL };
+    if (value.geminiReview && typeof value.geminiReview === "object") {
+      try { geminiReview = { enabled: value.geminiReview.enabled === true, model: assertModel(value.geminiReview.model || DEFAULT_GEMINI_REVIEW_MODEL, "Gemini 模型") }; }
+      catch { geminiReview = { enabled: false, model: DEFAULT_GEMINI_REVIEW_MODEL }; }
+    }
+    return { schemaVersion: 1, accounts, activeAccountId: accounts.some((account) => account.id === value.activeAccountId) ? value.activeAccountId : accounts[0].id, geminiReview };
   }
 
   private async mutate(mutator: () => void): Promise<void> {

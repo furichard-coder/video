@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell as electronShell } from "electron";
-import type { AiAccountSaveInput, AiPublishGenerationOptions, AiStoryContext, AiSubtitleGenerationOptions, BackgroundJobKind, BackgroundJobSnapshot, BackgroundJobStatus, BgmTrack, BrowserUploadPlatform, ConcatRenderRequest, ExternalMediaTarget, ExternalPlayerId, ExternalPlayerSettingsUpdate, IntroSuggestion, MainExclusionRange, MusicSuggestionRequest, PlacementRequest, PreviewVariant, ProjectColorSettings, SortMode, SubtitleCue, SubtitleTimelineScope, ThumbnailRenderRequest, TranslationSettingsUpdate, UserPreferencesUpdate, VoiceInputRequest, VolumeSegment, WatermarkSettings, YoutubeSettingsUpdate, YoutubeUploadRequest, ZoomSegment } from "../shared/domain";
+import type { AiAccountSaveInput, AiPublishGenerationOptions, AiStoryContext, AiSubtitleGenerationOptions, BackgroundJobKind, BackgroundJobSnapshot, BackgroundJobStatus, BgmTrack, BrowserUploadPlatform, ConcatRenderRequest, ExternalMediaTarget, ExternalPlayerId, ExternalPlayerSettingsUpdate, GeminiReviewSettingsUpdate, IntroSuggestion, MainExclusionRange, MusicSuggestionRequest, PlacementRequest, PreviewVariant, ProjectColorSettings, SortMode, SubtitleCue, SubtitleTimelineScope, ThumbnailRenderRequest, TranslationSettingsUpdate, UserPreferencesUpdate, VoiceInputRequest, VolumeSegment, WatermarkSettings, YoutubeSettingsUpdate, YoutubeUploadRequest, ZoomSegment } from "../shared/domain";
 import { ConcatRenderService } from "./services/concat-render";
 import { IntroAnalyzer } from "./services/intro-analyzer";
 import { PreviewCache } from "./services/preview-cache";
@@ -377,6 +377,7 @@ export function registerIpc(
   ipcMain.handle("intro:cancel-analysis", () => introController?.abort());
   ipcMain.handle("ai:get-settings", () => aiSettings.getSnapshot());
   ipcMain.handle("ai:save-account", (_event, input: AiAccountSaveInput) => aiSettings.saveAccount(input));
+  ipcMain.handle("ai:save-gemini-review", (_event, input: GeminiReviewSettingsUpdate) => aiSettings.saveGeminiReviewSettings(input));
   ipcMain.handle("ai:set-active-account", (_event, accountId: string) => aiSettings.setActiveAccount(accountId));
   ipcMain.handle("ai:remove-account", (_event, accountId: string) => aiSettings.removeAccount(accountId));
   ipcMain.handle("ai:test-account", async (_event, accountId: string) => {
@@ -680,6 +681,11 @@ export function registerIpc(
   ipcMain.handle("youtube:cancel-upload", () => youtubeUploadController?.abort());
   ipcMain.handle("youtube:retry-thumbnail", async (_event, videoId: string, thumbnailPath: string) => youtubeUpload.retryThumbnail(videoId, thumbnailPath));
   ipcMain.handle("youtube:open-video", (_event, videoId: string) => youtubeUpload.openVideo(videoId));
+  ipcMain.handle("youtube:prepare-chrome-handoff", async (_event, jobId: string) => {
+    const output = typeof jobId === "string" ? await outputHistory.get(jobId) : undefined;
+    if (!output || output.purpose === "INTRO" || output.purpose === "CLIP") throw new Error("片頭／單一時間段預覽不可直接當正片投稿；請選擇正片或已確認的既有 MP4。");
+    return platformUploadHandoff.openYoutubeChrome(output.outputPath);
+  });
   ipcMain.handle("platform-upload:open", async (_event, jobId: string, platform: BrowserUploadPlatform) => {
     const output = typeof jobId === "string" ? await outputHistory.get(jobId) : undefined;
     if (!output || output.purpose === "INTRO" || output.purpose === "CLIP") throw new Error("片頭／單一時間段預覽不可直接當正片投稿；請選擇正片或已確認的既有 MP4。");

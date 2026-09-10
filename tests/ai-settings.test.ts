@@ -48,4 +48,14 @@ describe("AI settings", () => {
     const unsafe = new AiSettingsStore(await root(), { isAvailable: () => false, protect: () => "", unprotect: () => "" }); await unsafe.initialize();
     await expect(unsafe.saveAccount({ name: "拒絕明文", provider: "OPENAI", visionModel: "gpt-5.6-terra", transcriptionModel: "gpt-4o-transcribe", apiKey: "sk-no-123456789012345678901234567890" })).rejects.toThrow(/拒絕保存/);
   });
+
+  it("stores the optional Gemini publish reviewer separately and never exposes its key", async () => {
+    const dataRoot = await root(); const store = new AiSettingsStore(dataRoot, protector); await store.initialize();
+    const apiKey = "AIza-gemini-review-12345678901234567890";
+    const saved = await store.saveGeminiReviewSettings({ enabled: true, model: "gemini-2.5-flash", apiKey });
+    expect(saved.geminiReview).toMatchObject({ enabled: true, model: "gemini-2.5-flash", credentialStatus: "SAVED_ENCRYPTED" });
+    expect(store.getRuntimeGeminiReview()).toMatchObject({ enabled: true, model: "gemini-2.5-flash", apiKey });
+    expect(await readFile(store.settingsPath, "utf8")).not.toContain(apiKey);
+    expect(await readFile(store.credentialsPath, "utf8")).not.toContain(apiKey);
+  });
 });

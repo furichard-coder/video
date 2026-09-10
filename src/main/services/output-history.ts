@@ -8,6 +8,7 @@ import type {
   PreviewOutputPurpose,
   PreviewOutputRecord,
   PreviewResolution,
+  RenderVideoCodec,
 } from "../../shared/domain";
 import { MediaProbe } from "./media-probe";
 
@@ -25,6 +26,10 @@ function validPurpose(value: unknown): value is PreviewOutputPurpose {
 
 function validResolution(value: unknown): value is PreviewResolution {
   return value === "360P" || value === "480P" || value === "720P" || value === "4K";
+}
+
+function validVideoCodec(value: unknown): value is RenderVideoCodec {
+  return value === "H265" || value === "H264";
 }
 
 function sanitizeRecord(value: unknown): StoredOutput | undefined {
@@ -45,6 +50,7 @@ function sanitizeRecord(value: unknown): StoredOutput | undefined {
     sizeBytes: Math.round(Number(item.sizeBytes)),
     durationMs: Number.isFinite(item.durationMs) && Number(item.durationMs) >= 0 ? Math.round(Number(item.durationMs)) : undefined,
     resolution: validResolution(item.resolution) ? item.resolution : undefined,
+    videoCodec: validVideoCodec(item.videoCodec) ? item.videoCodec : undefined,
     cancelled: item.cancelled === true,
     includedIntroSegmentCount: Number.isInteger(item.includedIntroSegmentCount) && Number(item.includedIntroSegmentCount) >= 0 ? Number(item.includedIntroSegmentCount) : undefined,
     projectName: typeof item.projectName === "string" && item.projectName.trim() ? item.projectName.trim().slice(0, 160) : undefined,
@@ -99,6 +105,7 @@ export class OutputHistoryStore {
       sizeBytes: result.sizeBytes,
       durationMs: result.expectedDurationMs,
       resolution: result.resolution,
+      videoCodec: result.videoCodec,
       cancelled: result.cancelled,
       includedIntroSegmentCount: result.includedIntroSegmentCount,
       projectName,
@@ -128,7 +135,8 @@ export class OutputHistoryStore {
         const displayWidth = media.displayWidth ?? media.width;
         const displayHeight = media.displayHeight ?? media.height;
         const resolution = displayWidth === 640 && displayHeight === 360 ? "360P" : displayWidth === 854 && displayHeight === 480 ? "480P" : displayWidth === 1280 && displayHeight === 720 ? "720P" : displayWidth === 3840 && displayHeight === 2160 ? "4K" : undefined;
-        additions.push({ jobId: randomUUID(), outputPath: resolved, fileName: path.basename(resolved), purpose: "UNKNOWN", origin: "IMPORTED_EXISTING", createdAt: file.birthtime.toISOString(), sizeBytes: file.size, durationMs: media.durationMs, resolution, aspectRatio: displayWidth && displayHeight && displayHeight > displayWidth ? "PORTRAIT_9_16" : "LANDSCAPE_16_9" });
+        const videoCodec = media.videoCodec?.toLowerCase() === "hevc" || media.videoCodec?.toLowerCase() === "h265" ? "H265" : media.videoCodec?.toLowerCase() === "h264" ? "H264" : undefined;
+        additions.push({ jobId: randomUUID(), outputPath: resolved, fileName: path.basename(resolved), purpose: "UNKNOWN", origin: "IMPORTED_EXISTING", createdAt: file.birthtime.toISOString(), sizeBytes: file.size, durationMs: media.durationMs, resolution, videoCodec, aspectRatio: displayWidth && displayHeight && displayHeight > displayWidth ? "PORTRAIT_9_16" : "LANDSCAPE_16_9" });
         known.add(key); addedCount += 1;
       } catch (error) { errors.push(`${path.basename(resolved)}：${error instanceof Error ? error.message : String(error)}`); }
     }

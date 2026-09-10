@@ -1,5 +1,21 @@
 # 第一階段驗證紀錄
 
+## v0.49.0 增量驗證（2026-09-10）
+
+| 項目 | 結果 |
+|---|---|
+| YouTube Chrome 人工拖放交接 | PASS；只接受成品索引內存在的 Main／既有 MP4，打開官方上傳頁、複製完整路徑並選取檔案；Intro／Clip 被阻擋，最終拖放與發布不自動執行。 |
+| 官方 API 備援 | PASS；既有 YouTube OAuth／集中確認流程保留為第二選項，預設仍為不公開且需人工確認。 |
+| H.265／H.264 | PASS；UI 與持久偏好預設 H.265，實際 FFmpeg 以 `libx265`＋`hvc1` 產生 HEVC MP4；H.264 路徑與舊輸出紀錄相容。 |
+| 單次浮水印 | PASS；輸出頁預設勾選，Main 再驗證；實際 opt-out 輸出回報未套用且來源 SHA-256 前後一致。 |
+| 浮水印 UX | PASS；modal 內容限制寬度、禁止橫向溢出，時間／位置／樣式欄位採 auto-fit，footer 可換行，小視窗改為單欄。 |
+| ChatGPT 主生成／Gemini 輔助 | PASS；Codex／ChatGPT 優先、OpenAI API 備援、離線 fallback 最後；Gemini 只復核既有 title/thumbnail ID，未設定或失敗不會丟失主結果。API Key 使用既有 Windows 加密憑證保存。 |
+| 標題與縮圖工作台 | PASS；選定結果、標題、縮圖依序優先顯示，標題 100 字 gate、片頭優先可追溯影格與候選縮圖合成維持。 |
+| 動物物種字幕證據 | PASS；OpenAI/Codex strict schema、正規化、cache 版本與字幕顯示均包含物種及說明；prompt 明定不確定時使用較寬分類／疑似、降低信心並警告。 |
+| 來源與舊版 | PASS；來源媒體、根目錄 7 份 SOP 與 v0.48.0 以前 release 未修改；封裝 smoke 未留下 v0.49.0 程序，也未關閉使用者正在執行的 v0.47/v0.48 視窗。 |
+
+完整驗證：TypeScript PASS；Vitest 43 個測試檔／262 個測試 PASS；production build PASS；Electron smoke PASS；Windows packaged smoke PASS；`npm audit --audit-level=high` 0 vulnerabilities。封裝 EXE 大小 `244441088` bytes，資料夾大小 `392502872` bytes，SHA-256 `82248E2C79CBB6C94BA4D81E5CCEF285DE6DE2C50704518D0C6ADB10768EA427`。
+
 ## v0.48.0 增量驗證（2026-09-10）
 
 | 項目 | 結果 |

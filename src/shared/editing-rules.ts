@@ -270,6 +270,8 @@ export function validateSubtitleCues(cues: SubtitleCue[]): SubtitleCue[] {
       aiConfidence: numericScore(cue.aiConfidence, "AI 信心分數"),
       peopleSummary: list(cue.peopleSummary),
       locationSummary: list(cue.locationSummary),
+      animalSpecies: list(cue.animalSpecies),
+      speciesExplanation: typeof cue.speciesExplanation === "string" ? cue.speciesExplanation.trim().slice(0, 1_000) : undefined,
       aiWarnings: list(cue.aiWarnings),
     };
   }).sort((a, b) => (a.timelineScope === "INTRO" ? 0 : 1) - (b.timelineScope === "INTRO" ? 0 : 1) || a.startMs - b.startMs || a.endMs - b.endMs);

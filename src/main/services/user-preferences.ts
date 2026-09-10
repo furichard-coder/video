@@ -120,7 +120,7 @@ function defaults(): UserPreferences {
   return {
     schemaVersion: 1,
     viewMode: "GRID",
-    renderDefaults: { transitionSeconds: 0.3, resolution: "480P", prependIntro: true, autoUpload: true, introPreviewIncludeBgm: false, mainPreviewIncludeBgm: true, mainStartCard: sanitizeMainStartCardOptions(undefined) },
+    renderDefaults: { transitionSeconds: 0.3, resolution: "480P", videoCodec: "H265", includeWatermark: true, youtubeHandoffMode: "CHROME_DRAG_DROP", prependIntro: true, autoUpload: true, introPreviewIncludeBgm: false, mainPreviewIncludeBgm: true, mainStartCard: sanitizeMainStartCardOptions(undefined) },
     youtubeUploadDefaults: { privacyStatus: "unlisted" },
     voiceInputLanguage: "zh-TW",
     subtitleBurnInDefaults: sanitizeSubtitleBurnInOptions(undefined),
@@ -153,6 +153,9 @@ function sanitize(value: unknown): UserPreferences {
     renderDefaults: {
       transitionSeconds: TRANSITIONS.has(render?.transitionSeconds as TransitionDurationSec) ? render?.transitionSeconds as TransitionDurationSec : fallback.renderDefaults.transitionSeconds,
       resolution: RESOLUTIONS.has(render?.resolution as PreviewResolution) ? render?.resolution as PreviewResolution : fallback.renderDefaults.resolution,
+      videoCodec: render?.videoCodec === "H264" || render?.videoCodec === "H265" ? render.videoCodec : fallback.renderDefaults.videoCodec,
+      includeWatermark: typeof render?.includeWatermark === "boolean" ? render.includeWatermark : fallback.renderDefaults.includeWatermark,
+      youtubeHandoffMode: render?.youtubeHandoffMode === "OFFICIAL_API" || render?.youtubeHandoffMode === "CHROME_DRAG_DROP" ? render.youtubeHandoffMode : fallback.renderDefaults.youtubeHandoffMode,
       prependIntro: typeof render?.prependIntro === "boolean" ? render.prependIntro : fallback.renderDefaults.prependIntro,
       autoUpload: typeof render?.autoUpload === "boolean" ? render.autoUpload : fallback.renderDefaults.autoUpload,
       introPreviewIncludeBgm: typeof render?.introPreviewIncludeBgm === "boolean" ? render.introPreviewIncludeBgm : fallback.renderDefaults.introPreviewIncludeBgm,
@@ -224,6 +227,15 @@ export class UserPreferencesStore {
         if (render.resolution !== undefined) {
           if (!RESOLUTIONS.has(render.resolution)) throw new Error("預覽解析度無效。");
           next.renderDefaults.resolution = render.resolution;
+        }
+        if (render.videoCodec !== undefined) {
+          if (render.videoCodec !== "H265" && render.videoCodec !== "H264") throw new Error("影片格式無效。");
+          next.renderDefaults.videoCodec = render.videoCodec;
+        }
+        if (render.includeWatermark !== undefined) next.renderDefaults.includeWatermark = Boolean(render.includeWatermark);
+        if (render.youtubeHandoffMode !== undefined) {
+          if (render.youtubeHandoffMode !== "CHROME_DRAG_DROP" && render.youtubeHandoffMode !== "OFFICIAL_API") throw new Error("YouTube 上傳交接方式無效。");
+          next.renderDefaults.youtubeHandoffMode = render.youtubeHandoffMode;
         }
         if (render.prependIntro !== undefined) next.renderDefaults.prependIntro = Boolean(render.prependIntro);
         if (render.autoUpload !== undefined) next.renderDefaults.autoUpload = Boolean(render.autoUpload);

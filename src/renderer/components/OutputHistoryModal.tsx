@@ -40,6 +40,14 @@ export function OutputHistoryModal({ onClose, onOpenYoutubeSettings }: Props) {
     finally { setBusyId(undefined); }
   };
 
+  const youtubeChromeHandoff = async (output: PreviewOutputRecord) => {
+    if (!window.sourceApp.prepareYoutubeChromeHandoff) { setError("請重新啟動新版 App 後再使用 Chrome 拖放交接。"); return; }
+    setBusyId(output.jobId); setError(undefined); setNotice(undefined);
+    try { setNotice((await window.sourceApp.prepareYoutubeChromeHandoff(output.jobId)).message); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusyId(undefined); }
+  };
+
   const removeRecord = async (jobId: string) => {
     setBusyId(jobId); setError(undefined);
     try { setOutputs((await window.sourceApp.removePreviewOutputRecord(jobId)).outputs); setNotice("已從歷史清單移除紀錄；磁碟上的 MP4 沒有刪除或修改。"); }
@@ -58,7 +66,7 @@ export function OutputHistoryModal({ onClose, onOpenYoutubeSettings }: Props) {
             <header><div><span className="kind-badge video">{purposeLabel(output)}</span><h3 title={output.fileName}>{output.fileName}</h3></div><span className={output.exists ? "history-file-ready" : "history-file-offline"}>{output.exists ? "✓ 檔案可用" : "檔案已移動／離線"}</span></header>
             <p className="source-path" title={output.outputPath}>{output.outputPath}</p>
             <dl><div><dt>建立時間</dt><dd>{formatDate(output.createdAt)}</dd></div><div><dt>片長</dt><dd>{formatDuration(output.durationMs)}</dd></div><div><dt>大小</dt><dd>{formatBytes(output.sizeBytes)}</dd></div><div><dt>解析度</dt><dd>{output.resolution ?? "原檔規格"}</dd></div><div><dt>來源</dt><dd>{output.origin === "APP_RENDERED" ? "本 App 產出" : "使用者手動加入"}{output.cancelled ? " · 取消後有效短片" : ""}</dd></div><div><dt>專案</dt><dd>{output.projectName ?? "未記錄"}</dd></div></dl>
-            <OutputRecordActions output={output} showPublish={canPublish} onError={setError} onCopySuccess={() => setNotice("已複製完整檔案路徑。")} onYoutube={() => setYoutubeOutput(output)} onPlatform={(platform) => handoff(output, platform)} />
+            <OutputRecordActions output={output} showPublish={canPublish} onError={setError} onCopySuccess={() => setNotice("已複製完整檔案路徑。")} onYoutube={() => void youtubeChromeHandoff(output)} onYoutubeApi={() => setYoutubeOutput(output)} onPlatform={(platform) => handoff(output, platform)} />
             {confirmRemoveId === output.jobId ? <div className="history-remove-confirm" role="alert"><span>只移除歷史紀錄，磁碟 MP4 不會刪除。</span><button type="button" autoFocus onClick={() => setConfirmRemoveId(undefined)}>取消</button><button className="danger-secondary-button" type="button" disabled={busyId === output.jobId} onClick={() => void removeRecord(output.jobId)}>確認移除紀錄</button></div> : <button className="history-remove-button" type="button" onClick={() => setConfirmRemoveId(output.jobId)}>從清單移除紀錄</button>}
           </article>;
         })}</div> : <div className="empty-state"><h2>尚無預覽成品紀錄</h2><p>下一次產出會自動出現在這裡；也可按「加入以前的 MP4」找回舊檔。</p></div>}

@@ -1,5 +1,13 @@
 # Phase 0｜架構、範圍與驗收
 
+## v0.49.0 增量範圍（2026-09-10）
+
+- 新增不冒充全自動化的 Chrome／檔案總管 YouTube 交接：Renderer 只傳 output record ID，Main 從成品索引解析並驗證 MP4，打開官方上傳頁、複製路徑、選取檔案，最終拖放與發布由使用者執行。
+- `ConcatRenderRequest` 明確攜帶 H.265／H.264 與單次浮水印布林值；Main 建立 codec args 並記錄實際結果。偏好層負責舊版缺省遷移。
+- AI 發布路由為 Codex／ChatGPT → OpenAI API → honest local fallback；Gemini 是主結果產生後的可選 reviewer，不建立新的不可追溯視覺內容。
+- AI 字幕證據 schema 增加物種欄位並提升 analyzer cache version，避免舊 cache 冒充已分析物種。
+- 浮水印頁的版面修正限於 Renderer 響應式 CSS，不變更 schema 16 或專案語義。
+
 ## v0.48.0 增量範圍（2026-09-10）
 
 - Manifest schema 16 新增經 Main process 正規化的專案浮水印設定；正片完成輸出與獨立片頭在字幕後套用週期 drawtext，Shorts 明確選用，固定片段檢查不套用。完整決策見 `docs/adr/0039-periodic-project-watermark.md`。

@@ -160,7 +160,7 @@ void app.whenReady().then(async () => {
   }, youtubeBrowsers);
   await youtubeSettings.initialize();
   const youtubeUpload = new YoutubeUploadService(youtubeSettings, youtubeBrowsers);
-  const platformUploadHandoff = new PlatformUploadHandoffService({ openExternal: (url) => shell.openExternal(url), showItemInFolder: (filePath) => shell.showItemInFolder(filePath), copyText: (value) => clipboard.writeText(value) });
+  const platformUploadHandoff = new PlatformUploadHandoffService({ openExternal: (url) => shell.openExternal(url), showItemInFolder: (filePath) => shell.showItemInFolder(filePath), copyText: (value) => clipboard.writeText(value), openYoutubeInChrome: async (url) => { await youtubeBrowsers.open("CHROME", url); } });
   const userPreferences = new UserPreferencesStore(app.getPath("userData"));
   await userPreferences.initialize();
   const aiStory = new AiStoryAnalysisService(path.join(app.getPath("userData"), "cache", "ai-story"), store, sources, aiSettings);

@@ -13,8 +13,9 @@ import { ProjectStore } from "./project-store";
 import { SourceService } from "./source-service";
 import { PreviewCache } from "./preview-cache";
 import { renderThumbnail } from "./thumbnail-render";
+import { GeminiPublishReviewProvider } from "./gemini-publish-review";
 
-export const PUBLISH_ANALYZER_VERSION = "publish-assets-v2-intro-first";
+export const PUBLISH_ANALYZER_VERSION = "publish-assets-v3-chatgpt-primary-gemini-review";
 
 function clipLabel(fileName: string, index: number): string {
   const stem = fileName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
@@ -63,7 +64,29 @@ export function selectPublishVisualCandidates(project: ReturnType<ProjectStore["
 }
 
 export class AiPublishAssetsService {
-  constructor(private readonly store: ProjectStore, private readonly sources: SourceService, private readonly previews: PreviewCache, private readonly aiStory: AiStoryAnalysisService, private readonly aiSettings: AiSettingsStore, private readonly openAi = new OpenAiProvider(), private readonly codex = new CodexCliStoryProvider(path.join(previews.cacheRoot, "codex-publish"))) {}
+  constructor(private readonly store: ProjectStore, private readonly sources: SourceService, private readonly previews: PreviewCache, private readonly aiStory: AiStoryAnalysisService, private readonly aiSettings: AiSettingsStore, private readonly openAi = new OpenAiProvider(), private readonly codex = new CodexCliStoryProvider(path.join(previews.cacheRoot, "codex-publish")), private readonly gemini = new GeminiPublishReviewProvider()) {}
+
+  private async applyGeminiReview(assets: AiPublishAssets, input: PublishGenerationInput, signal?: AbortSignal): Promise<void> {
+    const settings = this.aiSettings.getRuntimeGeminiReview();
+    if (!settings.enabled) {
+      assets.geminiReview = { enabled: false, status: "NOT_CONFIGURED", model: settings.model, summary: "Gemini 輔助復核未啟用；本次由 ChatGPT 主生成。", warnings: [] };
+      return;
+    }
+    if (!settings.apiKey) {
+      assets.geminiReview = { enabled: true, status: "NOT_CONFIGURED", model: settings.model, summary: "已啟用 Gemini 輔助，但尚未設定可用的 Gemini API Key。", warnings: ["本次沒有執行 Gemini 復核。"] };
+      return;
+    }
+    try {
+      assets.geminiReview = await this.gemini.review(assets, input, { model: settings.model, apiKey: settings.apiKey }, signal);
+      if (assets.geminiReview.recommendedTitleId) assets.selectedTitleId = assets.geminiReview.recommendedTitleId;
+      if (assets.geminiReview.recommendedThumbnailId) assets.selectedThumbnailId = assets.geminiReview.recommendedThumbnailId;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      assets.geminiReview = { enabled: true, status: "FAILED", model: settings.model, summary: "ChatGPT 主生成已保留；Gemini 第二次復核未完成。", warnings: [message] };
+      assets.warnings.push(`Gemini 輔助復核失敗：${message}`);
+    }
+  }
 
   private async materializeThumbnailPreviews(assets: AiPublishAssets, signal: AbortSignal | undefined, onProgress: (percent: number, detail: string) => void): Promise<void> {
     const directory = path.join(this.previews.cacheRoot, "publish-thumbnails");
@@ -98,12 +121,14 @@ export class AiPublishAssetsService {
     onProgress(20, "正在建立標題與說明候選…");
     const subject = topic.topic.trim() || topic.locations[0] || "這段旅程";
     const location = topic.locations[0] ? `｜${topic.locations[0]}` : "";
+    const promise = topic.audiencePromise.trim() || "一段值得慢慢看的旅程";
+    const locationName = topic.locations[0] || subject;
     const rawTitles = [
-      `${subject}${location}｜沿著畫面走進故事`,
-      `${subject}：${topic.audiencePromise.trim() || "一段值得慢慢看的旅程"}`,
-      `從${topic.locations[0] || subject}看見不一樣的風景`,
-      `${subject}｜人物、事件與地方特色完整記錄`,
-      `這趟${subject}旅程，最值得留下的畫面`,
+      `${subject}${location}｜${promise}`,
+      `${locationName}深度漫步：${subject}的自然與地方故事`,
+      `${subject}完整紀錄｜Scenery Walk #旅遊`,
+      `第一次這樣看${locationName}：風景、細節與沿途發現`,
+      `${subject}值得停下來看的畫面｜Travel Highlights`,
     ];
     const titles: PublishTitleCandidate[] = rawTitles.map((text, index) => {
       const safe = text.slice(0, 100);
@@ -142,25 +167,28 @@ export class AiPublishAssetsService {
     const timelineDurationMs = plan.clips.reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0);
     const generationInput: PublishGenerationInput = { topic: { topic: topic.topic.trim(), locations: topic.locations, storySummary: topic.storySummary.trim(), audiencePromise: topic.audiencePromise.trim() }, durationMs: timelineDurationMs, introSummary: project.introSegments.map((segment, order) => ({ assetId: segment.assetId, fileName: assetById.get(segment.assetId)?.fileName ?? segment.fileName, sourceInMs: segment.inMs, sourceOutMs: segment.outMs, order: order + 1 })), timelineSummary: plan.clips.map((clip) => ({ assetId: clip.assetId, fileName: assetById.get(clip.assetId)?.fileName ?? clip.assetId, startMs: clip.outputStartMs, endMs: clip.outputStartMs + clip.outMs - clip.inMs })), candidates };
     try {
-      const account = this.aiSettings.getRuntimeAccount(); onProgress(55, "正在呼叫 OpenAI Responses（store:false）…");
-      const generated = await this.openAi.generatePublishAssets(generationInput, account, signal); const generatedAt = new Date().toISOString();
-      const generatedAssets = applyGeneratedDraft(project.aiPublishAssets, generated.draft, { topicSnapshot: { ...topic, capturedAt: generatedAt }, provider: "OPENAI_API", model: generated.model, analyzerVersion: PUBLISH_ANALYZER_VERSION, generatedAt, mainTimelineRevision: project.mainTimelineRevision ?? project.timelineRevision, introTimelineRevision: project.introTimelineRevision });
+      const model = snapshot.accounts.find((item) => item.id === snapshot.activeAccountId)?.visionModel ?? "gpt-5.6-terra"; onProgress(55, "正在由 Codex／ChatGPT 分析片頭畫面並主生成標題、縮圖與說明…");
+      const generated = await this.codex.generatePublishAssets(generationInput, model, signal); const generatedAt = new Date().toISOString();
+      const generatedAssets = applyGeneratedDraft(project.aiPublishAssets, generated.draft, { topicSnapshot: { ...topic, capturedAt: generatedAt }, provider: "CODEX_CHATGPT", model: generated.model, analyzerVersion: PUBLISH_ANALYZER_VERSION, generatedAt, mainTimelineRevision: project.mainTimelineRevision ?? project.timelineRevision, introTimelineRevision: project.introTimelineRevision });
       for (const thumbnail of generatedAssets.thumbnails) thumbnail.previewUrl = thumbnails.find((item) => item.assetId === thumbnail.assetId && item.sourceTimeMs === thumbnail.sourceTimeMs)?.previewUrl;
       await this.materializeThumbnailPreviews(generatedAssets, signal, onProgress);
+      onProgress(97, "正在執行可選的 Gemini 第二次復核…"); await this.applyGeminiReview(generatedAssets, generationInput, signal);
       const latest = this.store.getProject(); if (latest.id !== project.id || (latest.mainTimelineRevision ?? latest.timelineRevision) !== (project.mainTimelineRevision ?? project.timelineRevision)) throw new Error("專案或正片時間線在 AI 生成期間已變更，結果未套用，請重新產生。" );
-      const updated = await this.store.setAiPublishAssets(generatedAssets); onProgress(100, "OpenAI 發布素材已保存"); return { project: updated, assets: generatedAssets, provider: "OPENAI_API" as const, model: generated.model };
-    } catch (openAiError) {
-      if (signal?.aborted) throw new DOMException("AI 發布素材分析已取消。", "AbortError"); warnings.push(`OpenAI 生成失敗：${openAiError instanceof Error ? openAiError.message : String(openAiError)}`);
+      const updated = await this.store.setAiPublishAssets(generatedAssets); onProgress(100, "ChatGPT 主生成發布素材已保存"); return { project: updated, assets: generatedAssets, provider: "CODEX_CHATGPT" as const, model: generated.model };
+    } catch (codexError) {
+      if (signal?.aborted) throw new DOMException("AI 發布素材分析已取消。", "AbortError"); warnings.push(`Codex／ChatGPT 主生成失敗：${codexError instanceof Error ? codexError.message : String(codexError)}`);
       try {
-        const snapshot = this.aiSettings.getSnapshot(); const model = snapshot.accounts.find((item) => item.id === snapshot.activeAccountId)?.visionModel ?? "gpt-5.6"; onProgress(65, "OpenAI 不可用，改用 Codex／ChatGPT 登入生成…");
-        const generated = await this.codex.generatePublishAssets(generationInput, model, signal); const generatedAt = new Date().toISOString();
-        const generatedAssets = applyGeneratedDraft(project.aiPublishAssets, generated.draft, { topicSnapshot: { ...topic, capturedAt: generatedAt }, provider: "CODEX_CHATGPT", model: generated.model, analyzerVersion: PUBLISH_ANALYZER_VERSION, generatedAt, mainTimelineRevision: project.mainTimelineRevision ?? project.timelineRevision, introTimelineRevision: project.introTimelineRevision });
+        const account = this.aiSettings.getRuntimeAccount(); onProgress(65, "ChatGPT 登入模式不可用，改用 OpenAI API 主生成…");
+        const generated = await this.openAi.generatePublishAssets(generationInput, account, signal); const generatedAt = new Date().toISOString();
+        const generatedAssets = applyGeneratedDraft(project.aiPublishAssets, generated.draft, { topicSnapshot: { ...topic, capturedAt: generatedAt }, provider: "OPENAI_API", model: generated.model, analyzerVersion: PUBLISH_ANALYZER_VERSION, generatedAt, mainTimelineRevision: project.mainTimelineRevision ?? project.timelineRevision, introTimelineRevision: project.introTimelineRevision });
+        generatedAssets.warnings.unshift(...warnings);
         for (const thumbnail of generatedAssets.thumbnails) thumbnail.previewUrl = thumbnails.find((item) => item.assetId === thumbnail.assetId && item.sourceTimeMs === thumbnail.sourceTimeMs)?.previewUrl;
         await this.materializeThumbnailPreviews(generatedAssets, signal, onProgress);
+        onProgress(97, "正在執行可選的 Gemini 第二次復核…"); await this.applyGeminiReview(generatedAssets, generationInput, signal);
         const latest = this.store.getProject(); if (latest.id !== project.id || (latest.mainTimelineRevision ?? latest.timelineRevision) !== (project.mainTimelineRevision ?? project.timelineRevision)) throw new Error("專案或正片時間線在 AI 生成期間已變更，結果未套用，請重新產生。" );
-        const updated = await this.store.setAiPublishAssets(generatedAssets); onProgress(100, "Codex／ChatGPT 發布素材已保存"); return { project: updated, assets: generatedAssets, provider: "CODEX_CHATGPT" as const, model: generated.model };
-      } catch (codexError) {
-        if (signal?.aborted) throw new DOMException("AI 發布素材分析已取消。", "AbortError"); warnings.push(`Codex／ChatGPT 生成失敗：${codexError instanceof Error ? codexError.message : String(codexError)}`);
+        const updated = await this.store.setAiPublishAssets(generatedAssets); onProgress(100, "OpenAI API 備援發布素材已保存"); return { project: updated, assets: generatedAssets, provider: "OPENAI_API" as const, model: generated.model };
+      } catch (openAiError) {
+        if (signal?.aborted) throw new DOMException("AI 發布素材分析已取消。", "AbortError"); warnings.push(`OpenAI API 備援生成失敗：${openAiError instanceof Error ? openAiError.message : String(openAiError)}`);
       }
     }
     onProgress(80, "正在依 transition-aware timeline 建立離線 fallback 草稿…");
@@ -174,6 +202,7 @@ export class AiPublishAssetsService {
       titles, description: `${topic.storySummary.trim() || `${subject}的旅程紀錄。`}\n\n${topic.audiencePromise.trim() || "用畫面認識這段旅程的特色與故事。"}`, englishSummary: `A visual journey through ${subject}.`, hashtags: ["#旅遊", `#${subject.replace(/\s+/g, "")}`].slice(0, 5), thumbnails, chapters, selectedTitleId: titles[0]?.id, selectedThumbnailId: thumbnails[0]?.id, provider, model, analyzerVersion: PUBLISH_ANALYZER_VERSION, generatedAt, mainTimelineRevision: project.mainTimelineRevision ?? project.timelineRevision, introTimelineRevision: project.introTimelineRevision, stale: false, userEdited: false, warnings,
     };
     await this.materializeThumbnailPreviews(assets, signal, onProgress);
+    await this.applyGeminiReview(assets, generationInput, signal);
     const updated = await this.store.setAiPublishAssets(assets);
     onProgress(100, "發布素材候選已保存");
     return { project: updated, assets, provider, model };

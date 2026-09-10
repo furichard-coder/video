@@ -9,6 +9,12 @@ async function root(): Promise<string> { const value = await mkdtemp(path.join(o
 afterEach(async () => { await Promise.all(roots.splice(0).map((item) => rm(item, { recursive: true, force: true }))); });
 
 describe("user preferences", () => {
+  it("defaults new renders to H.265, watermark on and Chrome drag-and-drop handoff", async () => {
+    const store = new UserPreferencesStore(await root()); await store.initialize();
+    expect(store.snapshot().renderDefaults).toMatchObject({ videoCodec: "H265", includeWatermark: true, youtubeHandoffMode: "CHROME_DRAG_DROP" });
+    const changed = await store.update({ renderDefaults: { videoCodec: "H264", includeWatermark: false, youtubeHandoffMode: "OFFICIAL_API" } });
+    expect(changed.renderDefaults).toMatchObject({ videoCodec: "H264", includeWatermark: false, youtubeHandoffMode: "OFFICIAL_API" });
+  });
   it("persists last UI, render, upload and voice defaults across reopen", async () => {
     const dataRoot = await root();
     const first = new UserPreferencesStore(dataRoot); await first.initialize();

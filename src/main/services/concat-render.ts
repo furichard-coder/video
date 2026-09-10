@@ -434,6 +434,12 @@ export function runFfmpegWithProgress(
   });
 }
 
+export function buildVideoCodecArgs(videoCodec: "H265" | "H264"): string[] {
+  if (videoCodec === "H265") return ["-c:v", "libx265", "-preset", "veryfast", "-crf", "27", "-tag:v", "hvc1"];
+  if (videoCodec === "H264") return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "25", "-profile:v", "high"];
+  throw new Error("影片編碼格式無效。只支援 H.265／HEVC 或 H.264／AVC。");
+}
+
 export class ConcatRenderService {
   constructor(
     private readonly store: ProjectStore,
@@ -456,6 +462,8 @@ export class ConcatRenderService {
     if (purpose !== "CONCAT" && purpose !== "INTRO" && purpose !== "CLIP" && purpose !== "SHORTS") throw new Error("預覽輸出用途無效。");
     if (request.orderedAssetIds.length < 1) throw new Error(purpose === "INTRO" ? "至少需要一個片段才能產出 Intro 預覽。" : purpose === "CLIP" ? "至少需要一個固定時間段才能輸出。" : "正片沒有可供輸出的保留片段。");
     const project = this.store.getProject();
+    const videoCodec = request.videoCodec ?? "H264";
+    if (videoCodec !== "H265" && videoCodec !== "H264") throw new Error("影片編碼格式無效。只支援 H.265／HEVC 或 H.264／AVC。");
     const introTargetDurationMs = project.introTargetDurationMs ?? DEFAULT_INTRO_TARGET_DURATION_MS;
     const outputIntroSegments = introSegmentsForOutput(project.introSegments, project.introSegmentMaxDurationMs);
     if (purpose === "CONCAT") {
@@ -508,7 +516,7 @@ export class ConcatRenderService {
       line2: path.join(parsed.dir, `.${parsed.name}.${renderId}.main-start-line2.txt`),
     } : undefined;
     const watermarkSettings = normalizeWatermarkSettings(project.watermarkSettings);
-    const watermarkActive = watermarkAppliesToPurpose(watermarkSettings, purpose);
+    const watermarkActive = request.includeWatermark !== false && watermarkAppliesToPurpose(watermarkSettings, purpose);
     const watermarkTextPaths = watermarkActive ? {
       chinese: path.join(parsed.dir, `.${parsed.name}.${renderId}.watermark-zh.txt`),
       english: path.join(parsed.dir, `.${parsed.name}.${renderId}.watermark-en.txt`),
@@ -675,14 +683,7 @@ export class ConcatRenderService {
       `[${videoOutputLabel}]`,
       "-map",
       `[${plan.audioOutputLabel}]`,
-      "-c:v",
-      "libx264",
-      "-preset",
-      "veryfast",
-      "-crf",
-      "25",
-      "-profile:v",
-      "high",
+      ...buildVideoCodecArgs(videoCodec),
       "-pix_fmt",
       "yuv420p",
       "-r",
@@ -748,6 +749,7 @@ export class ConcatRenderService {
         expectedDurationMs: completedDurationMs,
         transitionSeconds: request.transitionSeconds,
         resolution: request.resolution,
+        videoCodec,
         purpose,
         bgmAppliedCount: activeBgmTracks.length,
         photoShutterAppliedCount,

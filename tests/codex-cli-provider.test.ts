@@ -21,17 +21,18 @@ describe("Codex ChatGPT login subtitle adapter", () => {
   it("passes Chinese and spaced storyboard paths as argument-array items, uses stdin, and removes the temporary schema", async () => {
     const cacheRoot = await root();
     const framePath = path.join(cacheRoot, "大雪山 片段 01.jpg"); await writeFile(framePath, "frame");
-    const agentText = JSON.stringify({ results: [{ index: 0, suggestedSubtitle: "林下植被有助涵養水分", visualSummary: "森林步道", eventSummary: "步行觀察", peopleSummary: [], locationSummary: ["大雪山"], topicRelevanceScore: 92, transcriptVisualMatchScore: 70, confidence: 84, warnings: [] }] });
+    const agentText = JSON.stringify({ results: [{ index: 0, suggestedSubtitle: "林下植被有助涵養水分", visualSummary: "森林步道", eventSummary: "步行觀察", peopleSummary: [], locationSummary: ["大雪山"], animalSpecies: ["疑似山羌"], speciesExplanation: "森林底層常是山羌活動環境。", topicRelevanceScore: 92, transcriptVisualMatchScore: 70, confidence: 84, warnings: ["物種需人工確認"] }] });
     const runner = vi.fn(async (_executable, args: string[], _signal, options) => {
       expect(args).toEqual(expect.arrayContaining(["--ephemeral", "--ignore-user-config", "--sandbox", "read-only", "--image", framePath, "--json", "-"]));
       expect(options?.cwd).toBe(cacheRoot);
       expect(options?.input).toContain("大雪山森林");
+      expect(options?.input).toContain("animalSpecies");
       expect(options?.input).not.toContain("sk-");
       return { stdout: `${JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: agentText } })}\n`, stderr: "" };
     });
     const provider = new CodexCliStoryProvider(cacheRoot, "C:\\Codex\\codex.exe", runner);
     const result = await provider.analyzeStoryFramesBatch([{ id: "candidate-1", framePath, request: { mode: "SUBTITLE", transcript: "", context, sourceFileName: "森林 01.MOV" } }], "gpt-5.6-sol");
-    expect(result.get("candidate-1")).toMatchObject({ suggestedSubtitle: "林下植被有助涵養水分", confidence: 84 });
+    expect(result.get("candidate-1")).toMatchObject({ suggestedSubtitle: "林下植被有助涵養水分", animalSpecies: ["疑似山羌"], confidence: 84 });
     expect((await readdir(cacheRoot)).filter((name) => name.includes("codex-subtitle-schema"))).toEqual([]);
   });
 

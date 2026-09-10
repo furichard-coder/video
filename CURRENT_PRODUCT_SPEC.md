@@ -1,4 +1,4 @@
-# Current Product Spec — v0.48.0
+# Current Product Spec — v0.49.0
 
 ## Scope
 
@@ -54,6 +54,15 @@ The upload payload is composed once from the selected title, Chinese description
 Watermark settings are canonical project state in schema 16. The verified Caota Sand Dunes default is Chinese `漫步\n風光` at lower-left and `SceneryWalker` at lower-right, scaled from a 1080p baseline of 51/41 px and 63 px safe margins. The default cadence starts at 0 seconds, repeats every 360 seconds, stays visible for 15 seconds and fades in/out for 1 second. Text and box opacity default to 82% and 24%. Main-complete output and standalone Intro are enabled by default; Shorts is explicit opt-in. Main-process normalization requires distinct lower corners and validates every timing/opacity/size limit. The final drawtext pass is applied only to new output after optional subtitle composition.
 
 AI publishing visual candidates now prioritize the exact midpoint of selected Intro ranges, then fill from the canonical Main timeline. Candidate extraction creates three traceable, low-resolution analysis frames at their declared source time codes. OpenAI/Codex prompts include the topic, story promise, Intro order, Main timeline and candidate origin, and explicitly ask titles and thumbnail concepts to reflect the opening visuals. After any provider result—including honest local fallback—the App builds three local 1280×720 thumbnail previews from the referenced source frames. The scrolling result summary immediately shows provider, selected title and selected thumbnail; remote AI image fabrication remains out of scope.
+
+## v0.49.0 upload handoff, codec, publishing review and species evidence
+
+- The default YouTube handoff opens the official upload page in Chrome, copies the indexed latest Main MP4 path and asks Windows File Explorer to select that exact file. The human performs the actual cross-application drag and final YouTube publish action. The existing OAuth/API flow remains an explicit secondary choice and retains its final-review gate.
+- New render preferences default to H.265/HEVC (`libx265`, `hvc1`) with H.264/AVC as the compatibility option. The chosen codec and the per-render watermark choice are validated in Main, persisted in user preferences/output history, and sent explicitly by the Renderer. Watermark is checked by default; opting out affects only the new output.
+- Watermark settings use responsive auto-fit grids, width containment and wrapping footer actions so narrow windows do not overlap or cover controls.
+- Codex/ChatGPT is the primary publishing-material generator. OpenAI API is a fallback on the same OpenAI path; optional Gemini 2.5 Flash is a second reviewer that can recommend only an existing generated title ID and thumbnail ID. Gemini failure never discards or relabels the ChatGPT result.
+- The publishing workbench presents selected output, titles and visible thumbnails before description/chapters/advanced paste-back. Title prompts require distinct, scene-specific candidates within 100 characters; thumbnail copy is brief and composition-aware while remaining tied to traceable source frames.
+- Subtitle story-frame evidence may include `animalSpecies` and `speciesExplanation`. Empty means no animal detected. Uncertain sightings must use a broader class or `疑似`, reduce confidence and add a warning; no species fact may be invented from topic text alone.
 
 ## Verification baseline
 

@@ -2,6 +2,15 @@
 
 本檔案是每次可交付功能變更的簡短索引。完成一個階段後，必須同步更新本檔案、`README.md` 與 `VERIFICATION.md`；只有通過建置／測試的內容才可標記為完成。
 
+## v0.49.0 — 2026-09-10
+
+- YouTube 新增並預設採用 Chrome 上傳頁＋檔案總管選取最新 MP4 的人工拖放交接；官方 API 保留為第二選項，發布仍需人工確認。
+- 轉檔新增 H.265 預設／H.264 相容選項與預設勾選的單次浮水印控制；輸出紀錄保存 codec，浮水印設定頁修正窄視窗重疊。
+- AI 發布素材改為 ChatGPT 主生成、Gemini 可選第二復核；標題與縮圖結果提前呈現，提示詞加強 100 字、具體畫面與短縮圖文案規則。
+- AI 字幕影格分析新增動物物種與說明，含不確定性約束。
+- 驗證：43 個測試檔／262 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke、真實 H.265 編碼、浮水印 opt-out、來源 SHA-256 與 `npm audit` 全部通過。
+- 交付：`release/v0.49.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer.exe`；SHA-256 `82248E2C79CBB6C94BA4D81E5CCEF285DE6DE2C50704518D0C6ADB10768EA427`。
+
 ## v0.48.0 — 2026-09-10
 
 - 新增獨立浮水印工作區與 schema 16 專案設定；草漯沙丘預設為中文「漫步／風光」左下兩行、英文「SceneryWalker」右下，1080p 基準 51／41 px、63 px 邊距、文字／底框不透明度 82%／24%。

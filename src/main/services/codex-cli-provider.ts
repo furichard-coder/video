@@ -57,6 +57,8 @@ function normalizeResult(value: unknown): CodexBatchItem {
     eventSummary: typeof item.eventSummary === "string" ? item.eventSummary.trim() : "",
     peopleSummary: strings(item.peopleSummary),
     locationSummary: strings(item.locationSummary),
+    animalSpecies: strings(item.animalSpecies),
+    speciesExplanation: typeof item.speciesExplanation === "string" ? item.speciesExplanation.trim() : "",
     topicRelevanceScore: score(item.topicRelevanceScore),
     transcriptVisualMatchScore: score(item.transcriptVisualMatchScore),
     confidence: score(item.confidence),
@@ -96,12 +98,14 @@ function batchSchema() {
             eventSummary: { type: "string" },
             peopleSummary: { type: "array", items: { type: "string" } },
             locationSummary: { type: "array", items: { type: "string" } },
+            animalSpecies: { type: "array", items: { type: "string" } },
+            speciesExplanation: { type: "string" },
             topicRelevanceScore: { type: "integer", minimum: 0, maximum: 100 },
             transcriptVisualMatchScore: { type: "integer", minimum: 0, maximum: 100 },
             confidence: { type: "integer", minimum: 0, maximum: 100 },
             warnings: { type: "array", items: { type: "string" } },
           },
-          required: ["index", "suggestedSubtitle", "visualSummary", "eventSummary", "peopleSummary", "locationSummary", "topicRelevanceScore", "transcriptVisualMatchScore", "confidence", "warnings"],
+          required: ["index", "suggestedSubtitle", "visualSummary", "eventSummary", "peopleSummary", "locationSummary", "animalSpecies", "speciesExplanation", "topicRelevanceScore", "transcriptVisualMatchScore", "confidence", "warnings"],
         },
       },
     },
@@ -126,6 +130,7 @@ function promptFor(batch: CodexStoryRequest[]): string {
     `已知人物：${context.people.join("、") || "未提供"}`,
     `觀眾承諾：${context.audiencePromise || "未提供"}`,
     "字幕需與當下畫面直接相關，優先提供地方特色、歷史文化、自然生態、森林養護或環境保護等有助理解的知識。若地點或事實無法由畫面與已知背景支持，請使用一般描述、降低信心並加入警告，不得捏造。不得依臉孔猜測真實身分。",
+    "若畫面可見動物，辨識可由外觀支持的物種或較安全類群，animalSpecies 填常用中文名，speciesExplanation 寫一句與畫面相關的棲地、行為或生態說明，並在 suggestedSubtitle 自然帶入。不能可靠辨識時要用『疑似』或較廣類群、降低 confidence 並加入 warnings；沒有動物時兩欄留空。",
     "suggestedSubtitle 請自然精簡，適合在畫面停留約 4 秒；使用繁體中文。每張圖必須恰好回傳一筆，index 必須對應下列清單與附圖順序。",
     JSON.stringify(items),
   ].join("\n\n");
@@ -206,7 +211,7 @@ export class CodexCliStoryProvider {
     if (!executable) throw new Error("這台電腦找不到 Codex 執行程式。" );
     await mkdir(this.cacheRoot, { recursive: true });
     const schemaPath = path.join(this.cacheRoot, `.codex-publish-schema-${process.pid}-${Date.now()}.json`);
-    const prompt = ["你是旅遊 YouTube 發布素材編輯。先理解主題、故事與正片內容，再優先判讀已選片頭的實際候選畫面，讓標題與縮圖呈現影片開場承諾。不要執行工具、不要讀寫本機檔案；只依照文字與附加低解析影格回答。不得猜測人物身分或未提供的地點。", JSON.stringify({ topic: input.topic, durationMs: input.durationMs, intro: input.introSummary, timeline: input.timelineSummary, candidates: input.candidates.map(({ framePath: _framePath, ...candidate }) => candidate) }), "標題須延伸影片內容與片頭畫面；嚴格依 output schema 回傳完整 titles、description、englishSummary、hashtags、3 個可追溯縮圖概念與章節。縮圖概念應優先選用 origin=INTRO 的候選，除非該畫面明顯不適合。"].join("\n\n");
+    const prompt = ["你是旅遊 YouTube 發布素材編輯。先理解主題、故事與正片內容，再優先判讀已選片頭的實際候選畫面，讓標題與縮圖呈現影片開場承諾。不要執行工具、不要讀寫本機檔案；只依照文字與附加低解析影格回答。不得猜測人物身分或未提供的地點。", JSON.stringify({ topic: input.topic, durationMs: input.durationMs, intro: input.introSummary, timeline: input.timelineSummary, candidates: input.candidates.map(({ framePath: _framePath, ...candidate }) => candidate) }), "標題須延伸影片內容與片頭畫面；嚴格依 output schema 回傳完整 titles、description、englishSummary、hashtags、3 個可追溯縮圖概念與章節。縮圖概念應優先選用 origin=INTRO 的候選，除非該畫面明顯不適合。", "品質要求：標題彼此角度要有明顯差異、避免制式空話，必須具體呼應可見主體或片頭情境，總長不超過 100 字；可自然加入一個英文關鍵片語或 hashtag，但不可堆砌。縮圖顯示文字應精簡、通常不超過 12 個中文字，與標題互補而非重複，並依候選畫面的主體位置選擇左右版面、避免遮住重要景物。說明與章節只能使用有來源依據的資訊。"].join("\n\n");
     try {
       await writeFile(schemaPath, JSON.stringify(PUBLISH_JSON_SCHEMA), { encoding: "utf8", flag: "wx" });
       const args = ["exec", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only", "--skip-git-repo-check", "--model", model, "-C", this.cacheRoot, "--image", ...input.candidates.map((candidate) => candidate.framePath), "--output-schema", schemaPath, "--json", "-"];

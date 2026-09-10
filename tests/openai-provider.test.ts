@@ -41,11 +41,12 @@ describe("OpenAI provider adapter", () => {
       expect(body.store).toBe(false); expect(body.model).toBe("gpt-5.6-terra");
       expect(body.input[0].content).toEqual(expect.arrayContaining([expect.objectContaining({ type: "input_image", detail: "low" })]));
       expect(body.input[0].content[0].text).toContain("河內老城");
+      expect(body.input[0].content[0].text).toContain("animalSpecies");
       expect(body.text.format).toMatchObject({ type: "json_schema", strict: true });
-      return new Response(JSON.stringify({ output_text: JSON.stringify({ suggestedSubtitle: "主持人走進老城", visualSummary: "一人在街道步行", eventSummary: "抵達老城", peopleSummary: ["主持人"], locationSummary: ["河內老城"], topicRelevanceScore: 93, transcriptVisualMatchScore: 88, confidence: 86, warnings: [] }) }), { status: 200, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ output_text: JSON.stringify({ suggestedSubtitle: "主持人走進老城", visualSummary: "一人在街道步行", eventSummary: "抵達老城", peopleSummary: ["主持人"], locationSummary: ["河內老城"], animalSpecies: ["家犬"], speciesExplanation: "家犬常與人類共同活動。", topicRelevanceScore: 93, transcriptVisualMatchScore: 88, confidence: 86, warnings: [] }) }), { status: 200, headers: { "Content-Type": "application/json" } });
     });
     const result = await new OpenAiProvider(fetcher as typeof fetch).analyzeStoryFrames({ mode: "SUBTITLE", transcript: "我們到老城了", frames: ["data:image/jpeg;base64,AQID"], sourceFileName: "河內 01.mov", context: { topic: "河內旅行", locations: ["河內老城"], people: ["主持人"], storySummary: "抵達後步行", audiencePromise: "看城市", subtitleLanguage: "zh" } }, account);
-    expect(result).toMatchObject({ suggestedSubtitle: "主持人走進老城", topicRelevanceScore: 93, transcriptVisualMatchScore: 88 });
+    expect(result).toMatchObject({ suggestedSubtitle: "主持人走進老城", animalSpecies: ["家犬"], speciesExplanation: "家犬常與人類共同活動。", topicRelevanceScore: 93, transcriptVisualMatchScore: 88 });
   });
 
   it("uses a non-stored Responses web search and returns structured music links", async () => {
