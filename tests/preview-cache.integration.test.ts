@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -23,7 +23,7 @@ async function sha256(filePath: string): Promise<string> {
 }
 
 beforeAll(async () => {
-  root = await mkdtemp(path.join(os.tmpdir(), "source-app-preview-"));
+  root = await realpath(await mkdtemp(path.join(os.tmpdir(), "source-app-preview-")));
   imagePath = path.join(root, "photo.jpg");
   videoPath = path.join(root, "clip.mp4");
   rotatedVideoPath = path.join(root, "portrait-rotated.mp4");

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -49,7 +49,7 @@ function currentMainRequest() {
 }
 
 beforeAll(async () => {
-  root = await mkdtemp(path.join(os.tmpdir(), "source-app-concat-"));
+  root = await realpath(await mkdtemp(path.join(os.tmpdir(), "source-app-concat-")));
   firstPath = path.join(root, "clip01.mp4");
   secondPath = path.join(root, "clip02.mp4");
   outputPath = path.join(root, "joined-preview.mp4");
