@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AudioProtectionOptions,
+  BackgroundJobSnapshot,
   BgmScopeSelection,
   ConcatRenderProgress,
   ConcatRenderEstimate,
@@ -137,6 +138,12 @@ export function ConcatRenderModal({
   const [rendering, setRendering] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string>();
+  // monitoring = this window did not start the render; it adopted a render
+  // that is already running in the background (user closed and reopened).
+  const [monitoring, setMonitoring] = useState(false);
+  const [backgroundNotice, setBackgroundNotice] = useState<string>();
+  const monitoringJobIdRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
   const [showYoutubeUpload, setShowYoutubeUpload] = useState(false);
   const [showYoutubeSettings, setShowYoutubeSettings] = useState(false);
   const [youtubeSettingsRevision, setYoutubeSettingsRevision] = useState(0);
@@ -271,6 +278,59 @@ export function ConcatRenderModal({
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
     return () => window.sourceApp.clearConcatProgressListeners();
   }, [initialResolution, introClips?.length, isClip, isIntro, isMain, isYoutubeEligible, projectName]);
+
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
+
+  // Adopt a render that is already running in the background (the user closed
+  // this window with × and reopened it). Progress keeps flowing through the
+  // regular concat:progress subscription; completion is observed here.
+  useEffect(() => {
+    const jobsApi = window.sourceApp.getBackgroundJobs;
+    if (jobsApi) {
+      void jobsApi()
+        .then((jobs: BackgroundJobSnapshot[]) => {
+          if (!mountedRef.current) return;
+          const running = jobs.find((job) => job.kind === "CONCAT_RENDER" && job.status === "RUNNING");
+          if (running) {
+            monitoringJobIdRef.current = running.id;
+            setMonitoring(true);
+            setRendering(true);
+            setProgress({
+              phase: "RENDERING",
+              percent: running.percent ?? 0,
+              outTimeMs: 0,
+              expectedDurationMs: 0,
+            });
+          }
+        })
+        .catch(() => undefined);
+    }
+    const onJobs = window.sourceApp.onBackgroundJobs;
+    if (!onJobs) return;
+    onJobs((jobs: BackgroundJobSnapshot[]) => {
+      const trackedId = monitoringJobIdRef.current;
+      if (!trackedId || !mountedRef.current) return;
+      const tracked = jobs.find((job) => job.id === trackedId);
+      if (!tracked || tracked.status === "RUNNING") return;
+      monitoringJobIdRef.current = null;
+      setMonitoring(false);
+      setRendering(false);
+      if (tracked.status === "COMPLETED") {
+        setBackgroundNotice("背景轉檔完成，成品已加入下方的輸出檔案庫。");
+        setHistoryRefreshKey((value) => value + 1);
+      } else if (tracked.status === "FAILED") {
+        setError(tracked.error ?? "背景轉檔失敗，請重試。");
+      } else {
+        setBackgroundNotice("背景轉檔已取消。");
+      }
+    });
+    return () => window.sourceApp.clearBackgroundJobsListeners?.();
+  }, []);
 
   const rememberRenderDefaults = (
     update: Parameters<typeof window.sourceApp.updateUserPreferences>[0]["renderDefaults"],
@@ -498,6 +558,7 @@ export function ConcatRenderModal({
         estimatedDurationMs: totalEstimatedDurationMs,
         ...(isMain && prependIntro ? { mainStartCard } : {}),
       });
+      if (!mountedRef.current) return;
       setResult(completed);
       setHistoryRefreshKey((value) => value + 1);
       if (isYoutubeEligible && autoUploadEnabled && !completed.cancelled) {
@@ -516,12 +577,15 @@ export function ConcatRenderModal({
       }));
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason);
+      if (!mountedRef.current) return;
       setError(message.includes("取消") ? "已取消產出；未留下不完整的輸出檔。" : message);
       await prepareAutomaticOutput(true);
       setProgress(undefined);
     } finally {
-      setRendering(false);
-      setCancelling(false);
+      if (mountedRef.current) {
+        setRendering(false);
+        setCancelling(false);
+      }
     }
   };
 
@@ -573,7 +637,13 @@ export function ConcatRenderModal({
             </span>
             <h2>{purposeTitle}</h2>
           </div>
-          <button className="icon-button" type="button" aria-label="關閉" disabled={rendering} onClick={onClose}>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="關閉"
+            title={rendering ? "關閉視窗，轉檔繼續在背景執行" : "關閉"}
+            onClick={onClose}
+          >
             ×
           </button>
         </header>
@@ -1411,6 +1481,11 @@ export function ConcatRenderModal({
                   {error}
                 </div>
               )}
+              {backgroundNotice && (
+                <div className="notice success" role="status">
+                  {backgroundNotice}
+                </div>
+              )}
               {rendering && (
                 <section className="render-progress" aria-live="polite">
                   <div>
@@ -1418,9 +1493,11 @@ export function ConcatRenderModal({
                     <span>{Math.round(progress?.percent ?? 0)}%</span>
                   </div>
                   <progress max="100" value={progress?.percent ?? 0} />
+                  {monitoring && <small>已從背景轉檔接回監控中；再按 × 回主畫面也不會中斷。</small>}
                   <small>
                     可取消；若已有足夠畫面，App 會要求編碼器安全寫完 MP4
-                    結尾並保留較短成品。太早取消、無法驗證播放時才會清除 partial。來源不受影響。
+                    結尾並保留較短成品。太早取消、無法驗證播放時才會清除 partial。來源不受影響。 按右上 ×
+                    可回主畫面改字幕或做其他工作，轉檔會繼續；本次成品使用開始轉檔時的內容。
                   </small>
                 </section>
               )}

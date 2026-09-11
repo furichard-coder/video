@@ -2,6 +2,13 @@
 
 本檔案是每次可交付功能變更的簡短索引。完成一個階段後，必須同步更新本檔案、`README.md` 與 `VERIFICATION.md`；只有通過建置／測試的內容才可標記為完成。
 
+## v0.57.0 — 2026-09-12
+
+- 片頭／正片轉檔改為背景工作：轉檔中按 × 回主畫面，編碼繼續，主畫面背景工作列顯示即時進度；重開轉檔頁會接回監控（可取消，不會重複啟動），完成後成品出現在輸出檔案庫。
+- 轉檔期間字幕修改與 SRT 匯出照常可用；轉檔使用開始時的專案快照，事後字幕修改不影響進行中的成品，UI 已明示此語意。
+- 驗證：50 個測試檔／297 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke 與 `npm audit` 全部通過。
+- 交付：`release/v0.57.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.57.0.exe`。
+
 ## v0.56.0 — 2026-09-11
 
 - 字幕列新增鄰接的單筆確認／刪除／上移／下移；格內 textarea 維持原生文字游標及直接編輯。

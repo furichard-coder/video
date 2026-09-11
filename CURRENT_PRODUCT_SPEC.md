@@ -1,8 +1,15 @@
-# Current Product Spec — v0.56.0
+# Current Product Spec — v0.57.0
 
 ## Scope
 
 Windows-first read-only source organizer. The first visible workflow remains source selection, thumbnail/proxy preview, ordering, IN/OUT, Intro and preview MP4 output. Sources, SOP files and previous releases are never overwritten.
+
+## v0.57.0 background render with concurrent subtitle work
+
+- Concat/Intro render runs as a background job: pressing × closes the render window and returns to the main screen while encoding continues; the main-screen background-jobs banner keeps showing live percent.
+- Reopening the render page while a render runs adopts it in monitoring mode (live progress, cancel still available, no second render can start); completion or failure is reported in place and the finished file appears in the output library.
+- Subtitle review and SRT export stay fully usable during a render. The running render uses the project snapshot taken at start (store `getProject()` deep-clones), so later subtitle edits never alter the in-flight output; the UI states that the finished file reflects the content at render start.
+- Explicit 取消產出 still aborts through the single-flight controller with the existing safe-finalize contract; closing the window never cancels.
 
 ## v0.56.0 immediate per-cue subtitle persistence
 
