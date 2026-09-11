@@ -9,7 +9,7 @@
 - Master bus 改為透明峰值保護（acompressor -6dB/ratio4 → -1dB/ratio2），不再磨平整體動態，保留逐段 ducking 的對比；實測 detector 頻段 burst 仍壓低約 4 dB、底噪不動、非 detector 大音量段落多保留約 1.9 dB 對比，峰值仍受限。
 - 音訊設定頁補充最有效組合說明與 EQ／上限本來就細微的提示。
 - 驗證：51 個測試檔／306 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke 與 `npm audit` 全部通過。
-- 交付：`release/v0.58.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.58.0.exe`。
+- 交付：`release/v0.58.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.58.0.exe`；SHA-256 `346D3335345F41A8BC54AA0C1C9066DCC3EEBC5F1253C81153E0E8AC1CD994AB`。
 
 ## v0.57.0 — 2026-09-12
 
