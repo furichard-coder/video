@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type {
-  IntroAnalysisProgress,
-  IntroAnalysisResult,
-  IntroSuggestion,
-  SourceAsset,
+import type { IntroAnalysisProgress, IntroAnalysisResult, IntroSuggestion, SourceAsset } from "../../shared/domain";
+import {
+  DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS,
+  DEFAULT_INTRO_TARGET_DURATION_MS,
+  INTRO_MAX_SEGMENT_MS,
+  INTRO_MAX_SEGMENTS,
+  INTRO_MIN_SEGMENT_MS,
 } from "../../shared/domain";
-import { DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS, DEFAULT_INTRO_TARGET_DURATION_MS, INTRO_MAX_SEGMENT_MS, INTRO_MAX_SEGMENTS, INTRO_MIN_SEGMENT_MS } from "../../shared/domain";
 import { balanceIntroSegments, normalizeIntroSegmentMaxDuration } from "../../shared/intro-duration";
 import { assertSafeHexId, assertWithinRoot } from "./path-safety";
 import { runProcess } from "./process-runner";
@@ -73,7 +74,10 @@ function candidateWindows(durationMs: number): Array<{ inMs: number; outMs: numb
 }
 
 function suggestionId(assetId: string, inMs: number, outMs: number): string {
-  return createHash("sha256").update(`${INTRO_ANALYZER_VERSION}:${assetId}:${inMs}:${outMs}`).digest("hex").slice(0, 24);
+  return createHash("sha256")
+    .update(`${INTRO_ANALYZER_VERSION}:${assetId}:${inMs}:${outMs}`)
+    .digest("hex")
+    .slice(0, 24);
 }
 
 function isAbort(error: unknown): boolean {
@@ -103,7 +107,8 @@ export class IntroAnalyzer {
     const uniqueIds = [...new Set(assetIds)];
     if (!uniqueIds.length) throw new Error("沒有可供片頭分析的影片。");
     const selectionLimitMs = Math.round(maxDurationMs);
-    if (!Number.isFinite(selectionLimitMs) || selectionLimitMs < INTRO_MIN_SEGMENT_MS) throw new Error("片頭目標總長至少需要 0:03。" );
+    if (!Number.isFinite(selectionLimitMs) || selectionLimitMs < INTRO_MIN_SEGMENT_MS)
+      throw new Error("片頭目標總長至少需要 0:03。");
     const segmentLimitMs = normalizeIntroSegmentMaxDuration(maxSegmentDurationMs);
     onProgress({ phase: "PREPARING", processed: 0, total: uniqueIds.length });
     const allSuggestions: IntroSuggestion[] = [];
@@ -124,25 +129,31 @@ export class IntroAnalyzer {
       const asset = await this.sources.ensureMetadata(assetId, signal);
       if (asset.metadataState !== "READY" || !asset.mediaInfo?.durationMs) continue;
       const cached = await this.readCache(asset);
-      const candidates = cached ?? await this.analyzeAsset(asset, signal);
+      const candidates = cached ?? (await this.analyzeAsset(asset, signal));
       if (cached) cacheHits += 1;
       else await this.writeCache(asset, candidates);
       analyzedAssetCount += 1;
-      allSuggestions.push(...candidates.map((candidate) => {
-        const candidateDurationMs = candidate.outMs - candidate.inMs;
-        const durationMs = Math.min(candidateDurationMs, segmentLimitMs);
-        const centerMs = (candidate.inMs + candidate.outMs) / 2;
-        const inMs = Math.max(0, Math.min(asset.mediaInfo!.durationMs! - durationMs, Math.round(centerMs - durationMs / 2)));
-        const outMs = inMs + durationMs;
-        return {
-        id: suggestionId(asset.id, inMs, outMs),
-        assetId: asset.id,
-        fileName: asset.fileName,
-        origin: "AI" as const,
-        ...candidate,
-        inMs,
-        outMs,
-      }; }));
+      allSuggestions.push(
+        ...candidates.map((candidate) => {
+          const candidateDurationMs = candidate.outMs - candidate.inMs;
+          const durationMs = Math.min(candidateDurationMs, segmentLimitMs);
+          const centerMs = (candidate.inMs + candidate.outMs) / 2;
+          const inMs = Math.max(
+            0,
+            Math.min(asset.mediaInfo!.durationMs! - durationMs, Math.round(centerMs - durationMs / 2)),
+          );
+          const outMs = inMs + durationMs;
+          return {
+            id: suggestionId(asset.id, inMs, outMs),
+            assetId: asset.id,
+            fileName: asset.fileName,
+            origin: "AI" as const,
+            ...candidate,
+            inMs,
+            outMs,
+          };
+        }),
+      );
     }
 
     onProgress({ phase: "RANKING", processed: uniqueIds.length, total: uniqueIds.length });
@@ -151,8 +162,19 @@ export class IntroAnalyzer {
     let totalDurationMs = 0;
     for (const candidate of allSuggestions.sort((left, right) => right.score - left.score)) {
       if ((perAsset.get(candidate.assetId) ?? 0) >= 2) continue;
-      if (suggestions.some((item) => item.assetId === candidate.assetId && Math.max(item.inMs, candidate.inMs) < Math.min(item.outMs, candidate.outMs))) continue;
-      if (suggestions.length >= INTRO_MAX_SEGMENTS || totalDurationMs + candidate.outMs - candidate.inMs > selectionLimitMs) continue;
+      if (
+        suggestions.some(
+          (item) =>
+            item.assetId === candidate.assetId &&
+            Math.max(item.inMs, candidate.inMs) < Math.min(item.outMs, candidate.outMs),
+        )
+      )
+        continue;
+      if (
+        suggestions.length >= INTRO_MAX_SEGMENTS ||
+        totalDurationMs + candidate.outMs - candidate.inMs > selectionLimitMs
+      )
+        continue;
       suggestions.push(candidate);
       perAsset.set(candidate.assetId, (perAsset.get(candidate.assetId) ?? 0) + 1);
       totalDurationMs += candidate.outMs - candidate.inMs;
@@ -161,7 +183,12 @@ export class IntroAnalyzer {
     const enriched = this.aiStory
       ? await this.aiStory.enrichIntroSuggestions(suggestions, signal)
       : { suggestions, analyzedCount: 0, fallbackReason: "未啟用雲端故事分析。" };
-    const balancedSuggestions = balanceIntroSegments(enriched.suggestions, this.store.getProject().sources, selectionLimitMs, segmentLimitMs);
+    const balancedSuggestions = balanceIntroSegments(
+      enriched.suggestions,
+      this.store.getProject().sources,
+      selectionLimitMs,
+      segmentLimitMs,
+    );
     return {
       analyzerVersion: INTRO_ANALYZER_VERSION,
       analyzedAssetCount,
@@ -182,26 +209,30 @@ export class IntroAnalyzer {
       if (signal?.aborted) throw new DOMException("片頭分析已取消。", "AbortError");
       const sampleDurationMs = Math.min(1_500, window.outMs - window.inMs);
       try {
-        const { stdout, stderr } = await runProcess(this.ffmpegExecutable, [
-          "-hide_banner",
-          "-loglevel",
-          "error",
-          "-nostdin",
-          "-ss",
-          String(window.inMs / 1000),
-          "-t",
-          String(sampleDurationMs / 1000),
-          "-i",
-          asset.sourcePath,
-          "-map",
-          "0:v:0",
-          "-vf",
-          "fps=4,scale=320:180:force_original_aspect_ratio=decrease,signalstats,metadata=mode=print:file=-",
-          "-an",
-          "-f",
-          "null",
-          "-",
-        ], signal);
+        const { stdout, stderr } = await runProcess(
+          this.ffmpegExecutable,
+          [
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-ss",
+            String(window.inMs / 1000),
+            "-t",
+            String(sampleDurationMs / 1000),
+            "-i",
+            asset.sourcePath,
+            "-map",
+            "0:v:0",
+            "-vf",
+            "fps=4,scale=320:180:force_original_aspect_ratio=decrease,signalstats,metadata=mode=print:file=-",
+            "-an",
+            "-f",
+            "null",
+            "-",
+          ],
+          signal,
+        );
         const metrics = parseSignalMetrics(`${stdout}\n${stderr}`) ?? { exposure: 58, color: 48, motion: 45 };
         const score = Math.round(clamp(metrics.exposure * 0.45 + metrics.motion * 0.32 + metrics.color * 0.23));
         const reasons = [
@@ -232,7 +263,8 @@ export class IntroAnalyzer {
         cached.assetId === asset.id &&
         cached.previewCacheKey === asset.previewCacheKey &&
         Array.isArray(cached.candidates)
-      ) return cached.candidates;
+      )
+        return cached.candidates;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") return undefined;
     }

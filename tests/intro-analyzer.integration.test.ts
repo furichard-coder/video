@@ -3,11 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-  INTRO_ANALYZER_VERSION,
-  IntroAnalyzer,
-  parseSignalMetrics,
-} from "../src/main/services/intro-analyzer";
+import { INTRO_ANALYZER_VERSION, IntroAnalyzer, parseSignalMetrics } from "../src/main/services/intro-analyzer";
 import { MediaProbe } from "../src/main/services/media-probe";
 import { runProcess } from "../src/main/services/process-runner";
 import { ProjectStore } from "../src/main/services/project-store";
@@ -19,17 +15,37 @@ let store: ProjectStore;
 let analyzer: IntroAnalyzer;
 
 async function sha256(filePath: string): Promise<string> {
-  return createHash("sha256").update(await readFile(filePath)).digest("hex");
+  return createHash("sha256")
+    .update(await readFile(filePath))
+    .digest("hex");
 }
 
 beforeAll(async () => {
   root = await mkdtemp(path.join(os.tmpdir(), "source-app-intro-"));
   sourcePath = path.join(root, "moving-scene.mp4");
   await runProcess("ffmpeg", [
-    "-hide_banner", "-loglevel", "error",
-    "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30",
-    "-f", "lavfi", "-i", "sine=frequency=660:sample_rate=48000",
-    "-t", "6", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "-y", sourcePath,
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc2=size=640x360:rate=30",
+    "-f",
+    "lavfi",
+    "-i",
+    "sine=frequency=660:sample_rate=48000",
+    "-t",
+    "6",
+    "-c:v",
+    "libx264",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-shortest",
+    "-y",
+    sourcePath,
   ]);
   store = new ProjectStore(path.join(root, "app-data"));
   await store.initialize();
@@ -45,14 +61,16 @@ afterAll(async () => {
 
 describe("local intro analyzer", () => {
   it("parses exposure, color and frame-difference metrics", () => {
-    const metrics = parseSignalMetrics([
-      "lavfi.signalstats.YAVG=120",
-      "lavfi.signalstats.SATAVG=25",
-      "lavfi.signalstats.YDIF=8",
-      "lavfi.signalstats.YAVG=124",
-      "lavfi.signalstats.SATAVG=30",
-      "lavfi.signalstats.YDIF=10",
-    ].join("\n"));
+    const metrics = parseSignalMetrics(
+      [
+        "lavfi.signalstats.YAVG=120",
+        "lavfi.signalstats.SATAVG=25",
+        "lavfi.signalstats.YDIF=8",
+        "lavfi.signalstats.YAVG=124",
+        "lavfi.signalstats.SATAVG=30",
+        "lavfi.signalstats.YDIF=10",
+      ].join("\n"),
+    );
     expect(metrics?.exposure).toBeGreaterThan(95);
     expect(metrics?.color).toBeGreaterThan(80);
     expect(metrics?.motion).toBeGreaterThan(60);
@@ -80,6 +98,8 @@ describe("local intro analyzer", () => {
   it("honors cancellation before analysis starts", async () => {
     const controller = new AbortController();
     controller.abort();
-    await expect(analyzer.analyze([store.getProject().sources[0].id], controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    await expect(analyzer.analyze([store.getProject().sources[0].id], controller.signal)).rejects.toMatchObject({
+      name: "AbortError",
+    });
   });
 });

@@ -8,7 +8,13 @@ import { normalizeMediaExtension, PlayerSettingsStore, resolvePlayerId } from ".
 const temporaryRoots: string[] = [];
 const knownPlayers: ExternalPlayerOption[] = [
   { id: "SYSTEM_DEFAULT", label: "Windows 系統預設播放器", kind: "SYSTEM", available: true },
-  { id: "VLC", label: "VLC media player", kind: "KNOWN", available: true, executablePath: "C:\\Program Files\\VideoLAN\\VLC\\vlc.exe" },
+  {
+    id: "VLC",
+    label: "VLC media player",
+    kind: "KNOWN",
+    available: true,
+    executablePath: "C:\\Program Files\\VideoLAN\\VLC\\vlc.exe",
+  },
   { id: "WINDOWS_MEDIA_PLAYER", label: "Windows Media Player", kind: "KNOWN", available: false },
   { id: "MPC_HC", label: "MPC-HC", kind: "KNOWN", available: false },
 ];
@@ -57,7 +63,10 @@ describe("external player settings", () => {
     expect(snapshot.settings.extensionOverrides[".mp4"]).toBe(custom.id);
     expect(snapshot.settings.customPlayers[0].executablePath).toBe(executablePath);
     expect(snapshot.players.find((item) => item.id === custom.id)?.available).toBe(true);
-    expect(JSON.parse(await readFile(restored.settingsPath, "utf8"))).toMatchObject({ schemaVersion: 1, defaultPlayerId: "VLC" });
+    expect(JSON.parse(await readFile(restored.settingsPath, "utf8"))).toMatchObject({
+      schemaVersion: 1,
+      defaultPlayerId: "VLC",
+    });
   });
 
   it("removes references to a deleted custom player without affecting known routes", async () => {

@@ -37,8 +37,12 @@ function createDefaultSettings(): ExternalPlayerSettings {
 function isSettings(value: unknown): value is ExternalPlayerSettings {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<ExternalPlayerSettings>;
-  return candidate.schemaVersion === 1 && typeof candidate.defaultPlayerId === "string" &&
-    Boolean(candidate.extensionOverrides) && Array.isArray(candidate.customPlayers);
+  return (
+    candidate.schemaVersion === 1 &&
+    typeof candidate.defaultPlayerId === "string" &&
+    Boolean(candidate.extensionOverrides) &&
+    Array.isArray(candidate.customPlayers)
+  );
 }
 
 export class PlayerSettingsStore {
@@ -91,11 +95,20 @@ export class PlayerSettingsStore {
 
   async snapshotWithCurrentAvailability(): Promise<ExternalPlayerSettingsSnapshot> {
     const snapshot = this.getSnapshot();
-    snapshot.players = await Promise.all(snapshot.players.map(async (player) => player.kind !== "CUSTOM" ? player : ({
-      ...player,
-      available: Boolean(player.executablePath && await isExecutableFile(player.executablePath)),
-      detail: player.executablePath && await isExecutableFile(player.executablePath) ? "自訂執行檔可用" : "自訂執行檔已遺失或移動",
-    })));
+    snapshot.players = await Promise.all(
+      snapshot.players.map(async (player) =>
+        player.kind !== "CUSTOM"
+          ? player
+          : {
+              ...player,
+              available: Boolean(player.executablePath && (await isExecutableFile(player.executablePath))),
+              detail:
+                player.executablePath && (await isExecutableFile(player.executablePath))
+                  ? "自訂執行檔可用"
+                  : "自訂執行檔已遺失或移動",
+            },
+      ),
+    );
     return snapshot;
   }
 
@@ -116,8 +129,13 @@ export class PlayerSettingsStore {
   async addCustomPlayer(executablePath: string): Promise<ExternalPlayerSettingsSnapshot> {
     const resolved = path.resolve(executablePath);
     if (!(await isExecutableFile(resolved))) throw new Error("選取的檔案不是可用的 Windows .exe 執行檔。");
-    const id = `CUSTOM:${createHash("sha256").update(resolved.toLocaleLowerCase()).digest("hex").slice(0, 16)}` as const;
-    const definition: CustomPlayerDefinition = { id, name: path.basename(resolved, path.extname(resolved)), executablePath: resolved };
+    const id =
+      `CUSTOM:${createHash("sha256").update(resolved.toLocaleLowerCase()).digest("hex").slice(0, 16)}` as const;
+    const definition: CustomPlayerDefinition = {
+      id,
+      name: path.basename(resolved, path.extname(resolved)),
+      executablePath: resolved,
+    };
     await this.mutate((settings) => {
       const existing = settings.customPlayers.findIndex((player) => player.id === id);
       if (existing >= 0) settings.customPlayers[existing] = definition;
@@ -151,13 +169,18 @@ export class PlayerSettingsStore {
   }
 
   private sanitize(settings: ExternalPlayerSettings): ExternalPlayerSettings {
-    const customPlayers = settings.customPlayers.filter((item) => item?.id?.startsWith("CUSTOM:") && typeof item.executablePath === "string" && typeof item.name === "string");
+    const customPlayers = settings.customPlayers.filter(
+      (item) =>
+        item?.id?.startsWith("CUSTOM:") && typeof item.executablePath === "string" && typeof item.name === "string",
+    );
     const valid = new Set<ExternalPlayerId>([...KNOWN_IDS, ...customPlayers.map((item) => item.id)]);
     const extensionOverrides: Record<string, ExternalPlayerId> = {};
     for (const [extension, playerId] of Object.entries(settings.extensionOverrides)) {
       try {
         if (valid.has(playerId)) extensionOverrides[normalizeMediaExtension(extension)] = playerId;
-      } catch { /* discard invalid persisted extension */ }
+      } catch {
+        /* discard invalid persisted extension */
+      }
     }
     return {
       schemaVersion: 1,

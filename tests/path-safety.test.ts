@@ -5,9 +5,7 @@ import { assertSafeHexId, assertWithinRoot } from "../src/main/services/path-saf
 describe("path safety", () => {
   it("accepts a cache descendant", () => {
     const root = path.resolve("C:\\app-cache");
-    expect(assertWithinRoot(root, path.join(root, "abc", "thumb.jpg"))).toBe(
-      path.join(root, "abc", "thumb.jpg"),
-    );
+    expect(assertWithinRoot(root, path.join(root, "abc", "thumb.jpg"))).toBe(path.join(root, "abc", "thumb.jpg"));
   });
 
   it("rejects traversal outside cache", () => {
@@ -20,4 +18,3 @@ describe("path safety", () => {
     expect(() => assertSafeHexId("../../source")).toThrow(/格式無效/);
   });
 });
-

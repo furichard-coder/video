@@ -30,7 +30,11 @@ describe("SourceService folder selection", () => {
     expect(result.addedCount).toBe(4);
     expect(result.unsupportedCount).toBe(0);
     expect(result.project.sources.filter((asset) => asset.kind === "IMAGE")).toHaveLength(3);
-    expect(result.project.sources.filter((asset) => asset.kind === "IMAGE").every((asset) => asset.imageDurationMs === 5_000)).toBe(true);
+    expect(
+      result.project.sources
+        .filter((asset) => asset.kind === "IMAGE")
+        .every((asset) => asset.imageDurationMs === 5_000),
+    ).toBe(true);
     expect(result.project.sources.find((asset) => asset.extension === ".mov")?.kind).toBe("VIDEO");
   });
 
@@ -72,7 +76,15 @@ describe("SourceService folder selection", () => {
     await writeFile(sourcePath, "fixture");
     const imported = await service.importSelected([sourcePath]);
     const asset = imported.project.sources[0];
-    const mediaInfo = { durationMs: 1_000, width: 640, height: 360, displayWidth: 640, displayHeight: 360, rotationDegrees: 0, videoCodec: "hevc" };
+    const mediaInfo = {
+      durationMs: 1_000,
+      width: 640,
+      height: 360,
+      displayWidth: 640,
+      displayHeight: 360,
+      rotationDegrees: 0,
+      videoCodec: "hevc",
+    };
     await store.updateAsset({ ...asset, previewCacheKey: "0".repeat(64), metadataState: "READY", mediaInfo });
 
     const refreshed = await service.refreshAsset(asset.id);

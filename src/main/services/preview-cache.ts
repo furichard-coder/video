@@ -86,11 +86,7 @@ export class PreviewCache {
     await mkdir(this.cacheRoot, { recursive: true });
   }
 
-  async ensure(
-    assetId: string,
-    variant: PreviewVariant,
-    signal?: AbortSignal,
-  ): Promise<PreviewResult> {
+  async ensure(assetId: string, variant: PreviewVariant, signal?: AbortSignal): Promise<PreviewResult> {
     assertSafeHexId(assetId, "Asset ID");
     if (variant === "VIDEO_CLIP_PROXY") throw new Error("區段代理必須包含安全的片段時間範圍。");
     return this.pool.run(async () => {
@@ -147,31 +143,46 @@ export class PreviewCache {
             : error instanceof Error
               ? error.message
               : String(error);
-        throw new Error(
-          `無法建立${variant === "THUMBNAIL" ? "縮圖" : "預覽"}：${detail}`,
-        );
+        throw new Error(`無法建立${variant === "THUMBNAIL" ? "縮圖" : "預覽"}：${detail}`);
       }
       return this.result(asset, variant, invalidated ? "INVALIDATED" : "CREATED");
     }, signal);
   }
 
-  async ensureWithPath(assetId: string, variant: PreviewVariant, signal?: AbortSignal): Promise<PreviewResult & { cachePath: string }> {
+  async ensureWithPath(
+    assetId: string,
+    variant: PreviewVariant,
+    signal?: AbortSignal,
+  ): Promise<PreviewResult & { cachePath: string }> {
     const result = await this.ensure(assetId, variant, signal);
     const asset = this.store.getAsset(assetId);
     if (!asset) throw new Error("找不到來源項目。");
-    const names: Record<PreviewVariant, string> = { THUMBNAIL: "thumbnail.jpg", IMAGE_PREVIEW: "image-preview.jpg", VIDEO_PROXY: "video-preview.mp4", VIDEO_CLIP_PROXY: "video-clip-preview.mp4" };
+    const names: Record<PreviewVariant, string> = {
+      THUMBNAIL: "thumbnail.jpg",
+      IMAGE_PREVIEW: "image-preview.jpg",
+      VIDEO_PROXY: "video-preview.mp4",
+      VIDEO_CLIP_PROXY: "video-clip-preview.mp4",
+    };
     return { ...result, cachePath: path.join(this.cacheDirectory(asset.previewCacheKey), names[variant]) };
   }
 
   async ensureClip(assetId: string, inMs: number, outMs: number, signal?: AbortSignal): Promise<PreviewResult> {
     assertSafeHexId(assetId, "Asset ID");
-    const startMs = Math.round(inMs); const endMs = Math.round(outMs);
+    const startMs = Math.round(inMs);
+    const endMs = Math.round(outMs);
     return this.pool.run(async () => {
       let asset = await this.sources.refreshAsset(assetId);
       if (asset.kind !== "VIDEO") throw new Error("只有影片可以建立區段代理。");
       asset = await this.sources.ensureMetadata(assetId, signal);
       const durationMs = asset.mediaInfo?.durationMs;
-      if (!durationMs || !Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs < 0 || endMs > durationMs + 50 || endMs - startMs < 100) {
+      if (
+        !durationMs ||
+        !Number.isFinite(startMs) ||
+        !Number.isFinite(endMs) ||
+        startMs < 0 ||
+        endMs > durationMs + 50 ||
+        endMs - startMs < 100
+      ) {
         throw new Error("區段代理時間必須位於來源影片內，且至少 0.1 秒。");
       }
       const clipKey = createHash("sha256")
@@ -182,19 +193,37 @@ export class PreviewCache {
       const markerPath = assertWithinRoot(directory, path.join(directory, `clip-${clipKey}.json`));
       await mkdir(directory, { recursive: true });
       let hit = false;
-      if (await exists(markerPath) && await isUsableCachedOutput(outputPath, "VIDEO_CLIP_PROXY")) {
+      if ((await exists(markerPath)) && (await isUsableCachedOutput(outputPath, "VIDEO_CLIP_PROXY"))) {
         try {
-          const marker = JSON.parse(await readFile(markerPath, "utf8")) as CacheMarker & { sourceStartMs?: number; sourceEndMs?: number };
-          const markerMatches = marker.cacheKey === asset.previewCacheKey && marker.previewerVersion === CLIP_PREVIEWER_VERSION && marker.sourcePath === asset.sourcePath && marker.sourceSize === asset.sizeBytes && marker.sourceModifiedAt === asset.fileModifiedAt && marker.variant === "VIDEO_CLIP_PROXY" && marker.sourceStartMs === startMs && marker.sourceEndMs === endMs;
+          const marker = JSON.parse(await readFile(markerPath, "utf8")) as CacheMarker & {
+            sourceStartMs?: number;
+            sourceEndMs?: number;
+          };
+          const markerMatches =
+            marker.cacheKey === asset.previewCacheKey &&
+            marker.previewerVersion === CLIP_PREVIEWER_VERSION &&
+            marker.sourcePath === asset.sourcePath &&
+            marker.sourceSize === asset.sizeBytes &&
+            marker.sourceModifiedAt === asset.fileModifiedAt &&
+            marker.variant === "VIDEO_CLIP_PROXY" &&
+            marker.sourceStartMs === startMs &&
+            marker.sourceEndMs === endMs;
           if (markerMatches) {
             const output = await stat(outputPath);
-            const fingerprintMatches = marker.outputSizeBytes === output.size && marker.outputModifiedAt === output.mtime.toISOString();
-            hit = fingerprintMatches || await this.isValidProxy(outputPath);
+            const fingerprintMatches =
+              marker.outputSizeBytes === output.size && marker.outputModifiedAt === output.mtime.toISOString();
+            hit = fingerprintMatches || (await this.isValidProxy(outputPath));
             if (hit && !fingerprintMatches) {
-              await writeFile(markerPath, `${JSON.stringify({ ...marker, outputSizeBytes: output.size, outputModifiedAt: output.mtime.toISOString() }, null, 2)}\n`, "utf8");
+              await writeFile(
+                markerPath,
+                `${JSON.stringify({ ...marker, outputSizeBytes: output.size, outputModifiedAt: output.mtime.toISOString() }, null, 2)}\n`,
+                "utf8",
+              );
             }
           }
-        } catch { hit = false; }
+        } catch {
+          hit = false;
+        }
       }
       if (!hit) {
         const partialPath = `${outputPath}.${process.pid}.partial.mp4`;
@@ -204,15 +233,31 @@ export class PreviewCache {
           await this.assertGeneratedOutput(partialPath, "VIDEO_CLIP_PROXY", signal);
           await rename(partialPath, outputPath);
           const output = await stat(outputPath);
-          await writeFile(markerPath, `${JSON.stringify({ cacheKey: asset.previewCacheKey, previewerVersion: CLIP_PREVIEWER_VERSION, sourcePath: asset.sourcePath, sourceSize: asset.sizeBytes, sourceModifiedAt: asset.fileModifiedAt, variant: "VIDEO_CLIP_PROXY", sourceStartMs: startMs, sourceEndMs: endMs, generatedAt: new Date().toISOString(), outputSizeBytes: output.size, outputModifiedAt: output.mtime.toISOString() }, null, 2)}\n`, "utf8");
+          await writeFile(
+            markerPath,
+            `${JSON.stringify({ cacheKey: asset.previewCacheKey, previewerVersion: CLIP_PREVIEWER_VERSION, sourcePath: asset.sourcePath, sourceSize: asset.sizeBytes, sourceModifiedAt: asset.fileModifiedAt, variant: "VIDEO_CLIP_PROXY", sourceStartMs: startMs, sourceEndMs: endMs, generatedAt: new Date().toISOString(), outputSizeBytes: output.size, outputModifiedAt: output.mtime.toISOString() }, null, 2)}\n`,
+            "utf8",
+          );
         } catch (error) {
           await rm(partialPath, { force: true });
           if (isAbort(error)) throw error;
-          const detail = error instanceof ProcessFailure ? error.stderr.trim().split(/\r?\n/).slice(-3).join(" ") || error.message : error instanceof Error ? error.message : String(error);
+          const detail =
+            error instanceof ProcessFailure
+              ? error.stderr.trim().split(/\r?\n/).slice(-3).join(" ") || error.message
+              : error instanceof Error
+                ? error.message
+                : String(error);
           throw new Error(`無法建立快速區段代理：${detail}`);
         }
       }
-      return { assetId: asset.id, variant: "VIDEO_CLIP_PROXY", cacheStatus: hit ? "HIT" : "CREATED", sourceStartMs: startMs, sourceEndMs: endMs, url: `preview-media://cache/${asset.id}/video_clip_proxy/${clipKey}?key=${asset.previewCacheKey}` };
+      return {
+        assetId: asset.id,
+        variant: "VIDEO_CLIP_PROXY",
+        cacheStatus: hit ? "HIT" : "CREATED",
+        sourceStartMs: startMs,
+        sourceEndMs: endMs,
+        url: `preview-media://cache/${asset.id}/video_clip_proxy/${clipKey}?key=${asset.previewCacheKey}`,
+      };
     }, signal);
   }
 
@@ -227,7 +272,8 @@ export class PreviewCache {
   }
 
   async resolveClipExisting(assetId: string, clipKey: string): Promise<string> {
-    assertSafeHexId(assetId, "Asset ID"); assertSafeHexId(clipKey, "Clip cache key");
+    assertSafeHexId(assetId, "Asset ID");
+    assertSafeHexId(clipKey, "Clip cache key");
     const asset = this.store.getAsset(assetId);
     if (!asset) throw new Error("找不到來源項目。");
     const directory = this.cacheDirectory(asset.previewCacheKey);
@@ -250,14 +296,13 @@ export class PreviewCache {
     if (!(await isUsableCachedOutput(outputPath, variant)) || !(await exists(markerPath))) return false;
     try {
       const marker = JSON.parse(await readFile(markerPath, "utf8")) as CacheMarker;
-      const markerMatches = (
+      const markerMatches =
         marker.cacheKey === asset.previewCacheKey &&
         marker.previewerVersion === PREVIEWER_VERSION &&
         marker.sourcePath === asset.sourcePath &&
         marker.sourceSize === asset.sizeBytes &&
         marker.sourceModifiedAt === asset.fileModifiedAt &&
-        marker.variant === variant
-      );
+        marker.variant === variant;
       if (!markerMatches) return false;
       return variant === "VIDEO_PROXY" ? this.isValidProxy(outputPath) : true;
     } catch {
@@ -300,10 +345,7 @@ export class PreviewCache {
     const maxSize = variant === "IMAGE_PREVIEW" ? 1800 : 480;
     const seekArgs =
       asset.kind === "VIDEO"
-        ? [
-            "-ss",
-            String(Math.max(0, Math.min(30, (asset.mediaInfo?.durationMs ?? 10_000) / 10_000))),
-          ]
+        ? ["-ss", String(Math.max(0, Math.min(30, (asset.mediaInfo?.durationMs ?? 10_000) / 10_000)))]
         : [];
     await runProcess(
       this.ffmpegExecutable,
@@ -328,33 +370,82 @@ export class PreviewCache {
     );
   }
 
-  private async generateVideoProxy(asset: SourceAsset, outputPath: string, signal?: AbortSignal, range?: { startMs: number; durationMs: number }): Promise<void> {
+  private async generateVideoProxy(
+    asset: SourceAsset,
+    outputPath: string,
+    signal?: AbortSignal,
+    range?: { startMs: number; durationMs: number },
+  ): Promise<void> {
     const dimensions = targetDimensions(asset);
     const scale = dimensions
       ? `scale=${dimensions.width}:${dimensions.height}:flags=fast_bilinear,setsar=1,fps=30000/1001`
       : "scale=854:480:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,fps=30000/1001";
     const args = (hardware: boolean, audio: boolean) => [
-      "-hide_banner", "-loglevel", "error", "-nostdin",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-nostdin",
       ...(hardware ? ["-hwaccel", "auto"] : []),
       ...(range ? ["-ss", String(range.startMs / 1000), "-t", String(range.durationMs / 1000)] : []),
-      "-i", asset.sourcePath, "-map", "0:v:0", ...(audio ? ["-map", "0:a:0?"] : []),
-      "-vf", scale, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "32", "-pix_fmt", "yuv420p",
-      "-map_metadata", "-1", "-sn", "-dn",
+      "-i",
+      asset.sourcePath,
+      "-map",
+      "0:v:0",
+      ...(audio ? ["-map", "0:a:0?"] : []),
+      "-vf",
+      scale,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-crf",
+      "32",
+      "-pix_fmt",
+      "yuv420p",
+      "-map_metadata",
+      "-1",
+      "-sn",
+      "-dn",
       ...(audio ? ["-c:a", "aac", "-b:a", "64k", "-af", "aresample=async=1:first_pts=0"] : ["-an"]),
-      "-tag:v", "avc1", "-fps_mode", "cfr", "-avoid_negative_ts", "make_zero", "-max_muxing_queue_size", "2048",
-      "-movflags", "+faststart", "-y", outputPath,
+      "-tag:v",
+      "avc1",
+      "-fps_mode",
+      "cfr",
+      "-avoid_negative_ts",
+      "make_zero",
+      "-max_muxing_queue_size",
+      "2048",
+      "-movflags",
+      "+faststart",
+      "-y",
+      outputPath,
     ];
     let lastError: unknown;
     // iPhone HEVC/Dolby Vision MOV commonly spends longer negotiating generic
     // hardware decode than decoding in software. Prefer the measured reliable
     // route for this family, while retaining the previous fallback for others.
-    const isAppleHevcMov = asset.extension.toLowerCase() === ".mov" && asset.mediaInfo?.videoCodec?.toLowerCase() === "hevc";
+    const isAppleHevcMov =
+      asset.extension.toLowerCase() === ".mov" && asset.mediaInfo?.videoCodec?.toLowerCase() === "hevc";
     const attempts = isAppleHevcMov
-      ? [[false, true], [false, false], [true, true]] as const
-      : [[true, true], [false, true], [false, false]] as const;
+      ? ([
+          [false, true],
+          [false, false],
+          [true, true],
+        ] as const)
+      : ([
+          [true, true],
+          [false, true],
+          [false, false],
+        ] as const);
     for (const [hardware, audio] of attempts) {
-      try { await rm(outputPath, { force: true }); await runProcess(this.ffmpegExecutable, args(hardware, audio), signal); return; }
-      catch (error) { if (isAbort(error)) throw error; lastError = error; }
+      try {
+        await rm(outputPath, { force: true });
+        await runProcess(this.ffmpegExecutable, args(hardware, audio), signal);
+        return;
+      } catch (error) {
+        if (isAbort(error)) throw error;
+        lastError = error;
+      }
     }
     throw lastError;
   }

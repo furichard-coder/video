@@ -2,7 +2,43 @@ import { randomUUID } from "node:crypto";
 import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell as electronShell } from "electron";
-import type { AiAccountSaveInput, AiPublishGenerationOptions, AiStoryContext, AiSubtitleGenerationOptions, BackgroundJobKind, BackgroundJobSnapshot, BackgroundJobStatus, BgmTrack, BrowserUploadPlatform, ConcatRenderEstimateRequest, ConcatRenderRequest, ExternalMediaTarget, ExternalPlayerId, ExternalPlayerSettingsUpdate, GeminiReviewSettingsUpdate, IntroSuggestion, MainExclusionRange, MaterialSubtitleAnalysisRequest, MusicSuggestionRequest, PlacementRequest, PreviewVariant, ProjectColorSettings, SortMode, SubtitleCue, SubtitleTimelineScope, ThumbnailRenderRequest, TransitionDurationSec, TranslationSettingsUpdate, UserPreferencesUpdate, VoiceInputRequest, VolumeSegment, WatermarkSettings, YoutubeSettingsUpdate, YoutubeUploadRequest, ZoomSegment } from "../shared/domain";
+import type {
+  AiAccountSaveInput,
+  AiPublishGenerationOptions,
+  AiStoryContext,
+  AiSubtitleGenerationOptions,
+  BackgroundJobKind,
+  BackgroundJobSnapshot,
+  BackgroundJobStatus,
+  BgmTrack,
+  BrowserUploadPlatform,
+  ConcatRenderEstimateRequest,
+  ConcatRenderRequest,
+  ExternalMediaTarget,
+  ExternalPlayerId,
+  ExternalPlayerSettingsUpdate,
+  GeminiReviewSettingsUpdate,
+  IntroSuggestion,
+  MainExclusionRange,
+  MaterialSubtitleAnalysisRequest,
+  MusicSuggestionRequest,
+  PlacementRequest,
+  PreviewVariant,
+  ProjectColorSettings,
+  SortMode,
+  SubtitleCue,
+  SubtitleTimelineScope,
+  ThumbnailRenderRequest,
+  TransitionDurationSec,
+  TranslationSettingsUpdate,
+  UserPreferencesUpdate,
+  VoiceInputRequest,
+  VolumeSegment,
+  WatermarkSettings,
+  YoutubeSettingsUpdate,
+  YoutubeUploadRequest,
+  ZoomSegment,
+} from "../shared/domain";
 import { ConcatRenderService } from "./services/concat-render";
 import { IntroAnalyzer } from "./services/intro-analyzer";
 import { PreviewCache } from "./services/preview-cache";
@@ -81,35 +117,64 @@ export function registerIpc(
   const subtitleOutputTokens = new Map<string, { outputPath: string; createdAt: number }>();
   const backgroundJobs = new Map<string, BackgroundJobSnapshot>();
   const unsubscribeProjectChanges = store.subscribe((change) => {
-    for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send("project:changed", change);
+    for (const window of BrowserWindow.getAllWindows())
+      if (!window.isDestroyed()) window.webContents.send("project:changed", change);
   });
   const publishBackgroundJobs = () => {
     const jobs = [...backgroundJobs.values()].sort((left, right) => right.startedAt.localeCompare(left.startedAt));
-    for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send("background:jobs", jobs);
+    for (const window of BrowserWindow.getAllWindows())
+      if (!window.isDestroyed()) window.webContents.send("background:jobs", jobs);
   };
   const pruneBackgroundJobs = () => {
     const cutoff = Date.now() - 30 * 60 * 1000;
-    for (const [id, job] of backgroundJobs) if (job.status !== "RUNNING" && Date.parse(job.finishedAt ?? job.startedAt) < cutoff) backgroundJobs.delete(id);
+    for (const [id, job] of backgroundJobs)
+      if (job.status !== "RUNNING" && Date.parse(job.finishedAt ?? job.startedAt) < cutoff) backgroundJobs.delete(id);
   };
   const beginBackgroundJob = (kind: BackgroundJobKind, label: string): string => {
     pruneBackgroundJobs();
     const id = randomUUID();
     const project = store.getProject();
-    backgroundJobs.set(id, { id, kind, label, status: "RUNNING", startedAt: new Date().toISOString(), projectId: project.id, projectName: project.name, projectRevision: project.timelineRevision });
+    backgroundJobs.set(id, {
+      id,
+      kind,
+      label,
+      status: "RUNNING",
+      startedAt: new Date().toISOString(),
+      projectId: project.id,
+      projectName: project.name,
+      projectRevision: project.timelineRevision,
+    });
     publishBackgroundJobs();
     return id;
   };
   const assertNoRunningProjectJobs = () => {
     const running = [...backgroundJobs.values()].filter((job) => job.status === "RUNNING");
-    if (running.length) throw new Error(`目前有 ${running.length} 個背景工作正在處理「${running[0].projectName ?? "目前專案"}」，完成或取消後才能切換專案。`);
+    if (running.length)
+      throw new Error(
+        `目前有 ${running.length} 個背景工作正在處理「${running[0].projectName ?? "目前專案"}」，完成或取消後才能切換專案。`,
+      );
   };
   const updateBackgroundJob = (id: string, patch: Pick<BackgroundJobSnapshot, "percent" | "detail">) => {
-    const current = backgroundJobs.get(id); if (!current) return;
-    backgroundJobs.set(id, { ...current, ...patch }); publishBackgroundJobs();
+    const current = backgroundJobs.get(id);
+    if (!current) return;
+    backgroundJobs.set(id, { ...current, ...patch });
+    publishBackgroundJobs();
   };
-  const finishBackgroundJob = (id: string, status: BackgroundJobStatus, patch: Pick<BackgroundJobSnapshot, "detail" | "error"> = {}) => {
-    const current = backgroundJobs.get(id); if (!current) return;
-    backgroundJobs.set(id, { ...current, ...patch, status, percent: status === "COMPLETED" ? 100 : current.percent, finishedAt: new Date().toISOString() }); publishBackgroundJobs();
+  const finishBackgroundJob = (
+    id: string,
+    status: BackgroundJobStatus,
+    patch: Pick<BackgroundJobSnapshot, "detail" | "error"> = {},
+  ) => {
+    const current = backgroundJobs.get(id);
+    if (!current) return;
+    backgroundJobs.set(id, {
+      ...current,
+      ...patch,
+      status,
+      percent: status === "COMPLETED" ? 100 : current.percent,
+      finishedAt: new Date().toISOString(),
+    });
+    publishBackgroundJobs();
   };
 
   const runImport = async (event: Electron.IpcMainInvokeEvent, mode: "FILES" | "FOLDER" | "INTRO_FILES") => {
@@ -122,9 +187,7 @@ export function registerIpc(
       properties: isFolder ? ["openDirectory"] : ["openFile", "multiSelections"],
       filters: isFolder ? undefined : MEDIA_DIALOG_FILTERS,
     };
-    const result = window
-      ? await dialog.showOpenDialog(window, options)
-      : await dialog.showOpenDialog(options);
+    const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
     if (result.canceled || result.filePaths.length === 0) {
       return emptyCancelledResult(store.getProject());
     }
@@ -148,9 +211,13 @@ export function registerIpc(
 
   ipcMain.handle("app:get-info", () => ({ version: app.getVersion(), productName: app.getName() }));
   ipcMain.handle("preferences:get", () => userPreferences.snapshot());
-  ipcMain.handle("background:get-jobs", () => { pruneBackgroundJobs(); return [...backgroundJobs.values()].sort((left, right) => right.startedAt.localeCompare(left.startedAt)); });
+  ipcMain.handle("background:get-jobs", () => {
+    pruneBackgroundJobs();
+    return [...backgroundJobs.values()].sort((left, right) => right.startedAt.localeCompare(left.startedAt));
+  });
   ipcMain.handle("preferences:update", async (_event, update: UserPreferencesUpdate) => {
-    if (update?.renderDefaults?.transitionSeconds !== undefined) await store.setTimelineTransitionSeconds(update.renderDefaults.transitionSeconds);
+    if (update?.renderDefaults?.transitionSeconds !== undefined)
+      await store.setTimelineTransitionSeconds(update.renderDefaults.transitionSeconds);
     return userPreferences.update(update);
   });
   ipcMain.handle("project:get", () => store.getProject());
@@ -161,16 +228,24 @@ export function registerIpc(
   ipcMain.handle("project:save", () => store.saveProject());
   ipcMain.handle("project:save-as", async (event) => {
     const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    const safeName = store.getProject().name.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").trim() || "SceneryWalker_project";
+    const safeName =
+      store
+        .getProject()
+        .name.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+        .trim() || "SceneryWalker_project";
     const options: Electron.SaveDialogOptions = {
       title: "另存 SceneryWalker 專案",
-      defaultPath: path.join(userPreferences.getLastDirectory("PROJECT", app.getPath("documents")), `${safeName}.swproj`),
+      defaultPath: path.join(
+        userPreferences.getLastDirectory("PROJECT", app.getPath("documents")),
+        `${safeName}.swproj`,
+      ),
       filters: [{ name: "SceneryWalker 專案", extensions: ["swproj"] }],
       properties: ["showOverwriteConfirmation", "createDirectory"],
     };
     const result = window ? await dialog.showSaveDialog(window, options) : await dialog.showSaveDialog(options);
     if (result.canceled || !result.filePath) return null;
-    const filePath = path.extname(result.filePath).toLowerCase() === ".swproj" ? result.filePath : `${result.filePath}.swproj`;
+    const filePath =
+      path.extname(result.filePath).toLowerCase() === ".swproj" ? result.filePath : `${result.filePath}.swproj`;
     await userPreferences.rememberDirectory("PROJECT", filePath);
     const projectName = path.basename(filePath, path.extname(filePath)).trim();
     return store.saveProjectAs(filePath, projectName);
@@ -200,35 +275,68 @@ export function registerIpc(
   ipcMain.handle("main:restore-asset", (_event, assetId: string) => store.restoreMainAsset(assetId));
   ipcMain.handle("intro:set-segments", (_event, segments: IntroSuggestion[]) => store.setIntroSegments(segments));
   ipcMain.handle("intro:set-target-duration", (_event, durationMs: number) => store.setIntroTargetDuration(durationMs));
-  ipcMain.handle("intro:set-segment-max-duration", (_event, durationMs: number) => store.setIntroSegmentMaxDuration(durationMs));
-  ipcMain.handle("project:set-color-settings", (_event, settings: ProjectColorSettings) => store.setProjectColorSettings(settings));
-  ipcMain.handle("project:set-watermark-settings", (_event, settings: WatermarkSettings) => store.setWatermarkSettings(settings));
+  ipcMain.handle("intro:set-segment-max-duration", (_event, durationMs: number) =>
+    store.setIntroSegmentMaxDuration(durationMs),
+  );
+  ipcMain.handle("project:set-color-settings", (_event, settings: ProjectColorSettings) =>
+    store.setProjectColorSettings(settings),
+  );
+  ipcMain.handle("project:set-watermark-settings", (_event, settings: WatermarkSettings) =>
+    store.setWatermarkSettings(settings),
+  );
   ipcMain.handle("intro:remove-segment", (_event, segmentId: string) => store.removeIntroSegment(segmentId));
   ipcMain.handle("intro:restore-segment", (_event, segmentId: string) => store.restoreIntroSegment(segmentId));
   ipcMain.handle("source:set-preview-range", (_event, assetId: string, inMs: number, outMs: number) =>
-    store.setPreviewRange(assetId, inMs, outMs));
+    store.setPreviewRange(assetId, inMs, outMs),
+  );
   ipcMain.handle("source:set-image-duration", (_event, assetId: string, durationMs: number) =>
-    store.setImageDuration(assetId, durationMs));
+    store.setImageDuration(assetId, durationMs),
+  );
   ipcMain.handle("source:set-photo-sound", (_event, assetId: string, enabled: boolean) =>
-    store.setPhotoSoundEnabled(assetId, enabled));
-  ipcMain.handle("main:add-media-insertion", (_event, anchorVideoAssetId: string, insertedAssetId: string, atMs: number, sourceRange?: { inMs: number; outMs: number }) =>
-    store.addMediaInsertion(anchorVideoAssetId, insertedAssetId, atMs, sourceRange));
-  ipcMain.handle("main:update-media-insertion", (_event, insertionId: string, atMs: number, sourceRange: { inMs: number; outMs: number }) =>
-    store.updateMediaInsertion(insertionId, atMs, sourceRange));
+    store.setPhotoSoundEnabled(assetId, enabled),
+  );
+  ipcMain.handle(
+    "main:add-media-insertion",
+    (
+      _event,
+      anchorVideoAssetId: string,
+      insertedAssetId: string,
+      atMs: number,
+      sourceRange?: { inMs: number; outMs: number },
+    ) => store.addMediaInsertion(anchorVideoAssetId, insertedAssetId, atMs, sourceRange),
+  );
+  ipcMain.handle(
+    "main:update-media-insertion",
+    (_event, insertionId: string, atMs: number, sourceRange: { inMs: number; outMs: number }) =>
+      store.updateMediaInsertion(insertionId, atMs, sourceRange),
+  );
   ipcMain.handle("main:remove-media-insertion", (_event, insertionId: string) =>
-    store.removeMediaInsertion(insertionId));
+    store.removeMediaInsertion(insertionId),
+  );
   ipcMain.handle("main:move-media-insertion", (_event, insertionId: string, toIndex: number) =>
-    store.moveMediaInsertion(insertionId, toIndex));
+    store.moveMediaInsertion(insertionId, toIndex),
+  );
   ipcMain.handle("source:set-volume-segments", (_event, assetId: string, segments: VolumeSegment[]) =>
-    store.setVolumeSegments(assetId, segments));
+    store.setVolumeSegments(assetId, segments),
+  );
   ipcMain.handle("main:set-exclusion-ranges", (_event, assetId: string, ranges: MainExclusionRange[]) =>
-    store.setMainExclusionRanges(assetId, ranges));
+    store.setMainExclusionRanges(assetId, ranges),
+  );
   ipcMain.handle("main:set-zoom-segments", (_event, assetId: string, segments: ZoomSegment[]) =>
-    store.setZoomSegments(assetId, segments));
-  ipcMain.handle("project:place-asset", (_event, assetId: string, placement: PlacementRequest) => store.placeAsset(assetId, placement));
-  ipcMain.handle("project:move-asset", (_event, assetId: string, toIndex: number) => store.moveTimelineAsset(assetId, toIndex));
-  ipcMain.handle("project:set-timeline-transition", (_event, seconds: TransitionDurationSec) => store.setTimelineTransitionSeconds(seconds));
-  ipcMain.handle("subtitle:force-re-review", (_event, scopes: SubtitleTimelineScope[]) => store.forceSubtitleReReview(scopes));
+    store.setZoomSegments(assetId, segments),
+  );
+  ipcMain.handle("project:place-asset", (_event, assetId: string, placement: PlacementRequest) =>
+    store.placeAsset(assetId, placement),
+  );
+  ipcMain.handle("project:move-asset", (_event, assetId: string, toIndex: number) =>
+    store.moveTimelineAsset(assetId, toIndex),
+  );
+  ipcMain.handle("project:set-timeline-transition", (_event, seconds: TransitionDurationSec) =>
+    store.setTimelineTransitionSeconds(seconds),
+  );
+  ipcMain.handle("subtitle:force-re-review", (_event, scopes: SubtitleTimelineScope[]) =>
+    store.forceSubtitleReReview(scopes),
+  );
   ipcMain.handle("source:metadata", (_event, assetId: string) => sources.ensureMetadata(assetId));
   ipcMain.handle("project:set-sort", (_event, sortMode: SortMode) => {
     if (!SORT_MODES.has(sortMode)) throw new Error("排序模式無效。");
@@ -275,20 +383,18 @@ export function registerIpc(
       filters: [{ name: "MP4 影片", extensions: ["mp4"] }],
       properties: ["showOverwriteConfirmation", "createDirectory"],
     };
-    const result = window
-      ? await dialog.showSaveDialog(window, options)
-      : await dialog.showSaveDialog(options);
+    const result = window ? await dialog.showSaveDialog(window, options) : await dialog.showSaveDialog(options);
     if (result.canceled || !result.filePath) return null;
-    const outputPath = path.extname(result.filePath).toLowerCase() === ".mp4"
-      ? result.filePath
-      : `${result.filePath}.mp4`;
+    const outputPath =
+      path.extname(result.filePath).toLowerCase() === ".mp4" ? result.filePath : `${result.filePath}.mp4`;
     await userPreferences.rememberDirectory("PREVIEW_OUTPUT", outputPath);
     const token = randomUUID();
     outputTokens.set(token, { outputPath, createdAt: Date.now(), allowOverwrite: true });
     return { token, displayPath: outputPath };
   });
   ipcMain.handle("concat:prepare-output", async (_event, suggestedName: string) => {
-    for (const [token, item] of outputTokens) if (Date.now() - item.createdAt > 30 * 60 * 1000) outputTokens.delete(token);
+    for (const [token, item] of outputTokens)
+      if (Date.now() - item.createdAt > 30 * 60 * 1000) outputTokens.delete(token);
     const fallbackDirectory = app.getPath("videos");
     const preferredDirectory = userPreferences.getLastDirectory("PREVIEW_OUTPUT", fallbackDirectory);
     const preferredState = await stat(preferredDirectory).catch(() => undefined);
@@ -302,10 +408,16 @@ export function registerIpc(
   ipcMain.handle("concat:estimate", async (_event, request: ConcatRenderEstimateRequest) => {
     if (!request || typeof request.outputToken !== "string") throw new Error("轉檔預估要求格式無效。");
     const selectedOutput = outputTokens.get(request.outputToken);
-    if (!selectedOutput || Date.now() - selectedOutput.createdAt > 30 * 60 * 1000) throw new Error("輸出位置授權已失效，請重新選擇儲存位置。");
+    if (!selectedOutput || Date.now() - selectedOutput.createdAt > 30 * 60 * 1000)
+      throw new Error("輸出位置授權已失效，請重新選擇儲存位置。");
     if (!RENDER_RESOLUTIONS.has(request.resolution)) throw new Error("預估解析度無效。");
     if (!RENDER_CODECS.has(request.videoCodec)) throw new Error("預估影片格式無效。");
-    return estimateRenderOnDisk(selectedOutput.outputPath, request.expectedDurationMs, request.resolution, request.videoCodec);
+    return estimateRenderOnDisk(
+      selectedOutput.outputPath,
+      request.expectedDurationMs,
+      request.resolution,
+      request.videoCodec,
+    );
   });
   ipcMain.handle("concat:start", async (event, request: ConcatRenderRequest) => {
     if (concatController) throw new Error("已有一個串連預覽正在產出，請先等待或取消。");
@@ -315,11 +427,20 @@ export function registerIpc(
     if (!selectedOutput || Date.now() - selectedOutput.createdAt > 30 * 60 * 1000) {
       throw new Error("輸出位置授權已失效，請重新選擇儲存位置。");
     }
-    if (!selectedOutput.allowOverwrite && await stat(selectedOutput.outputPath).catch(() => undefined)) {
+    if (!selectedOutput.allowOverwrite && (await stat(selectedOutput.outputPath).catch(() => undefined))) {
       throw new Error("自動產生的檔名已被其他程式使用，請按『重新產生檔名』後再試；既有檔案不會被覆寫。");
     }
-    if (!RENDER_RESOLUTIONS.has(request.resolution) || (request.videoCodec !== undefined && !RENDER_CODECS.has(request.videoCodec))) throw new Error("轉檔解析度或影片格式無效。");
-    const preflight = await estimateRenderOnDisk(selectedOutput.outputPath, request.estimatedDurationMs ?? 0, request.resolution, request.videoCodec ?? "H264");
+    if (
+      !RENDER_RESOLUTIONS.has(request.resolution) ||
+      (request.videoCodec !== undefined && !RENDER_CODECS.has(request.videoCodec))
+    )
+      throw new Error("轉檔解析度或影片格式無效。");
+    const preflight = await estimateRenderOnDisk(
+      selectedOutput.outputPath,
+      request.estimatedDurationMs ?? 0,
+      request.resolution,
+      request.videoCodec ?? "H264",
+    );
     if (!preflight.canRender) throw new Error(preflight.warning ?? "輸出磁碟空間不足 1 GB，本次不會開始轉檔。");
     const releasePowerGuard = renderPowerGuard.acquire();
     const controller = new AbortController();
@@ -328,20 +449,21 @@ export function registerIpc(
     const cancelIfRendererCloses = () => controller.abort();
     event.sender.once("destroyed", cancelIfRendererCloses);
     try {
-      const result = await concatRenderer.render(
-        request,
-        selectedOutput.outputPath,
-        controller.signal,
-        (progress) => {
-          updateBackgroundJob(backgroundJobId, { percent: progress.percent, detail: progress.phase });
-          if (!event.sender.isDestroyed()) event.sender.send("concat:progress", progress);
-        },
-      );
+      const result = await concatRenderer.render(request, selectedOutput.outputPath, controller.signal, (progress) => {
+        updateBackgroundJob(backgroundJobId, { percent: progress.percent, detail: progress.phase });
+        if (!event.sender.isDestroyed()) event.sender.send("concat:progress", progress);
+      });
       await outputHistory.registerRender(result, store.getProject().name);
-      finishBackgroundJob(backgroundJobId, result.cancelled ? "CANCELLED" : "COMPLETED", { detail: result.cancelled ? "使用者取消，已保留可播放結尾" : result.outputPath });
+      finishBackgroundJob(backgroundJobId, result.cancelled ? "CANCELLED" : "COMPLETED", {
+        detail: result.cancelled ? "使用者取消，已保留可播放結尾" : result.outputPath,
+      });
       return result;
     } catch (error) {
-      finishBackgroundJob(backgroundJobId, error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED", { error: error instanceof Error ? error.message : String(error) });
+      finishBackgroundJob(
+        backgroundJobId,
+        error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED",
+        { error: error instanceof Error ? error.message : String(error) },
+      );
       throw error;
     } finally {
       event.sender.removeListener("destroyed", cancelIfRendererCloses);
@@ -367,41 +489,66 @@ export function registerIpc(
   ipcMain.handle("output-history:get", () => outputHistory.snapshot());
   ipcMain.handle("output-history:choose-existing", async (event) => {
     const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    const options: Electron.OpenDialogOptions = { title: "加入以前產出的 MP4 預覽檔", defaultPath: userPreferences.getLastDirectory("OUTPUT_HISTORY", app.getPath("videos")), properties: ["openFile", "multiSelections"], filters: [{ name: "MP4 影片", extensions: ["mp4"] }] };
+    const options: Electron.OpenDialogOptions = {
+      title: "加入以前產出的 MP4 預覽檔",
+      defaultPath: userPreferences.getLastDirectory("OUTPUT_HISTORY", app.getPath("videos")),
+      properties: ["openFile", "multiSelections"],
+      filters: [{ name: "MP4 影片", extensions: ["mp4"] }],
+    };
     const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
-    if (result.canceled || !result.filePaths.length) return { cancelled: true, addedCount: 0, duplicateCount: 0, errors: [], history: await outputHistory.snapshot() };
+    if (result.canceled || !result.filePaths.length)
+      return { cancelled: true, addedCount: 0, duplicateCount: 0, errors: [], history: await outputHistory.snapshot() };
     await userPreferences.rememberDirectory("OUTPUT_HISTORY", result.filePaths[0]);
     return outputHistory.importExisting(result.filePaths);
   });
   ipcMain.handle("output-history:remove-record", (_event, jobId: string) => outputHistory.removeRecord(jobId));
-  ipcMain.handle("intro:analyze", async (event, assetIds: string[], maxDurationMs: number, maxSegmentDurationMs: number) => {
-    if (introController) throw new Error("精彩片頭分析已在進行中。");
-    if (!Array.isArray(assetIds) || !Number.isFinite(maxDurationMs) || !Number.isFinite(maxSegmentDurationMs)) throw new Error("片頭分析要求格式無效。");
-    const controller = new AbortController();
-    introController = controller;
-    const backgroundJobId = beginBackgroundJob("INTRO_ANALYSIS", "AI 精彩片頭建議");
-    const cancelIfRendererCloses = () => controller.abort();
-    event.sender.once("destroyed", cancelIfRendererCloses);
-    try {
-      const result = await introAnalyzer.analyze(assetIds, controller.signal, (progress) => {
-        updateBackgroundJob(backgroundJobId, { percent: progress.total ? Math.round(progress.processed / progress.total * 100) : 0, detail: progress.currentName ?? progress.phase });
-        if (!event.sender.isDestroyed()) event.sender.send("intro:analysis-progress", progress);
-      }, maxDurationMs, maxSegmentDurationMs);
-      await store.setIntroAnalysisResult(result);
-      finishBackgroundJob(backgroundJobId, "COMPLETED", { detail: "片頭分析完成；結果已保存，可重新開啟片頭頁查看" });
-      return result;
-    } catch (error) {
-      finishBackgroundJob(backgroundJobId, error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED", { error: error instanceof Error ? error.message : String(error) });
-      throw error;
-    } finally {
-      event.sender.removeListener("destroyed", cancelIfRendererCloses);
-      if (introController === controller) introController = undefined;
-    }
-  });
+  ipcMain.handle(
+    "intro:analyze",
+    async (event, assetIds: string[], maxDurationMs: number, maxSegmentDurationMs: number) => {
+      if (introController) throw new Error("精彩片頭分析已在進行中。");
+      if (!Array.isArray(assetIds) || !Number.isFinite(maxDurationMs) || !Number.isFinite(maxSegmentDurationMs))
+        throw new Error("片頭分析要求格式無效。");
+      const controller = new AbortController();
+      introController = controller;
+      const backgroundJobId = beginBackgroundJob("INTRO_ANALYSIS", "AI 精彩片頭建議");
+      const cancelIfRendererCloses = () => controller.abort();
+      event.sender.once("destroyed", cancelIfRendererCloses);
+      try {
+        const result = await introAnalyzer.analyze(
+          assetIds,
+          controller.signal,
+          (progress) => {
+            updateBackgroundJob(backgroundJobId, {
+              percent: progress.total ? Math.round((progress.processed / progress.total) * 100) : 0,
+              detail: progress.currentName ?? progress.phase,
+            });
+            if (!event.sender.isDestroyed()) event.sender.send("intro:analysis-progress", progress);
+          },
+          maxDurationMs,
+          maxSegmentDurationMs,
+        );
+        await store.setIntroAnalysisResult(result);
+        finishBackgroundJob(backgroundJobId, "COMPLETED", { detail: "片頭分析完成；結果已保存，可重新開啟片頭頁查看" });
+        return result;
+      } catch (error) {
+        finishBackgroundJob(
+          backgroundJobId,
+          error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED",
+          { error: error instanceof Error ? error.message : String(error) },
+        );
+        throw error;
+      } finally {
+        event.sender.removeListener("destroyed", cancelIfRendererCloses);
+        if (introController === controller) introController = undefined;
+      }
+    },
+  );
   ipcMain.handle("intro:cancel-analysis", () => introController?.abort());
   ipcMain.handle("ai:get-settings", () => aiSettings.getSnapshot());
   ipcMain.handle("ai:save-account", (_event, input: AiAccountSaveInput) => aiSettings.saveAccount(input));
-  ipcMain.handle("ai:save-gemini-review", (_event, input: GeminiReviewSettingsUpdate) => aiSettings.saveGeminiReviewSettings(input));
+  ipcMain.handle("ai:save-gemini-review", (_event, input: GeminiReviewSettingsUpdate) =>
+    aiSettings.saveGeminiReviewSettings(input),
+  );
   ipcMain.handle("ai:set-active-account", (_event, accountId: string) => aiSettings.setActiveAccount(accountId));
   ipcMain.handle("ai:remove-account", (_event, accountId: string) => aiSettings.removeAccount(accountId));
   ipcMain.handle("ai:test-account", async (_event, accountId: string) => {
@@ -420,27 +567,35 @@ export function registerIpc(
     };
   });
   ipcMain.handle("translation:get-settings", () => translationSettings.snapshot());
-  ipcMain.handle("translation:update-settings", (_event, update: TranslationSettingsUpdate) => translationSettings.update(update));
+  ipcMain.handle("translation:update-settings", (_event, update: TranslationSettingsUpdate) =>
+    translationSettings.update(update),
+  );
   ipcMain.handle("translation:test-google", async () => {
     await subtitleTranslation.testGoogle();
     return { ok: true, message: "Google Cloud Translation 實際翻譯測試成功；OpenAI 不可用時可安全切換為後援。" };
   });
   ipcMain.handle("ai:transcribe-voice-input", async (event, request: VoiceInputRequest) => {
     voiceInputController?.abort();
-    const controller = new AbortController(); voiceInputController = controller;
-    const cancelIfRendererCloses = () => controller.abort(); event.sender.once("destroyed", cancelIfRendererCloses);
-    try { return await aiStory.transcribeVoiceInput(request, controller.signal); }
-    finally {
+    const controller = new AbortController();
+    voiceInputController = controller;
+    const cancelIfRendererCloses = () => controller.abort();
+    event.sender.once("destroyed", cancelIfRendererCloses);
+    try {
+      return await aiStory.transcribeVoiceInput(request, controller.signal);
+    } finally {
       event.sender.removeListener("destroyed", cancelIfRendererCloses);
       if (voiceInputController === controller) voiceInputController = undefined;
     }
   });
   ipcMain.handle("project:set-ai-story-context", (_event, context: AiStoryContext) => store.setAiStoryContext(context));
   ipcMain.handle("publish:get-assets", () => store.getProject().aiPublishAssets ?? null);
-  ipcMain.handle("publish:set-assets", (_event, assets: import("../shared/domain").AiPublishAssets) => store.setAiPublishAssets(assets));
+  ipcMain.handle("publish:set-assets", (_event, assets: import("../shared/domain").AiPublishAssets) =>
+    store.setAiPublishAssets(assets),
+  );
   ipcMain.handle("publish:generate", async (event, options: AiPublishGenerationOptions) => {
     if (aiPublishController) throw new Error("AI 發布素材分析已在進行中。");
-    const controller = new AbortController(); aiPublishController = controller;
+    const controller = new AbortController();
+    aiPublishController = controller;
     const backgroundJobId = beginBackgroundJob("AI_PUBLISH_ASSETS", "AI 發布素材與縮圖建議");
     try {
       const result = await aiPublishAssets.generate(options, controller.signal, (percent, detail) => {
@@ -450,37 +605,74 @@ export function registerIpc(
       finishBackgroundJob(backgroundJobId, "COMPLETED", { detail: "AI 發布素材已保存" });
       return result;
     } catch (error) {
-      finishBackgroundJob(backgroundJobId, error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED", { error: error instanceof Error ? error.message : String(error) });
+      finishBackgroundJob(
+        backgroundJobId,
+        error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED",
+        { error: error instanceof Error ? error.message : String(error) },
+      );
       throw error;
-    } finally { if (aiPublishController === controller) aiPublishController = undefined; }
+    } finally {
+      if (aiPublishController === controller) aiPublishController = undefined;
+    }
   });
   ipcMain.handle("publish:cancel", () => aiPublishController?.abort());
   ipcMain.handle("publish:thumbnail:choose-output", async (event, format: "jpg" | "png" = "jpg") => {
     if (format !== "jpg" && format !== "png") throw new Error("縮圖格式只支援 JPG 或 PNG。");
     const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    const result = window ? await dialog.showSaveDialog(window, { title: "另存 YouTube 縮圖", defaultPath: path.join(userPreferences.getLastDirectory("PREVIEW_OUTPUT", app.getPath("pictures")), `SceneryWalker_thumbnail.${format}`), filters: [{ name: format.toUpperCase(), extensions: [format] }], properties: ["showOverwriteConfirmation", "createDirectory"] }) : await dialog.showSaveDialog({ title: "另存 YouTube 縮圖", defaultPath: path.join(app.getPath("pictures"), `SceneryWalker_thumbnail.${format}`), filters: [{ name: format.toUpperCase(), extensions: [format] }], properties: ["showOverwriteConfirmation", "createDirectory"] });
+    const result = window
+      ? await dialog.showSaveDialog(window, {
+          title: "另存 YouTube 縮圖",
+          defaultPath: path.join(
+            userPreferences.getLastDirectory("PREVIEW_OUTPUT", app.getPath("pictures")),
+            `SceneryWalker_thumbnail.${format}`,
+          ),
+          filters: [{ name: format.toUpperCase(), extensions: [format] }],
+          properties: ["showOverwriteConfirmation", "createDirectory"],
+        })
+      : await dialog.showSaveDialog({
+          title: "另存 YouTube 縮圖",
+          defaultPath: path.join(app.getPath("pictures"), `SceneryWalker_thumbnail.${format}`),
+          filters: [{ name: format.toUpperCase(), extensions: [format] }],
+          properties: ["showOverwriteConfirmation", "createDirectory"],
+        });
     if (result.canceled || !result.filePath) return null;
-    const outputPath = path.extname(result.filePath).toLowerCase() === `.${format}` ? result.filePath : `${result.filePath}.${format}`;
-    const token = randomUUID(); thumbnailTokens.set(token, { outputPath, createdAt: Date.now(), format });
+    const outputPath =
+      path.extname(result.filePath).toLowerCase() === `.${format}` ? result.filePath : `${result.filePath}.${format}`;
+    const token = randomUUID();
+    thumbnailTokens.set(token, { outputPath, createdAt: Date.now(), format });
     await userPreferences.rememberDirectory("PREVIEW_OUTPUT", outputPath);
     return { token, displayPath: outputPath, format };
   });
   ipcMain.handle("publish:thumbnail:choose-import", async (event) => {
     const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    const options: Electron.OpenDialogOptions = { title: "匯入 YouTube JPG／PNG 縮圖", properties: ["openFile"], filters: [{ name: "圖片", extensions: ["jpg", "jpeg", "png"] }] };
+    const options: Electron.OpenDialogOptions = {
+      title: "匯入 YouTube JPG／PNG 縮圖",
+      properties: ["openFile"],
+      filters: [{ name: "圖片", extensions: ["jpg", "jpeg", "png"] }],
+    };
     const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
     if (result.canceled || !result.filePaths[0]) return null;
     const extension = path.extname(result.filePaths[0]).toLowerCase();
-    if (extension !== ".jpg" && extension !== ".jpeg" && extension !== ".png") throw new Error("只支援 JPG 或 PNG 縮圖。" );
+    if (extension !== ".jpg" && extension !== ".jpeg" && extension !== ".png")
+      throw new Error("只支援 JPG 或 PNG 縮圖。");
     const file = await stat(result.filePaths[0]);
-    if (file.size > 2 * 1024 * 1024) throw new Error("縮圖超過 YouTube 2 MB 上限。" );
-    return { path: result.filePaths[0], format: extension === ".png" ? "png" as const : "jpg" as const };
+    if (file.size > 2 * 1024 * 1024) throw new Error("縮圖超過 YouTube 2 MB 上限。");
+    return { path: result.filePaths[0], format: extension === ".png" ? ("png" as const) : ("jpg" as const) };
   });
   ipcMain.handle("publish:thumbnail:render", async (_event, request: ThumbnailRenderRequest) => {
-    if (!request || typeof request.outputToken !== "string" || typeof request.candidateId !== "string" || (request.format !== "jpg" && request.format !== "png")) throw new Error("縮圖產出要求格式無效。");
-    const token = thumbnailTokens.get(request.outputToken); thumbnailTokens.delete(request.outputToken);
-    if (!token || token.format !== request.format || Date.now() - token.createdAt > 30 * 60_000) throw new Error("縮圖輸出位置授權已失效，請重新選擇儲存位置。");
-    const project = store.getProject(); const candidate = project.aiPublishAssets?.thumbnails.find((item) => item.id === request.candidateId);
+    if (
+      !request ||
+      typeof request.outputToken !== "string" ||
+      typeof request.candidateId !== "string" ||
+      (request.format !== "jpg" && request.format !== "png")
+    )
+      throw new Error("縮圖產出要求格式無效。");
+    const token = thumbnailTokens.get(request.outputToken);
+    thumbnailTokens.delete(request.outputToken);
+    if (!token || token.format !== request.format || Date.now() - token.createdAt > 30 * 60_000)
+      throw new Error("縮圖輸出位置授權已失效，請重新選擇儲存位置。");
+    const project = store.getProject();
+    const candidate = project.aiPublishAssets?.thumbnails.find((item) => item.id === request.candidateId);
     if (!candidate) throw new Error("找不到縮圖候選，請重新產生或選擇候選影格。");
     const asset = project.sources.find((item) => item.id === candidate.assetId);
     if (!asset) throw new Error("縮圖候選的來源素材不存在；來源檔沒有被修改。");
@@ -489,7 +681,8 @@ export function registerIpc(
   });
   ipcMain.handle("external-player:get-settings", () => playerSettings.snapshotWithCurrentAvailability());
   ipcMain.handle("external-player:update-settings", (_event, update: ExternalPlayerSettingsUpdate) =>
-    playerSettings.update(update));
+    playerSettings.update(update),
+  );
   ipcMain.handle("external-player:choose-custom", async (event) => {
     const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
     const options: Electron.OpenDialogOptions = {
@@ -504,29 +697,46 @@ export function registerIpc(
     return playerSettings.addCustomPlayer(result.filePaths[0]);
   });
   ipcMain.handle("external-player:remove-custom", (_event, playerId: ExternalPlayerId) =>
-    playerSettings.removeCustomPlayer(playerId));
+    playerSettings.removeCustomPlayer(playerId),
+  );
   ipcMain.handle("external-player:open", (_event, assetId: string, target: ExternalMediaTarget) =>
-    externalPlayers.open(assetId, target));
+    externalPlayers.open(assetId, target),
+  );
   ipcMain.handle("bgm:choose-files", async (event) => {
     const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    const options: Electron.OpenDialogOptions = { title: "選擇 MP3 配樂", defaultPath: userPreferences.getLastDirectory("BGM", app.getPath("music")), properties: ["openFile", "multiSelections"], filters: [{ name: "MP3 音樂", extensions: ["mp3"] }] };
+    const options: Electron.OpenDialogOptions = {
+      title: "選擇 MP3 配樂",
+      defaultPath: userPreferences.getLastDirectory("BGM", app.getPath("music")),
+      properties: ["openFile", "multiSelections"],
+      filters: [{ name: "MP3 音樂", extensions: ["mp3"] }],
+    };
     const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
-    if (result.canceled || !result.filePaths.length) return { cancelled: true, addedCount: 0, errors: [], project: store.getProject() };
+    if (result.canceled || !result.filePaths.length)
+      return { cancelled: true, addedCount: 0, errors: [], project: store.getProject() };
     await userPreferences.rememberDirectory("BGM", result.filePaths[0]);
     return bgm.importSelected(result.filePaths);
   });
-  ipcMain.handle("bgm:add-youtube-references", (_event, urls: string[]) => bgm.addYoutubeReferences(Array.isArray(urls) ? urls : []));
+  ipcMain.handle("bgm:add-youtube-references", (_event, urls: string[]) =>
+    bgm.addYoutubeReferences(Array.isArray(urls) ? urls : []),
+  );
   ipcMain.handle("bgm:resolve-reference", async (event, trackId: string, rightsConfirmed: boolean) => {
     if (!rightsConfirmed) throw new Error("請先確認音檔使用權，再指定本機 MP3。");
     const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    const options: Electron.OpenDialogOptions = { title: "選擇自有或已授權的 MP3", defaultPath: userPreferences.getLastDirectory("BGM", app.getPath("music")), properties: ["openFile"], filters: [{ name: "MP3 音樂", extensions: ["mp3"] }] };
+    const options: Electron.OpenDialogOptions = {
+      title: "選擇自有或已授權的 MP3",
+      defaultPath: userPreferences.getLastDirectory("BGM", app.getPath("music")),
+      properties: ["openFile"],
+      filters: [{ name: "MP3 音樂", extensions: ["mp3"] }],
+    };
     const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
     if (result.canceled || !result.filePaths[0]) return null;
     await userPreferences.rememberDirectory("BGM", result.filePaths[0]);
     return bgm.resolveReference(trackId, result.filePaths[0], rightsConfirmed);
   });
   ipcMain.handle("bgm:sequence", () => store.sequenceBgmTracks());
-  ipcMain.handle("project:set-source-audio-volume", (_event, volumePercent: number) => store.setSourceAudioVolume(volumePercent));
+  ipcMain.handle("project:set-source-audio-volume", (_event, volumePercent: number) =>
+    store.setSourceAudioVolume(volumePercent),
+  );
   ipcMain.handle("bgm:update", (_event, track: BgmTrack) => store.updateBgmTrack(track));
   ipcMain.handle("bgm:remove", (_event, trackId: string) => store.removeBgmTrack(trackId));
   ipcMain.handle("bgm:move", (_event, trackId: string, toIndex: number) => store.moveBgmTrack(trackId, toIndex));
@@ -534,7 +744,8 @@ export function registerIpc(
     if (typeof trackId !== "string" || !trackId) throw new Error("配樂 ID 無效。");
     const track = store.getProject().bgmTracks.find((item) => item.id === trackId);
     if (!track) throw new Error("找不到這筆配樂。");
-    if (track.resolutionStatus === "NEEDS_LOCAL_FILE" || !track.sourcePath || !path.isAbsolute(track.sourcePath)) throw new Error("這筆配樂尚未指定可用的本機 MP3。");
+    if (track.resolutionStatus === "NEEDS_LOCAL_FILE" || !track.sourcePath || !path.isAbsolute(track.sourcePath))
+      throw new Error("這筆配樂尚未指定可用的本機 MP3。");
     const file = await stat(track.sourcePath).catch(() => undefined);
     if (!file?.isFile()) throw new Error("配樂已移動、刪除或離線，請重新指定本機 MP3。");
     return track;
@@ -558,19 +769,24 @@ export function registerIpc(
   });
   ipcMain.handle("bgm:ai-suggest", async (event, request: MusicSuggestionRequest) => {
     if (musicSuggestionController) throw new Error("AI 配樂建議正在產生中。");
-    const controller = new AbortController(); musicSuggestionController = controller;
+    const controller = new AbortController();
+    musicSuggestionController = controller;
     const backgroundJobId = beginBackgroundJob("MUSIC_SUGGESTIONS", "AI 配樂建議搜尋");
-    const cancelIfRendererCloses = () => controller.abort(); event.sender.once("destroyed", cancelIfRendererCloses);
+    const cancelIfRendererCloses = () => controller.abort();
+    event.sender.once("destroyed", cancelIfRendererCloses);
     try {
       const result = await musicSuggestions.generate(request, controller.signal);
       await store.setMusicSuggestionResult(result);
       finishBackgroundJob(backgroundJobId, "COMPLETED", { detail: `已保存 ${result.suggestions.length} 筆建議` });
       return result;
     } catch (error) {
-      finishBackgroundJob(backgroundJobId, error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED", { error: error instanceof Error ? error.message : String(error) });
+      finishBackgroundJob(
+        backgroundJobId,
+        error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED",
+        { error: error instanceof Error ? error.message : String(error) },
+      );
       throw error;
-    }
-    finally {
+    } finally {
       event.sender.removeListener("destroyed", cancelIfRendererCloses);
       if (musicSuggestionController === controller) musicSuggestionController = undefined;
     }
@@ -580,18 +796,27 @@ export function registerIpc(
   ipcMain.handle("subtitle:set-cues", (_event, cues: SubtitleCue[]) => store.setSubtitleCues(cues));
   ipcMain.handle("subtitle:ai-generate", async (event, options: AiSubtitleGenerationOptions) => {
     if (aiSubtitleController) throw new Error("AI 字幕分析已在進行中。");
-    const controller = new AbortController(); aiSubtitleController = controller;
+    const controller = new AbortController();
+    aiSubtitleController = controller;
     const backgroundJobId = beginBackgroundJob("AI_SUBTITLES", "AI 知識型字幕產出");
-    const cancelIfRendererCloses = () => controller.abort(); event.sender.once("destroyed", cancelIfRendererCloses);
+    const cancelIfRendererCloses = () => controller.abort();
+    event.sender.once("destroyed", cancelIfRendererCloses);
     try {
       const result = await aiStory.generateSubtitles(options, controller.signal, (progress) => {
-        updateBackgroundJob(backgroundJobId, { percent: progress.total ? Math.round(progress.processed / progress.total * 100) : 0, detail: progress.currentName ?? progress.phase });
+        updateBackgroundJob(backgroundJobId, {
+          percent: progress.total ? Math.round((progress.processed / progress.total) * 100) : 0,
+          detail: progress.currentName ?? progress.phase,
+        });
         if (!event.sender.isDestroyed()) event.sender.send("ai:analysis-progress", progress);
       });
       finishBackgroundJob(backgroundJobId, "COMPLETED", { detail: "字幕草稿已保存到專案" });
       return result;
     } catch (error) {
-      finishBackgroundJob(backgroundJobId, error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED", { error: error instanceof Error ? error.message : String(error) });
+      finishBackgroundJob(
+        backgroundJobId,
+        error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED",
+        { error: error instanceof Error ? error.message : String(error) },
+      );
       throw error;
     } finally {
       event.sender.removeListener("destroyed", cancelIfRendererCloses);
@@ -601,18 +826,27 @@ export function registerIpc(
   ipcMain.handle("subtitle:ai-cancel", () => aiSubtitleController?.abort());
   ipcMain.handle("subtitle:material-analyze", async (event, request: MaterialSubtitleAnalysisRequest) => {
     if (materialAnalysisController) throw new Error("素材影像分析已在進行中。");
-    const controller = new AbortController(); materialAnalysisController = controller;
+    const controller = new AbortController();
+    materialAnalysisController = controller;
     const backgroundJobId = beginBackgroundJob("AI_MATERIAL_ANALYSIS", "素材影像／物種字幕分析");
-    const cancelIfRendererCloses = () => controller.abort(); event.sender.once("destroyed", cancelIfRendererCloses);
+    const cancelIfRendererCloses = () => controller.abort();
+    event.sender.once("destroyed", cancelIfRendererCloses);
     try {
       const result = await aiStory.analyzeMaterialForSubtitles(request, controller.signal, (progress) => {
-        updateBackgroundJob(backgroundJobId, { percent: progress.total ? Math.round(progress.processed / progress.total * 100) : 0, detail: progress.currentName ?? progress.phase });
+        updateBackgroundJob(backgroundJobId, {
+          percent: progress.total ? Math.round((progress.processed / progress.total) * 100) : 0,
+          detail: progress.currentName ?? progress.phase,
+        });
         if (!event.sender.isDestroyed()) event.sender.send("ai:analysis-progress", progress);
       });
       finishBackgroundJob(backgroundJobId, "COMPLETED", { detail: `已產生 ${result.drafts.length} 筆待確認字幕` });
       return result;
     } catch (error) {
-      finishBackgroundJob(backgroundJobId, error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED", { error: error instanceof Error ? error.message : String(error) });
+      finishBackgroundJob(
+        backgroundJobId,
+        error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED",
+        { error: error instanceof Error ? error.message : String(error) },
+      );
       throw error;
     } finally {
       event.sender.removeListener("destroyed", cancelIfRendererCloses);
@@ -623,29 +857,38 @@ export function registerIpc(
   ipcMain.handle("subtitle:build-intro-preview", async (event, includeBgm: boolean = false) => {
     if (subtitlePreviewController) throw new Error("480P 片頭字幕預覽正在建立中。");
     if (typeof includeBgm !== "boolean") throw new Error("片頭配樂預覽設定無效。");
-    const controller = new AbortController(); subtitlePreviewController = controller;
+    const controller = new AbortController();
+    subtitlePreviewController = controller;
     const backgroundJobId = beginBackgroundJob("SUBTITLE_PREVIEW", "字幕片頭 480P 預覽");
-    const cancelIfRendererCloses = () => controller.abort(); event.sender.once("destroyed", cancelIfRendererCloses);
+    const cancelIfRendererCloses = () => controller.abort();
+    event.sender.once("destroyed", cancelIfRendererCloses);
     try {
       const result = await subtitlePreviews.ensureIntro480p(includeBgm, controller.signal, (progress) => {
         updateBackgroundJob(backgroundJobId, { percent: progress.percent, detail: progress.phase });
         if (!event.sender.isDestroyed()) event.sender.send("subtitle:preview-progress", progress);
       });
-      await outputHistory.registerRender({
-        jobId: `subprev-${result.cacheKey}`,
-        outputPath: result.outputPath,
-        sizeBytes: result.sizeBytes,
-        expectedDurationMs: result.durationMs,
-        transitionSeconds: store.getProject().timelineTransitionSeconds,
-        resolution: "480P",
-        purpose: "INTRO",
-        bgmAppliedCount: includeBgm ? store.getProject().bgmTracks.length : 0,
-        includedIntroSegmentCount: store.getProject().introSegments.length,
-      }, store.getProject().name);
+      await outputHistory.registerRender(
+        {
+          jobId: `subprev-${result.cacheKey}`,
+          outputPath: result.outputPath,
+          sizeBytes: result.sizeBytes,
+          expectedDurationMs: result.durationMs,
+          transitionSeconds: store.getProject().timelineTransitionSeconds,
+          resolution: "480P",
+          purpose: "INTRO",
+          bgmAppliedCount: includeBgm ? store.getProject().bgmTracks.length : 0,
+          includedIntroSegmentCount: store.getProject().introSegments.length,
+        },
+        store.getProject().name,
+      );
       finishBackgroundJob(backgroundJobId, "COMPLETED", { detail: result.outputPath });
       return result;
     } catch (error) {
-      finishBackgroundJob(backgroundJobId, error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED", { error: error instanceof Error ? error.message : String(error) });
+      finishBackgroundJob(
+        backgroundJobId,
+        error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED",
+        { error: error instanceof Error ? error.message : String(error) },
+      );
       throw error;
     } finally {
       event.sender.removeListener("destroyed", cancelIfRendererCloses);
@@ -667,33 +910,67 @@ export function registerIpc(
     return importSrtFile(result.filePaths[0]);
   });
   ipcMain.handle("subtitle:choose-output", async (event, suggestedName: string) => {
-    for (const [token, item] of subtitleOutputTokens) if (Date.now() - item.createdAt > 30 * 60 * 1000) subtitleOutputTokens.delete(token);
-    const safeStem = path.basename(typeof suggestedName === "string" ? suggestedName : "").replace(/\.srt$/i, "").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").trim();
-    const options: Electron.SaveDialogOptions = { title: "匯出 UTF-8 SRT 字幕", defaultPath: path.join(userPreferences.getLastDirectory("SUBTITLE_OUTPUT", app.getPath("documents")), `${safeStem || "SceneryWalker_subtitles"}.srt`), filters: [{ name: "SubRip 字幕", extensions: ["srt"] }], properties: ["showOverwriteConfirmation", "createDirectory"] };
+    for (const [token, item] of subtitleOutputTokens)
+      if (Date.now() - item.createdAt > 30 * 60 * 1000) subtitleOutputTokens.delete(token);
+    const safeStem = path
+      .basename(typeof suggestedName === "string" ? suggestedName : "")
+      .replace(/\.srt$/i, "")
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+      .trim();
+    const options: Electron.SaveDialogOptions = {
+      title: "匯出 UTF-8 SRT 字幕",
+      defaultPath: path.join(
+        userPreferences.getLastDirectory("SUBTITLE_OUTPUT", app.getPath("documents")),
+        `${safeStem || "SceneryWalker_subtitles"}.srt`,
+      ),
+      filters: [{ name: "SubRip 字幕", extensions: ["srt"] }],
+      properties: ["showOverwriteConfirmation", "createDirectory"],
+    };
     const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
     const result = window ? await dialog.showSaveDialog(window, options) : await dialog.showSaveDialog(options);
     if (result.canceled || !result.filePath) return null;
-    const outputPath = path.extname(result.filePath).toLowerCase() === ".srt" ? result.filePath : `${result.filePath}.srt`;
+    const outputPath =
+      path.extname(result.filePath).toLowerCase() === ".srt" ? result.filePath : `${result.filePath}.srt`;
     await userPreferences.rememberDirectory("SUBTITLE_OUTPUT", outputPath);
-    const token = randomUUID(); subtitleOutputTokens.set(token, { outputPath, createdAt: Date.now() });
+    const token = randomUUID();
+    subtitleOutputTokens.set(token, { outputPath, createdAt: Date.now() });
     return { token, displayPath: outputPath };
   });
   ipcMain.handle("subtitle:export", async (_event, token: string, scopes?: SubtitleTimelineScope[]) => {
-    const selected = subtitleOutputTokens.get(token); subtitleOutputTokens.delete(token);
-    if (!selected || Date.now() - selected.createdAt > 30 * 60 * 1000) throw new Error("字幕輸出位置授權已失效，請重新選擇。");
-    subtitleExportController?.abort(); subtitleExportController = new AbortController();
-    const selectedScopes = new Set((Array.isArray(scopes) && scopes.length ? scopes : ["MAIN"]).filter((scope): scope is SubtitleTimelineScope => scope === "INTRO" || scope === "MAIN"));
-    const confirmed = store.getProject().subtitleCues.filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED" && selectedScopes.has(cue.timelineScope ?? "MAIN"));
+    const selected = subtitleOutputTokens.get(token);
+    subtitleOutputTokens.delete(token);
+    if (!selected || Date.now() - selected.createdAt > 30 * 60 * 1000)
+      throw new Error("字幕輸出位置授權已失效，請重新選擇。");
+    subtitleExportController?.abort();
+    subtitleExportController = new AbortController();
+    const selectedScopes = new Set(
+      (Array.isArray(scopes) && scopes.length ? scopes : ["MAIN"]).filter(
+        (scope): scope is SubtitleTimelineScope => scope === "INTRO" || scope === "MAIN",
+      ),
+    );
+    const confirmed = store
+      .getProject()
+      .subtitleCues.filter(
+        (cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED" && selectedScopes.has(cue.timelineScope ?? "MAIN"),
+      );
     if (!confirmed.length) throw new Error("沒有已確認的字幕可匯出；AI 草稿必須逐項確認。");
-    try { return await exportSrt(confirmed, selected.outputPath, subtitleExportController.signal); }
-    finally { subtitleExportController = undefined; }
+    try {
+      return await exportSrt(confirmed, selected.outputPath, subtitleExportController.signal);
+    } finally {
+      subtitleExportController = undefined;
+    }
   });
   ipcMain.handle("subtitle:cancel-export", () => subtitleExportController?.abort());
   ipcMain.handle("youtube:get-settings", () => youtubeSettings.getSnapshot());
   ipcMain.handle("youtube:update-settings", (_event, update: YoutubeSettingsUpdate) => youtubeSettings.update(update));
   ipcMain.handle("youtube:choose-oauth-client", async (event) => {
     const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    const options: Electron.OpenDialogOptions = { title: "選擇 Google Desktop app OAuth client JSON", defaultPath: userPreferences.getLastDirectory("OAUTH_CLIENT", app.getPath("documents")), properties: ["openFile"], filters: [{ name: "Google OAuth JSON", extensions: ["json"] }] };
+    const options: Electron.OpenDialogOptions = {
+      title: "選擇 Google Desktop app OAuth client JSON",
+      defaultPath: userPreferences.getLastDirectory("OAUTH_CLIENT", app.getPath("documents")),
+      properties: ["openFile"],
+      filters: [{ name: "Google OAuth JSON", extensions: ["json"] }],
+    };
     const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
     if (result.canceled || !result.filePaths[0]) return null;
     await userPreferences.rememberDirectory("OAUTH_CLIENT", result.filePaths[0]);
@@ -701,19 +978,28 @@ export function registerIpc(
   });
   ipcMain.handle("youtube:connect", async (event) => {
     if (youtubeAuthController) throw new Error("YouTube 頻道連結正在進行中。");
-    const controller = new AbortController(); youtubeAuthController = controller;
-    const cancelIfRendererCloses = () => controller.abort(); event.sender.once("destroyed", cancelIfRendererCloses);
-    try { return await youtubeUpload.connect(controller.signal); }
-    finally { event.sender.removeListener("destroyed", cancelIfRendererCloses); if (youtubeAuthController === controller) youtubeAuthController = undefined; }
+    const controller = new AbortController();
+    youtubeAuthController = controller;
+    const cancelIfRendererCloses = () => controller.abort();
+    event.sender.once("destroyed", cancelIfRendererCloses);
+    try {
+      return await youtubeUpload.connect(controller.signal);
+    } finally {
+      event.sender.removeListener("destroyed", cancelIfRendererCloses);
+      if (youtubeAuthController === controller) youtubeAuthController = undefined;
+    }
   });
   ipcMain.handle("youtube:cancel-connect", () => youtubeAuthController?.abort());
   ipcMain.handle("youtube:disconnect", () => youtubeUpload.disconnect());
   ipcMain.handle("youtube:upload", async (event, request: YoutubeUploadRequest) => {
     if (youtubeUploadController) throw new Error("已有 YouTube 上傳正在進行中。");
     const output = request && typeof request.jobId === "string" ? await outputHistory.get(request.jobId) : undefined;
-    if (!output || output.purpose === "CLIP") throw new Error("單一時間段預覽不可直接上傳；請選擇正片、片頭、Shorts 或已確認的既有 MP4。");
-    const controller = new AbortController(); youtubeUploadController = controller;
-    const cancelIfRendererCloses = () => controller.abort(); event.sender.once("destroyed", cancelIfRendererCloses);
+    if (!output || output.purpose === "CLIP")
+      throw new Error("單一時間段預覽不可直接上傳；請選擇正片、片頭、Shorts 或已確認的既有 MP4。");
+    const controller = new AbortController();
+    youtubeUploadController = controller;
+    const cancelIfRendererCloses = () => controller.abort();
+    event.sender.once("destroyed", cancelIfRendererCloses);
     try {
       return await youtubeUpload.upload(output.outputPath, request, controller.signal, (progress) => {
         if (!event.sender.isDestroyed()) event.sender.send("youtube:upload-progress", progress);
@@ -724,17 +1010,23 @@ export function registerIpc(
     }
   });
   ipcMain.handle("youtube:cancel-upload", () => youtubeUploadController?.abort());
-  ipcMain.handle("youtube:retry-thumbnail", async (_event, videoId: string, thumbnailPath: string) => youtubeUpload.retryThumbnail(videoId, thumbnailPath));
+  ipcMain.handle("youtube:retry-thumbnail", async (_event, videoId: string, thumbnailPath: string) =>
+    youtubeUpload.retryThumbnail(videoId, thumbnailPath),
+  );
   ipcMain.handle("youtube:open-video", (_event, videoId: string) => youtubeUpload.openVideo(videoId));
   ipcMain.handle("youtube:prepare-chrome-handoff", async (_event, jobId: string) => {
     const output = typeof jobId === "string" ? await outputHistory.get(jobId) : undefined;
-    if (!output || output.purpose === "CLIP") throw new Error("單一時間段預覽不可直接上傳；請選擇正片、片頭、Shorts 或已確認的既有 MP4。");
+    if (!output || output.purpose === "CLIP")
+      throw new Error("單一時間段預覽不可直接上傳；請選擇正片、片頭、Shorts 或已確認的既有 MP4。");
     return platformUploadHandoff.openYoutubeChrome(output.outputPath);
   });
   ipcMain.handle("platform-upload:open", async (_event, jobId: string, platform: BrowserUploadPlatform) => {
     const output = typeof jobId === "string" ? await outputHistory.get(jobId) : undefined;
-    if (!output || output.purpose === "INTRO" || output.purpose === "CLIP") throw new Error("片頭／單一時間段預覽不可直接當正片投稿；請選擇正片或已確認的既有 MP4。");
+    if (!output || output.purpose === "INTRO" || output.purpose === "CLIP")
+      throw new Error("片頭／單一時間段預覽不可直接當正片投稿；請選擇正片或已確認的既有 MP4。");
     return platformUploadHandoff.open(output.outputPath, platform);
   });
-  ipcMain.handle("platform-upload:open-portal", (_event, platform: BrowserUploadPlatform) => platformUploadHandoff.openPortal(platform));
+  ipcMain.handle("platform-upload:open-portal", (_event, platform: BrowserUploadPlatform) =>
+    platformUploadHandoff.openPortal(platform),
+  );
 }

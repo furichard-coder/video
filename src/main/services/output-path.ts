@@ -4,7 +4,10 @@ import path from "node:path";
 
 export function safePreviewFileName(suggestedName: unknown): string {
   const rawName = path.basename(typeof suggestedName === "string" ? suggestedName : "");
-  const safeStem = rawName.replace(/\.mp4$/i, "").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").trim();
+  const safeStem = rawName
+    .replace(/\.mp4$/i, "")
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+    .trim();
   return `${safeStem || "SceneryWalker_preview"}.mp4`;
 }
 

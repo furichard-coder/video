@@ -188,75 +188,75 @@
 
 ## 第一階段驗收對應
 
-| ID | 驗收 | 證據 |
-|---|---|---|
-| VS-01 | 多檔與資料夾選擇 | 原生 Windows dialog、匯入測試 |
-| VS-02 | 來源保持不變 | 匯入／preview 前後來源 SHA-256 測試 |
-| VS-03 | 基本資訊 | ffprobe adapter 與 UI 欄位測試 |
-| VS-04 | 四種排序 | 自然檔名、時間、加入、智慧排序單元測試 |
-| VS-05 | 個別預覽 | 圖片 preview 與影片 proxy/UI 測試 |
-| VS-06 | 總體預覽 | 依目前排序逐項播放，不產生合併檔 |
-| VS-07 | manifest 恢復 | atomic save/load 測試 |
-| VS-08 | 移除不刪檔 | ProjectStore 與 source existence 測試 |
-| VS-09 | cache 命中／失效 | preview cache 整合測試 |
-| VS-10 | 取消與 fallback | 任務池取消、UI 錯誤狀態測試 |
-| VS-11 | 串連選項與確認 gate | UI 測試：三個秒數、兩個解析度、選定路徑後 OK 才啟動 |
-| VS-12 | 疊化串連正確性 | FFmpeg filter graph 與實際 H.264／AAC 輸出整合測試 |
-| VS-13 | 串連仍保護來源 | 輸出前後 SHA-256 相同、取消不留 partial 測試 |
-| VS-14 | 網格播放與雙把手 | UI 測試：VIDEO_PROXY、IN／OUT bar、manifest persistence |
-| VS-15 | 720p／4K 規格 | filter graph 與 1280×720 實際輸出測試 |
-| VS-16 | 精彩片頭建議 | 本機分析、cache hit、來源不變、UI 可調片段測試 |
-| VS-17 | Intro 多片段輸出 | 同一來源多範圍、獨立 IN／OUT、H.264/AAC 輸出測試 |
-| VS-18 | 音量 automation | 0/80/100/200%、重疊/越界、IN/OUT 裁切與實際 dB 量測 |
-| VS-19 | 補充素材安插 | 待決定、前後錨點、手動移動、重開恢復 |
-| VS-20 | 直式手機素材 | display rotation 解析、同源 split/blur/overlay 與實際輸出 |
-| VS-21 | BGM 混音 | MP3 唯讀、時間/淡入淡出/增益、offline gate、limiter 與實際輸出 |
-| VS-22 | 字幕與 SRT | cue CRUD、重疊/總時間、revision gate、UTF-8 格式與 partial 清理 |
-| VS-23 | 舊專案相容 | schema 1–8 → 9 migration 保存來源與既有欄位，舊照片安插轉通用素材安插，既有安插補來源位置，其他舊預設與資料不遺失，未知 schema 不覆寫 |
-| VS-24 | 照片時間 | 預設 5 秒、3–7 秒驗證、總體預覽與真實串連輸出、來源 hash 不變 |
-| VS-25 | 專案檔 | 原生另存／開啟、完整 schema 9 round-trip、atomic partial、損壞檔不取代目前專案 |
-| VS-26 | 正片／Intro 安全移除 | 獨立引用、確認預設安全焦點、最近移除、原位恢復、重開與來源 hash 測試 |
-| VS-27 | 放大 seek 與 Main exclusions | 播放頭／目前時間 UI、區段 CRUD、排序合併、IN／OUT 裁切、全部排除 gate |
-| VS-28 | 排除後真實輸出 | 保留子片段、片長、無占位、音量／xfade／BGM／直式 blur 與來源 hash 整合測試 |
-| VS-29 | 沙丘相機快門音效 | 精確 SHA-256、預設啟用／逐張關閉、總體預覽、真實混音、limiter 與來源不變 |
-| VS-30 | 影片時段素材安插 | 保留範圍／邊界驗證、照片／影片、影片獨立 IN／OUT、同點接續排序、原位恢復、schema 9 重開與真實輸出 |
-| VS-31 | AI 帳號與憑證 | 多 profile、作用中帳號、環境變數 fallback、OS 加密、無明文、連線錯誤與重開恢復 |
-| VS-32 | AI 故事比對管線 | 語音時間對映、低解析故事板、人物／事件／地點／主題證據、cache hit、取消與來源 SHA-256 |
-| VS-33 | 字幕人工審核 | 同步 proxy、草稿／確認／排除、文字與時間編輯、只匯出 confirmed、timeline revision gate |
-| VS-34 | 全介面文字與縮放 | 上方設定、16／18／20／22 px root scale、75%–150% UI zoom、Ctrl 滾輪／鍵盤、local storage 重開恢復 |
-| VS-35 | 網格直接拖曳排序 | 280 ms 長按 gate、拖動時序號即時更新、放開保存、手動排序與字幕 revision 回歸 |
-| VS-36 | 版本與專案歷史 | 版本文字、畫面按鈕、Ctrl+Z/Y、50 步 session history、來源 hash 不變 |
-| VS-37 | 取消後可播放 MP4 | FFmpeg `q` 安全結束、有效短檔 ffprobe、太早取消清理無效 partial |
-| VS-38 | Intro 專案級限制 | 3–22 秒、最多 50 段；總長超過 180 秒只警示，UI／保存／輸出均不硬擋 |
-| VS-39 | 新音訊預設與來源政策 | 原音 80%、BGM 35%、0–200%、多 MP3 排序、YouTube pending reference、權利確認與來源 hash |
-| VS-40 | YouTube 預覽上傳 | secret 加密、PKCE、精確頻道 gate、不公開預設、resumable 參數、取消與輸出 hash 不變 |
-| VS-41 | 分／秒時間 UI | 安插、排除、片段、音量與 IN／OUT 雙欄、Enter 焦點順序、夾限與毫秒保存 |
-| VS-42 | BiliBili／TikTok 交接 | 完成 Main job gate、MP4 存在驗證、Unicode／空格路徑、官方 URL、來源 hash 不變 |
-| VS-43 | 安插資料夾切換 | 既有資料夾篩選、原生資料夾加入、pending gate、確認安插與取消原位恢復 |
-| VS-44 | AI Intro 原始比例 | display dimensions／rotation、直式與橫式 player `aspect-ratio`、`contain` 完整顯示 |
-| VS-45 | 影片縮圖外部播放 | 左鍵以 asset ID／ORIGINAL 呼叫安全外部播放器 IPC、不開 App modal，並回歸照片放大及其他卡片控制 |
-| VS-46 | 平台登入狀態 | YouTube 官方 OAuth、頻道名稱／ID、無密碼輸入或明文保存；BiliBili／TikTok 固定官方入口 |
-| VS-47 | 預覽成品庫 | 跨重開持久化、舊 MP4 明確匯入、Unicode／空格路徑、離線狀態、移除索引不刪檔／不改 hash |
-| VS-48 | Intro＋Main 串接 | Renderer 預設選項、可取消、Main process 精確順序／範圍 gate、實際輸出順序與片長 |
-| VS-49 | 60 秒上傳準備 | 預設勾選、完整輸出後倒數、取消／取消勾選停止、取消輸出不觸發、最後確認 gate |
-| VS-50 | 片頭統一上限與平均分配 | 3–22 秒、預設 15 秒、改成 12 秒重開保存、來源容量不足時可預測縮短 |
-| VS-51 | SRT 匯入 | UTF-8／BOM、多行、逗號／小數點毫秒、錯誤／重疊阻擋、逐項編輯與來源唯讀 |
-| VS-52 | 片頭文字與基底素材 | 文字指示保存、單一影片優先分析、總長／每段上限傳入分析器 |
-| VS-53 | 代理比例與失敗復原 | rotation-aware display dimensions、480p 等比、音訊失敗重試、重新建立／外部原檔 fallback |
-| VS-54 | 頁內歷史輸出 | 正片／片頭分流、檔名連結、外部播放與重開索引 |
-| VS-55 | 精簡網格資訊 | 網格不重複路徑／唯讀文字、全域唯讀狀態與清單路徑保留 |
-| VS-56 | 合併時段／放大 | 單一編輯區、0% 無放大預設、舊 scale 相容、4K 選項保留 |
-| VS-57 | 片頭加入確認 | 預設勾選、實際順位提示、前往片頭後可見已保存區段 |
-| VS-58 | Intro 循環模式 | 預設整體依序、最後接第一、單段循環、暫停不推進 |
-| VS-59 | 手動片頭時間保護 | 加入影片／照片／局部放大時既有 IN／OUT 與目標時間不變、不重跑均衡；剩餘容量不足則阻擋並要求明確調整 |
-| VS-60 | 相鄰檔名顯示優先序 | 同前綴／日期保留尾端，不同英文／年份／日期保留前端，首末與完整名稱回歸 |
-| VS-61 | 網格兩行詳細資料 | 標題及時間／大小、規格／編碼緊湊排列，可讀字級與全域縮放回歸 |
-| VS-62 | 網格已保存狀態 | IN／OUT／排除／放大、音量、安插分色與非色彩提示，未設定回歸 |
-| VS-63 | 片頭三分鐘警示 | 超過 180 秒紅色摘要及輸出列、保存／預覽／輸出不阻擋 |
-| VS-64 | 字幕短區段 Proxy | 每筆只轉 cue 對應來源 IN／OUT、有效快取免重複 ffprobe、損壞自動重建、來源 hash 不變 |
-| VS-65 | 強制逐筆字幕校對 | 現行主軸／疊化重新對位、來源 OUT 更新、一致／不一致修改／略過流程、人工判定邊界 |
-| VS-66 | 安全預設游標 | 確認視窗安全按鍵自動焦點與滑鼠定位、Renderer 邊界驗證、關閉預設不關閉 |
-| VS-67 | 版本化 EXE | 封裝產物及 smoke 使用 `SceneryWalkerSourceOrganizer-v<version>.exe` |
+| ID    | 驗收                         | 證據                                                                                                                                  |
+| ----- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| VS-01 | 多檔與資料夾選擇             | 原生 Windows dialog、匯入測試                                                                                                         |
+| VS-02 | 來源保持不變                 | 匯入／preview 前後來源 SHA-256 測試                                                                                                   |
+| VS-03 | 基本資訊                     | ffprobe adapter 與 UI 欄位測試                                                                                                        |
+| VS-04 | 四種排序                     | 自然檔名、時間、加入、智慧排序單元測試                                                                                                |
+| VS-05 | 個別預覽                     | 圖片 preview 與影片 proxy/UI 測試                                                                                                     |
+| VS-06 | 總體預覽                     | 依目前排序逐項播放，不產生合併檔                                                                                                      |
+| VS-07 | manifest 恢復                | atomic save/load 測試                                                                                                                 |
+| VS-08 | 移除不刪檔                   | ProjectStore 與 source existence 測試                                                                                                 |
+| VS-09 | cache 命中／失效             | preview cache 整合測試                                                                                                                |
+| VS-10 | 取消與 fallback              | 任務池取消、UI 錯誤狀態測試                                                                                                           |
+| VS-11 | 串連選項與確認 gate          | UI 測試：三個秒數、兩個解析度、選定路徑後 OK 才啟動                                                                                   |
+| VS-12 | 疊化串連正確性               | FFmpeg filter graph 與實際 H.264／AAC 輸出整合測試                                                                                    |
+| VS-13 | 串連仍保護來源               | 輸出前後 SHA-256 相同、取消不留 partial 測試                                                                                          |
+| VS-14 | 網格播放與雙把手             | UI 測試：VIDEO_PROXY、IN／OUT bar、manifest persistence                                                                               |
+| VS-15 | 720p／4K 規格                | filter graph 與 1280×720 實際輸出測試                                                                                                 |
+| VS-16 | 精彩片頭建議                 | 本機分析、cache hit、來源不變、UI 可調片段測試                                                                                        |
+| VS-17 | Intro 多片段輸出             | 同一來源多範圍、獨立 IN／OUT、H.264/AAC 輸出測試                                                                                      |
+| VS-18 | 音量 automation              | 0/80/100/200%、重疊/越界、IN/OUT 裁切與實際 dB 量測                                                                                   |
+| VS-19 | 補充素材安插                 | 待決定、前後錨點、手動移動、重開恢復                                                                                                  |
+| VS-20 | 直式手機素材                 | display rotation 解析、同源 split/blur/overlay 與實際輸出                                                                             |
+| VS-21 | BGM 混音                     | MP3 唯讀、時間/淡入淡出/增益、offline gate、limiter 與實際輸出                                                                        |
+| VS-22 | 字幕與 SRT                   | cue CRUD、重疊/總時間、revision gate、UTF-8 格式與 partial 清理                                                                       |
+| VS-23 | 舊專案相容                   | schema 1–8 → 9 migration 保存來源與既有欄位，舊照片安插轉通用素材安插，既有安插補來源位置，其他舊預設與資料不遺失，未知 schema 不覆寫 |
+| VS-24 | 照片時間                     | 預設 5 秒、3–7 秒驗證、總體預覽與真實串連輸出、來源 hash 不變                                                                         |
+| VS-25 | 專案檔                       | 原生另存／開啟、完整 schema 9 round-trip、atomic partial、損壞檔不取代目前專案                                                        |
+| VS-26 | 正片／Intro 安全移除         | 獨立引用、確認預設安全焦點、最近移除、原位恢復、重開與來源 hash 測試                                                                  |
+| VS-27 | 放大 seek 與 Main exclusions | 播放頭／目前時間 UI、區段 CRUD、排序合併、IN／OUT 裁切、全部排除 gate                                                                 |
+| VS-28 | 排除後真實輸出               | 保留子片段、片長、無占位、音量／xfade／BGM／直式 blur 與來源 hash 整合測試                                                            |
+| VS-29 | 沙丘相機快門音效             | 精確 SHA-256、預設啟用／逐張關閉、總體預覽、真實混音、limiter 與來源不變                                                              |
+| VS-30 | 影片時段素材安插             | 保留範圍／邊界驗證、照片／影片、影片獨立 IN／OUT、同點接續排序、原位恢復、schema 9 重開與真實輸出                                     |
+| VS-31 | AI 帳號與憑證                | 多 profile、作用中帳號、環境變數 fallback、OS 加密、無明文、連線錯誤與重開恢復                                                        |
+| VS-32 | AI 故事比對管線              | 語音時間對映、低解析故事板、人物／事件／地點／主題證據、cache hit、取消與來源 SHA-256                                                 |
+| VS-33 | 字幕人工審核                 | 同步 proxy、草稿／確認／排除、文字與時間編輯、只匯出 confirmed、timeline revision gate                                                |
+| VS-34 | 全介面文字與縮放             | 上方設定、16／18／20／22 px root scale、75%–150% UI zoom、Ctrl 滾輪／鍵盤、local storage 重開恢復                                     |
+| VS-35 | 網格直接拖曳排序             | 280 ms 長按 gate、拖動時序號即時更新、放開保存、手動排序與字幕 revision 回歸                                                          |
+| VS-36 | 版本與專案歷史               | 版本文字、畫面按鈕、Ctrl+Z/Y、50 步 session history、來源 hash 不變                                                                   |
+| VS-37 | 取消後可播放 MP4             | FFmpeg `q` 安全結束、有效短檔 ffprobe、太早取消清理無效 partial                                                                       |
+| VS-38 | Intro 專案級限制             | 3–22 秒、最多 50 段；總長超過 180 秒只警示，UI／保存／輸出均不硬擋                                                                    |
+| VS-39 | 新音訊預設與來源政策         | 原音 80%、BGM 35%、0–200%、多 MP3 排序、YouTube pending reference、權利確認與來源 hash                                                |
+| VS-40 | YouTube 預覽上傳             | secret 加密、PKCE、精確頻道 gate、不公開預設、resumable 參數、取消與輸出 hash 不變                                                    |
+| VS-41 | 分／秒時間 UI                | 安插、排除、片段、音量與 IN／OUT 雙欄、Enter 焦點順序、夾限與毫秒保存                                                                 |
+| VS-42 | BiliBili／TikTok 交接        | 完成 Main job gate、MP4 存在驗證、Unicode／空格路徑、官方 URL、來源 hash 不變                                                         |
+| VS-43 | 安插資料夾切換               | 既有資料夾篩選、原生資料夾加入、pending gate、確認安插與取消原位恢復                                                                  |
+| VS-44 | AI Intro 原始比例            | display dimensions／rotation、直式與橫式 player `aspect-ratio`、`contain` 完整顯示                                                    |
+| VS-45 | 影片縮圖外部播放             | 左鍵以 asset ID／ORIGINAL 呼叫安全外部播放器 IPC、不開 App modal，並回歸照片放大及其他卡片控制                                        |
+| VS-46 | 平台登入狀態                 | YouTube 官方 OAuth、頻道名稱／ID、無密碼輸入或明文保存；BiliBili／TikTok 固定官方入口                                                 |
+| VS-47 | 預覽成品庫                   | 跨重開持久化、舊 MP4 明確匯入、Unicode／空格路徑、離線狀態、移除索引不刪檔／不改 hash                                                 |
+| VS-48 | Intro＋Main 串接             | Renderer 預設選項、可取消、Main process 精確順序／範圍 gate、實際輸出順序與片長                                                       |
+| VS-49 | 60 秒上傳準備                | 預設勾選、完整輸出後倒數、取消／取消勾選停止、取消輸出不觸發、最後確認 gate                                                           |
+| VS-50 | 片頭統一上限與平均分配       | 3–22 秒、預設 15 秒、改成 12 秒重開保存、來源容量不足時可預測縮短                                                                     |
+| VS-51 | SRT 匯入                     | UTF-8／BOM、多行、逗號／小數點毫秒、錯誤／重疊阻擋、逐項編輯與來源唯讀                                                                |
+| VS-52 | 片頭文字與基底素材           | 文字指示保存、單一影片優先分析、總長／每段上限傳入分析器                                                                              |
+| VS-53 | 代理比例與失敗復原           | rotation-aware display dimensions、480p 等比、音訊失敗重試、重新建立／外部原檔 fallback                                               |
+| VS-54 | 頁內歷史輸出                 | 正片／片頭分流、檔名連結、外部播放與重開索引                                                                                          |
+| VS-55 | 精簡網格資訊                 | 網格不重複路徑／唯讀文字、全域唯讀狀態與清單路徑保留                                                                                  |
+| VS-56 | 合併時段／放大               | 單一編輯區、0% 無放大預設、舊 scale 相容、4K 選項保留                                                                                 |
+| VS-57 | 片頭加入確認                 | 預設勾選、實際順位提示、前往片頭後可見已保存區段                                                                                      |
+| VS-58 | Intro 循環模式               | 預設整體依序、最後接第一、單段循環、暫停不推進                                                                                        |
+| VS-59 | 手動片頭時間保護             | 加入影片／照片／局部放大時既有 IN／OUT 與目標時間不變、不重跑均衡；剩餘容量不足則阻擋並要求明確調整                                   |
+| VS-60 | 相鄰檔名顯示優先序           | 同前綴／日期保留尾端，不同英文／年份／日期保留前端，首末與完整名稱回歸                                                                |
+| VS-61 | 網格兩行詳細資料             | 標題及時間／大小、規格／編碼緊湊排列，可讀字級與全域縮放回歸                                                                          |
+| VS-62 | 網格已保存狀態               | IN／OUT／排除／放大、音量、安插分色與非色彩提示，未設定回歸                                                                           |
+| VS-63 | 片頭三分鐘警示               | 超過 180 秒紅色摘要及輸出列、保存／預覽／輸出不阻擋                                                                                   |
+| VS-64 | 字幕短區段 Proxy             | 每筆只轉 cue 對應來源 IN／OUT、有效快取免重複 ffprobe、損壞自動重建、來源 hash 不變                                                   |
+| VS-65 | 強制逐筆字幕校對             | 現行主軸／疊化重新對位、來源 OUT 更新、一致／不一致修改／略過流程、人工判定邊界                                                       |
+| VS-66 | 安全預設游標                 | 確認視窗安全按鍵自動焦點與滑鼠定位、Renderer 邊界驗證、關閉預設不關閉                                                                 |
+| VS-67 | 版本化 EXE                   | 封裝產物及 smoke 使用 `SceneryWalkerSourceOrganizer-v<version>.exe`                                                                   |
 
 ## 後續安全階段
 

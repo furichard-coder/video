@@ -1,16 +1,7 @@
 import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import type {
-  ProjectManifest,
-  WatermarkCorner,
-  WatermarkSettings,
-  WatermarkTextLayout,
-} from "../../shared/domain";
-import {
-  DEFAULT_WATERMARK_SETTINGS,
-  normalizeWatermarkSettings,
-  watermarkRenderedText,
-} from "../../shared/watermark";
+import type { ProjectManifest, WatermarkCorner, WatermarkSettings, WatermarkTextLayout } from "../../shared/domain";
+import { DEFAULT_WATERMARK_SETTINGS, normalizeWatermarkSettings, watermarkRenderedText } from "../../shared/watermark";
 
 interface Props {
   project: ProjectManifest;
@@ -24,8 +15,7 @@ function cornerLabel(position: WatermarkCorner): string {
 
 function WatermarkPreview({ settings }: { settings: WatermarkSettings }) {
   const style = (item: WatermarkSettings["chinese"]): CSSProperties => ({
-    [item.position === "LOWER_LEFT" ? "left" : "right"]:
-      `${Math.max(12, settings.safeMargin1080p * 0.25)}px`,
+    [item.position === "LOWER_LEFT" ? "left" : "right"]: `${Math.max(12, settings.safeMargin1080p * 0.25)}px`,
     bottom: `${Math.max(12, settings.safeMargin1080p * 0.25)}px`,
     fontSize: `${Math.max(12, item.fontSize1080p * 0.25)}px`,
     opacity: settings.textOpacityPercent / 100,
@@ -39,12 +29,8 @@ function WatermarkPreview({ settings }: { settings: WatermarkSettings }) {
       <div className="watermark-preview-dune" />
       {settings.enabled ? (
         <>
-          <span style={style(settings.chinese)}>
-            {watermarkRenderedText(settings.chinese)}
-          </span>
-          <span style={style(settings.english)}>
-            {watermarkRenderedText(settings.english)}
-          </span>
+          <span style={style(settings.chinese)}>{watermarkRenderedText(settings.chinese)}</span>
+          <span style={style(settings.english)}>{watermarkRenderedText(settings.english)}</span>
         </>
       ) : (
         <strong>浮水印目前關閉</strong>
@@ -54,14 +40,8 @@ function WatermarkPreview({ settings }: { settings: WatermarkSettings }) {
   );
 }
 
-export function WatermarkSettingsModal({
-  project,
-  onProjectUpdated,
-  onClose,
-}: Props) {
-  const [draft, setDraft] = useState<WatermarkSettings>(() =>
-    normalizeWatermarkSettings(project.watermarkSettings),
-  );
+export function WatermarkSettingsModal({ project, onProjectUpdated, onClose }: Props) {
+  const [draft, setDraft] = useState<WatermarkSettings>(() => normalizeWatermarkSettings(project.watermarkSettings));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
@@ -69,14 +49,9 @@ export function WatermarkSettingsModal({
     () => Math.max(0, draft.intervalSeconds - draft.visibleDurationSeconds),
     [draft.intervalSeconds, draft.visibleDurationSeconds],
   );
-  const patch = <K extends keyof WatermarkSettings>(
-    key: K,
-    value: WatermarkSettings[K],
-  ) => setDraft((current) => ({ ...current, [key]: value }));
-  const patchText = (
-    key: "chinese" | "english",
-    update: Partial<WatermarkSettings["chinese"]>,
-  ) =>
+  const patch = <K extends keyof WatermarkSettings>(key: K, value: WatermarkSettings[K]) =>
+    setDraft((current) => ({ ...current, [key]: value }));
+  const patchText = (key: "chinese" | "english", update: Partial<WatermarkSettings["chinese"]>) =>
     setDraft((current) => ({
       ...current,
       [key]: { ...current[key], ...update },
@@ -91,9 +66,7 @@ export function WatermarkSettingsModal({
       const updated = await window.sourceApp.setWatermarkSettings(normalized);
       setDraft(normalizeWatermarkSettings(updated.watermarkSettings));
       onProjectUpdated(updated);
-      setNotice(
-        "浮水印設定已保存；下一次正片／片頭預覽輸出會依此排程套用，不改寫來源檔。",
-      );
+      setNotice("浮水印設定已保存；下一次正片／片頭預覽輸出會依此排程套用，不改寫來源檔。");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -103,29 +76,14 @@ export function WatermarkSettingsModal({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section
-        className="watermark-settings-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="浮水印設定"
-      >
+      <section className="watermark-settings-modal" role="dialog" aria-modal="true" aria-label="浮水印設定">
         <header className="modal-header">
           <div>
-            <span className="eyebrow">
-              BRANDING WATERMARK · PROJECT SETTINGS
-            </span>
+            <span className="eyebrow">BRANDING WATERMARK · PROJECT SETTINGS</span>
             <h2>浮水印設定</h2>
-            <p>
-              參照「草漯沙丘地質公園」已驗證版式；設定只保存到目前專案，輸出時才寫入新
-              MP4。
-            </p>
+            <p>參照「草漯沙丘地質公園」已驗證版式；設定只保存到目前專案，輸出時才寫入新 MP4。</p>
           </div>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="關閉"
-            onClick={onClose}
-          >
+          <button className="icon-button" type="button" aria-label="關閉" onClick={onClose}>
             ×
           </button>
         </header>
@@ -134,9 +92,7 @@ export function WatermarkSettingsModal({
           <section className="watermark-reference-card">
             <div>
               <strong>草漯沙丘預設</strong>
-              <span>
-                中文左下兩行、英文右下；每 360 秒顯示 15 秒，淡入／淡出各 1 秒。
-              </span>
+              <span>中文左下兩行、英文右下；每 360 秒顯示 15 秒，淡入／淡出各 1 秒。</span>
             </div>
             <button
               className="secondary-button"
@@ -174,9 +130,7 @@ export function WatermarkSettingsModal({
                 type="checkbox"
                 checked={draft.applyToIntro}
                 disabled={!draft.enabled}
-                onChange={(event) =>
-                  patch("applyToIntro", event.target.checked)
-                }
+                onChange={(event) => patch("applyToIntro", event.target.checked)}
               />{" "}
               獨立片頭輸出
             </label>
@@ -185,9 +139,7 @@ export function WatermarkSettingsModal({
                 type="checkbox"
                 checked={draft.applyToShorts}
                 disabled={!draft.enabled}
-                onChange={(event) =>
-                  patch("applyToShorts", event.target.checked)
-                }
+                onChange={(event) => patch("applyToShorts", event.target.checked)}
               />{" "}
               Shorts 9:16
             </label>
@@ -206,9 +158,7 @@ export function WatermarkSettingsModal({
                       rows={2}
                       maxLength={80}
                       value={item.text}
-                      onChange={(event) =>
-                        patchText(key, { text: event.target.value })
-                      }
+                      onChange={(event) => patchText(key, { text: event.target.value })}
                     />
                   </label>
                   <div>
@@ -262,10 +212,7 @@ export function WatermarkSettingsModal({
                     </label>
                   </div>
                   <small>
-                    目前：{cornerLabel(item.position)} ·{" "}
-                    {item.layout === "STACKED_TWO_LINES"
-                      ? "上下兩行"
-                      : "單行橫排"}
+                    目前：{cornerLabel(item.position)} · {item.layout === "STACKED_TWO_LINES" ? "上下兩行" : "單行橫排"}
                   </small>
                 </fieldset>
               );
@@ -282,9 +229,7 @@ export function WatermarkSettingsModal({
                 max="86400"
                 step="1"
                 value={draft.startSeconds}
-                onChange={(event) =>
-                  patch("startSeconds", Number(event.target.value))
-                }
+                onChange={(event) => patch("startSeconds", Number(event.target.value))}
               />
               <span>秒</span>
             </label>
@@ -297,9 +242,7 @@ export function WatermarkSettingsModal({
                 max="86400"
                 step="1"
                 value={draft.intervalSeconds}
-                onChange={(event) =>
-                  patch("intervalSeconds", Number(event.target.value))
-                }
+                onChange={(event) => patch("intervalSeconds", Number(event.target.value))}
               />
               <span>秒</span>
             </label>
@@ -312,9 +255,7 @@ export function WatermarkSettingsModal({
                 max={Math.max(1, draft.intervalSeconds)}
                 step="1"
                 value={draft.visibleDurationSeconds}
-                onChange={(event) =>
-                  patch("visibleDurationSeconds", Number(event.target.value))
-                }
+                onChange={(event) => patch("visibleDurationSeconds", Number(event.target.value))}
               />
               <span>秒</span>
             </label>
@@ -327,9 +268,7 @@ export function WatermarkSettingsModal({
                 max="60"
                 step="0.1"
                 value={draft.fadeInSeconds}
-                onChange={(event) =>
-                  patch("fadeInSeconds", Number(event.target.value))
-                }
+                onChange={(event) => patch("fadeInSeconds", Number(event.target.value))}
               />
               <span>秒</span>
             </label>
@@ -342,16 +281,13 @@ export function WatermarkSettingsModal({
                 max="60"
                 step="0.1"
                 value={draft.fadeOutSeconds}
-                onChange={(event) =>
-                  patch("fadeOutSeconds", Number(event.target.value))
-                }
+                onChange={(event) => patch("fadeOutSeconds", Number(event.target.value))}
               />
               <span>秒</span>
             </label>
             <p>
-              以目前設定：每 {draft.intervalSeconds || 0} 秒開始顯示一次，顯示{" "}
-              {draft.visibleDurationSeconds || 0} 秒，兩次之間約空白{" "}
-              {hiddenSeconds} 秒。
+              以目前設定：每 {draft.intervalSeconds || 0} 秒開始顯示一次，顯示 {draft.visibleDurationSeconds || 0}{" "}
+              秒，兩次之間約空白 {hiddenSeconds} 秒。
             </p>
           </fieldset>
           <fieldset className="watermark-appearance">
@@ -364,9 +300,7 @@ export function WatermarkSettingsModal({
                 min="0"
                 max="100"
                 value={draft.textOpacityPercent}
-                onChange={(event) =>
-                  patch("textOpacityPercent", Number(event.target.value))
-                }
+                onChange={(event) => patch("textOpacityPercent", Number(event.target.value))}
               />
               <strong>{draft.textOpacityPercent}%</strong>
             </label>
@@ -378,9 +312,7 @@ export function WatermarkSettingsModal({
                 min="0"
                 max="100"
                 value={draft.boxOpacityPercent}
-                onChange={(event) =>
-                  patch("boxOpacityPercent", Number(event.target.value))
-                }
+                onChange={(event) => patch("boxOpacityPercent", Number(event.target.value))}
               />
               <strong>{draft.boxOpacityPercent}%</strong>
             </label>
@@ -392,9 +324,7 @@ export function WatermarkSettingsModal({
                 min="12"
                 max="300"
                 value={draft.safeMargin1080p}
-                onChange={(event) =>
-                  patch("safeMargin1080p", Number(event.target.value))
-                }
+                onChange={(event) => patch("safeMargin1080p", Number(event.target.value))}
               />
               <span>px</span>
             </label>
@@ -411,25 +341,12 @@ export function WatermarkSettingsModal({
           )}
         </div>
         <footer className="settings-footer">
-          <p>
-            輸出採來源唯讀、唯一 partial 成功後才完成
-            MP4；浮水印變更只影響之後的新輸出。
-          </p>
+          <p>輸出採來源唯讀、唯一 partial 成功後才完成 MP4；浮水印變更只影響之後的新輸出。</p>
           <div>
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={busy}
-              onClick={onClose}
-            >
+            <button className="secondary-button" type="button" disabled={busy} onClick={onClose}>
               完成
             </button>
-            <button
-              className="primary-button"
-              type="button"
-              disabled={busy}
-              onClick={() => void save()}
-            >
+            <button className="primary-button" type="button" disabled={busy} onClick={() => void save()}>
               {busy ? "保存中…" : "保存浮水印設定"}
             </button>
           </div>

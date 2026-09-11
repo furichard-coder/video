@@ -17,11 +17,7 @@ interface Props {
 
 const NEW_ACCOUNT = "__NEW__";
 const VISION_MODELS = ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"];
-const TRANSCRIPTION_MODELS = [
-  "gpt-4o-transcribe-diarize",
-  "gpt-4o-transcribe",
-  "whisper-1",
-];
+const TRANSCRIPTION_MODELS = ["gpt-4o-transcribe-diarize", "gpt-4o-transcribe", "whisper-1"];
 
 function splitList(value: string): string[] {
   return value
@@ -34,8 +30,7 @@ function profileForm(account?: AiAccountProfile) {
   return {
     name: account?.name ?? "新的 OpenAI API 帳號",
     visionModel: account?.visionModel ?? "gpt-5.6-terra",
-    transcriptionModel:
-      account?.transcriptionModel ?? "gpt-4o-transcribe-diarize",
+    transcriptionModel: account?.transcriptionModel ?? "gpt-4o-transcribe-diarize",
     apiKey: "",
   };
 }
@@ -44,23 +39,15 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
   const [snapshot, setSnapshot] = useState<AiSettingsSnapshot>();
   const [selectedId, setSelectedId] = useState(NEW_ACCOUNT);
   const [form, setForm] = useState(profileForm());
-  const [context, setContext] = useState<AiStoryContext>(() =>
-    structuredClone(project.aiStoryContext),
-  );
-  const [locationsText, setLocationsText] = useState(
-    project.aiStoryContext.locations.join("、"),
-  );
-  const [peopleText, setPeopleText] = useState(
-    project.aiStoryContext.people.join("、"),
-  );
+  const [context, setContext] = useState<AiStoryContext>(() => structuredClone(project.aiStoryContext));
+  const [locationsText, setLocationsText] = useState(project.aiStoryContext.locations.join("、"));
+  const [peopleText, setPeopleText] = useState(project.aiStoryContext.people.join("、"));
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
-  const [voiceLanguage, setVoiceLanguage] =
-    useState<VoiceInputLanguage>("zh-TW");
-  const [translationSnapshot, setTranslationSnapshot] =
-    useState<TranslationSettingsSnapshot>();
+  const [voiceLanguage, setVoiceLanguage] = useState<VoiceInputLanguage>("zh-TW");
+  const [translationSnapshot, setTranslationSnapshot] = useState<TranslationSettingsSnapshot>();
   const [googleApiKey, setGoogleApiKey] = useState("");
   const [translationBusy, setTranslationBusy] = useState(false);
   const [translationTesting, setTranslationTesting] = useState(false);
@@ -80,19 +67,11 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
       .then((next) => {
         setSnapshot(next);
         setSelectedId(next.activeAccountId);
-        setForm(
-          profileForm(
-            next.accounts.find(
-              (account) => account.id === next.activeAccountId,
-            ),
-          ),
-        );
+        setForm(profileForm(next.accounts.find((account) => account.id === next.activeAccountId)));
         setGeminiEnabled(next.geminiReview?.enabled === true);
         setGeminiModel(next.geminiReview?.model ?? "gemini-2.5-flash");
       })
-      .catch((reason: unknown) =>
-        setError(reason instanceof Error ? reason.message : String(reason)),
-      );
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
     void window.sourceApp
       .getUserPreferences()
       .then((preferences) => setVoiceLanguage(preferences.voiceInputLanguage))
@@ -100,30 +79,22 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
     void window.sourceApp
       .getTranslationSettings()
       .then(setTranslationSnapshot)
-      .catch((reason: unknown) =>
-        setError(reason instanceof Error ? reason.message : String(reason)),
-      );
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
   }, []);
 
   const appendText = (current: string, transcript: string, separator = " ") =>
-    current.trim()
-      ? `${current.trimEnd()}${separator}${transcript}`
-      : transcript;
+    current.trim() ? `${current.trimEnd()}${separator}${transcript}` : transcript;
   const voiceError = (message: string) => setError(message || undefined);
   const changeVoiceLanguage = (language: VoiceInputLanguage) => {
     setVoiceLanguage(language);
     void window.sourceApp
       .updateUserPreferences({ voiceInputLanguage: language })
-      .catch((reason: unknown) =>
-        setError(reason instanceof Error ? reason.message : String(reason)),
-      );
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
   };
 
   const chooseAccount = (id: string) => {
     setSelectedId(id);
-    setForm(
-      profileForm(snapshot?.accounts.find((account) => account.id === id)),
-    );
+    setForm(profileForm(snapshot?.accounts.find((account) => account.id === id)));
     setError(undefined);
     setNotice(undefined);
   };
@@ -142,9 +113,7 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
         apiKey: form.apiKey || undefined,
         makeActive: true,
       });
-      const active = next.accounts.find(
-        (account) => account.id === next.activeAccountId,
-      )!;
+      const active = next.accounts.find((account) => account.id === next.activeAccountId)!;
       setSnapshot(next);
       setSelectedId(active.id);
       setForm(profileForm(active));
@@ -217,9 +186,7 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
     setError(undefined);
     try {
       const next = await window.sourceApp.removeAiAccount(selected.id);
-      const active = next.accounts.find(
-        (account) => account.id === next.activeAccountId,
-      )!;
+      const active = next.accounts.find((account) => account.id === next.activeAccountId)!;
       setSnapshot(next);
       setSelectedId(active.id);
       setForm(profileForm(active));
@@ -263,9 +230,7 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
       });
       setTranslationSnapshot(next);
       setGoogleApiKey("");
-      setNotice(
-        "Google Cloud Translation API Key 已使用 Windows 安全儲存加密；只在 OpenAI 翻譯不可用時啟用。",
-      );
+      setNotice("Google Cloud Translation API Key 已使用 Windows 安全儲存加密；只在 OpenAI 翻譯不可用時啟用。");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -305,7 +270,10 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
   };
 
   const saveGeminiReview = async (clearApiKey = false) => {
-    if (!window.sourceApp.saveGeminiReviewSettings) { setError("此版本尚未載入 Gemini 輔助設定服務，請重新啟動新版 App。"); return; }
+    if (!window.sourceApp.saveGeminiReviewSettings) {
+      setError("此版本尚未載入 Gemini 輔助設定服務，請重新啟動新版 App。");
+      return;
+    }
     setGeminiBusy(true);
     setError(undefined);
     setNotice(undefined);
@@ -336,23 +304,13 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
       role="presentation"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
-      <section
-        className="ai-settings-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="AI 帳號與故事設定"
-      >
+      <section className="ai-settings-modal" role="dialog" aria-modal="true" aria-label="AI 帳號與故事設定">
         <header className="modal-header">
           <div>
             <span className="eyebrow">AI SETTINGS · REVIEW FIRST</span>
             <h2>AI 帳號與故事判斷設定</h2>
           </div>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={onClose}
-            aria-label="關閉"
-          >
+          <button className="icon-button" type="button" onClick={onClose} aria-label="關閉">
             ×
           </button>
         </header>
@@ -360,13 +318,11 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
           <div className="ai-account-warning">
             <strong>發布素材由 Codex／ChatGPT 主生成</strong>
             <p>
-              標題、縮圖與說明會先交給這台電腦已登入的
-              Codex／ChatGPT；不可用時才改用 OpenAI API。Gemini
+              標題、縮圖與說明會先交給這台電腦已登入的 Codex／ChatGPT；不可用時才改用 OpenAI API。Gemini
               只做可選的第二次復核，不會取代或暗中改寫主要結果。
             </p>
             <p>
-              知識型字幕可自動改用這台電腦的 Codex／ChatGPT 登入；App
-              不讀取、不複製登入 token，只使用唯讀暫存工作。
+              知識型字幕可自動改用這台電腦的 Codex／ChatGPT 登入；App 不讀取、不複製登入 token，只使用唯讀暫存工作。
             </p>
             {snapshot && (
               <small role="status">
@@ -391,8 +347,8 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                     <h3>執行帳號</h3>
                   </div>
                   <p>
-                    可保存多個 OpenAI API 設定；知識型字幕另有本機
-                    Codex／ChatGPT 登入備援。語音轉錄目前仍使用 OpenAI API。
+                    可保存多個 OpenAI API 設定；知識型字幕另有本機 Codex／ChatGPT 登入備援。語音轉錄目前仍使用 OpenAI
+                    API。
                   </p>
                 </div>
                 <div className="ai-account-layout">
@@ -401,19 +357,13 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                       <button
                         key={account.id}
                         type="button"
-                        className={
-                          selectedId === account.id ? "is-selected" : ""
-                        }
+                        className={selectedId === account.id ? "is-selected" : ""}
                         onClick={() => chooseAccount(account.id)}
                       >
-                        <span
-                          className={`credential-dot ${account.credentialStatus.toLowerCase()}`}
-                        />{" "}
+                        <span className={`credential-dot ${account.credentialStatus.toLowerCase()}`} />{" "}
                         <strong>{account.name}</strong>
                         <small>
-                          {account.id === snapshot.activeAccountId
-                            ? "目前使用 · "
-                            : ""}
+                          {account.id === snapshot.activeAccountId ? "目前使用 · " : ""}
                           {account.credentialStatus === "MISSING"
                             ? "缺少金鑰"
                             : account.credentialStatus === "ENVIRONMENT"
@@ -423,11 +373,7 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                       </button>
                     ))}
                     <button
-                      className={
-                        selectedId === NEW_ACCOUNT
-                          ? "is-selected add-account"
-                          : "add-account"
-                      }
+                      className={selectedId === NEW_ACCOUNT ? "is-selected add-account" : "add-account"}
                       type="button"
                       onClick={() => chooseAccount(NEW_ACCOUNT)}
                     >
@@ -485,9 +431,7 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                         type="password"
                         autoComplete="off"
                         placeholder={
-                          selected?.credentialStatus === "MISSING"
-                            ? "尚未設定"
-                            : "保留現有金鑰（如要更換再輸入）"
+                          selected?.credentialStatus === "MISSING" ? "尚未設定" : "保留現有金鑰（如要更換再輸入）"
                         }
                         value={form.apiKey}
                         onChange={(event) =>
@@ -499,25 +443,13 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                       />
                     </label>
                     <div className="ai-form-actions">
-                      <button
-                        type="button"
-                        disabled={busy || testing}
-                        onClick={() => void saveAccount()}
-                      >
+                      <button type="button" disabled={busy || testing} onClick={() => void saveAccount()}>
                         儲存並使用
                       </button>
-                      <button
-                        type="button"
-                        disabled={!selected || busy || testing}
-                        onClick={() => void activate()}
-                      >
+                      <button type="button" disabled={!selected || busy || testing} onClick={() => void activate()}>
                         設為目前帳號
                       </button>
-                      <button
-                        type="button"
-                        disabled={!selected || busy || testing}
-                        onClick={() => void test()}
-                      >
+                      <button type="button" disabled={!selected || busy || testing} onClick={() => void test()}>
                         {testing ? "實際測試中…" : "測試 API／Codex 備援"}
                       </button>
                       {selected?.credentialStatus === "SAVED_ENCRYPTED" && (
@@ -542,8 +474,8 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                       )}
                     </div>
                     <small className="ai-live-test-note">
-                      若 OpenAI API 可用，測試會送出極小的故事與語音請求；若 API
-                      不可用，則只確認 Codex 的 ChatGPT 登入可供知識型字幕使用。
+                      若 OpenAI API 可用，測試會送出極小的故事與語音請求；若 API 不可用，則只確認 Codex 的 ChatGPT
+                      登入可供知識型字幕使用。
                     </small>
                   </div>
                 </div>
@@ -556,7 +488,8 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                     <h3>Gemini 圖片辨識與發布復核</h3>
                   </div>
                   <p>
-                    Gemini 會逐張分析照片或指定影片影格的物種、名稱與場景，並簡化成字幕；也可在 ChatGPT 完成發布草稿後復核標題與縮圖。沒有金鑰時不會啟動。
+                    Gemini 會逐張分析照片或指定影片影格的物種、名稱與場景，並簡化成字幕；也可在 ChatGPT
+                    完成發布草稿後復核標題與縮圖。沒有金鑰時不會啟動。
                   </p>
                 </div>
                 <div className="ai-account-form translation-provider-form">
@@ -564,24 +497,16 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                     <input
                       type="checkbox"
                       checked={geminiEnabled}
-                      onChange={(event) =>
-                        setGeminiEnabled(event.target.checked)
-                      }
+                      onChange={(event) => setGeminiEnabled(event.target.checked)}
                     />
                     <span>
                       <strong>啟用 Gemini 第二次復核</strong>
-                      <small>
-                        只送出低解析候選影格與 ChatGPT
-                        草稿，不送出完整原始影片。
-                      </small>
+                      <small>只送出低解析候選影格與 ChatGPT 草稿，不送出完整原始影片。</small>
                     </span>
                   </label>
                   <label>
                     Gemini 模型
-                    <input
-                      value={geminiModel}
-                      onChange={(event) => setGeminiModel(event.target.value)}
-                    />
+                    <input value={geminiModel} onChange={(event) => setGeminiModel(event.target.value)} />
                   </label>
                   <label>
                     Gemini API Key
@@ -602,17 +527,13 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                       type="button"
                       disabled={
                         geminiBusy ||
-                        (geminiEnabled &&
-                          snapshot.geminiReview?.credentialStatus ===
-                            "MISSING" &&
-                          !geminiApiKey.trim())
+                        (geminiEnabled && snapshot.geminiReview?.credentialStatus === "MISSING" && !geminiApiKey.trim())
                       }
                       onClick={() => void saveGeminiReview()}
                     >
                       {geminiBusy ? "保存中…" : "保存 Gemini 設定"}
                     </button>
-                    {snapshot.geminiReview?.credentialStatus ===
-                      "SAVED_ENCRYPTED" && (
+                    {snapshot.geminiReview?.credentialStatus === "SAVED_ENCRYPTED" && (
                       <button
                         className="danger-text"
                         type="button"
@@ -624,7 +545,8 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                     )}
                   </div>
                   <small className="ai-live-test-note">
-                    素材頁明確選擇 Gemini 時，只送出該張低解析影格；不送完整原始影片。上方核取方塊只控制發布素材的第二次復核，不會停用你手動選擇的照片／影格分析。
+                    素材頁明確選擇 Gemini
+                    時，只送出該張低解析影格；不送完整原始影片。上方核取方塊只控制發布素材的第二次復核，不會停用你手動選擇的照片／影格分析。
                   </small>
                 </div>
               </section>
@@ -636,19 +558,16 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                     <h3>字幕翻譯後援</h3>
                   </div>
                   <p>
-                    雙語字幕先用目前 OpenAI API
-                    帳號發出新的無狀態翻譯請求；若金鑰缺失、額度不足或請求失敗，再使用
+                    雙語字幕先用目前 OpenAI API 帳號發出新的無狀態翻譯請求；若金鑰缺失、額度不足或請求失敗，再使用
                     Google Cloud Translation。
                   </p>
                 </div>
                 <div className="ai-account-warning">
                   <strong>ChatGPT／Codex 登入與 API 額度是分開的</strong>
                   <p>
-                    這裡無法代替您操作 ChatGPT 網頁的新對話；App 會以 OpenAI
-                    Responses API
-                    的新請求達到相同的獨立翻譯效果，並要求自然、口語且忠實。Google
-                    後援需另外啟用 Cloud Translation API 與帳務，不能沿用
-                    YouTube OAuth。
+                    這裡無法代替您操作 ChatGPT 網頁的新對話；App 會以 OpenAI Responses API
+                    的新請求達到相同的獨立翻譯效果，並要求自然、口語且忠實。Google 後援需另外啟用 Cloud Translation API
+                    與帳務，不能沿用 YouTube OAuth。
                   </p>
                 </div>
                 <div className="ai-account-form translation-provider-form">
@@ -669,22 +588,14 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                   <div className="ai-form-actions">
                     <button
                       type="button"
-                      disabled={
-                        translationBusy ||
-                        translationTesting ||
-                        !googleApiKey.trim()
-                      }
+                      disabled={translationBusy || translationTesting || !googleApiKey.trim()}
                       onClick={() => void saveGoogleKey()}
                     >
                       保存 Google 後援
                     </button>
                     <button
                       type="button"
-                      disabled={
-                        translationBusy ||
-                        translationTesting ||
-                        !translationSnapshot?.googleCloudConfigured
-                      }
+                      disabled={translationBusy || translationTesting || !translationSnapshot?.googleCloudConfigured}
                       onClick={() => void testGoogle()}
                     >
                       {translationTesting ? "實際測試中…" : "測試 Google 翻譯"}
@@ -701,8 +612,8 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                     )}
                   </div>
                   <small className="ai-live-test-note">
-                    金鑰只保存在 App 的加密憑證檔，不寫入專案、輸出影片或字幕
-                    cache。翻譯結果會存入可重建的 App cache，避免重複付費。
+                    金鑰只保存在 App 的加密憑證檔，不寫入專案、輸出影片或字幕 cache。翻譯結果會存入可重建的 App
+                    cache，避免重複付費。
                   </small>
                 </div>
               </section>
@@ -721,19 +632,13 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                 <div className="voice-language-row">
                   <div>
                     <strong>麥克風輸入語言</strong>
-                    <small>
-                      預設繁體中文；內容可夾用英文，需要純英文辨識時再切換。
-                    </small>
+                    <small>預設繁體中文；內容可夾用英文，需要純英文辨識時再切換。</small>
                   </div>
                   <select
                     aria-label="麥克風輸入語言"
                     value={voiceLanguage}
                     disabled={busy}
-                    onChange={(event) =>
-                      changeVoiceLanguage(
-                        event.target.value as VoiceInputLanguage,
-                      )
-                    }
+                    onChange={(event) => changeVoiceLanguage(event.target.value as VoiceInputLanguage)}
                   >
                     <option value="zh-TW">繁體中文（主要）</option>
                     <option value="en-US">English（輔助）</option>
@@ -772,20 +677,14 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                       <textarea
                         placeholder="河內老城、還劍湖…"
                         value={locationsText}
-                        onChange={(event) =>
-                          setLocationsText(event.target.value)
-                        }
+                        onChange={(event) => setLocationsText(event.target.value)}
                       />
                     </label>
                     <VoiceInputButton
                       language={voiceLanguage}
                       disabled={busy}
                       onError={voiceError}
-                      onTranscript={(text) =>
-                        setLocationsText((current) =>
-                          appendText(current, text, "、"),
-                        )
-                      }
+                      onTranscript={(text) => setLocationsText((current) => appendText(current, text, "、"))}
                     />
                   </div>
                   <div className="voice-field">
@@ -801,11 +700,7 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                       language={voiceLanguage}
                       disabled={busy}
                       onError={voiceError}
-                      onTranscript={(text) =>
-                        setPeopleText((current) =>
-                          appendText(current, text, "、"),
-                        )
-                      }
+                      onTranscript={(text) => setPeopleText((current) => appendText(current, text, "、"))}
                     />
                   </div>
                   <div className="voice-field story-wide">
@@ -829,11 +724,7 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                       onTranscript={(text) =>
                         setContext((current) => ({
                           ...current,
-                          storySummary: appendText(
-                            current.storySummary,
-                            text,
-                            "\n",
-                          ),
+                          storySummary: appendText(current.storySummary, text, "\n"),
                         }))
                       }
                     />
@@ -859,10 +750,7 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                       onTranscript={(text) =>
                         setContext((current) => ({
                           ...current,
-                          audiencePromise: appendText(
-                            current.audiencePromise,
-                            text,
-                          ),
+                          audiencePromise: appendText(current.audiencePromise, text),
                         }))
                       }
                     />
@@ -886,12 +774,7 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                     </select>
                   </label>
                   <div className="story-save">
-                    <button
-                      className="primary-button"
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void saveContext()}
-                    >
+                    <button className="primary-button" type="button" disabled={busy} onClick={() => void saveContext()}>
                       儲存故事背景
                     </button>
                   </div>
@@ -902,9 +785,8 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                 <strong>送出的資料</strong>
                 <p>
                   只在您按下 AI 分析時，送出 App cache
-                  內的低解析故事板與上方故事背景；勾選語音分析時才會另送短音訊。發布素材由
-                  ChatGPT 主生成；啟用 Gemini 後才會把三張低解析候選與草稿交給
-                  Gemini 復核。不送出完整原始影片。
+                  內的低解析故事板與上方故事背景；勾選語音分析時才會另送短音訊。發布素材由 ChatGPT 主生成；啟用 Gemini
+                  後才會把三張低解析候選與草稿交給 Gemini 復核。不送出完整原始影片。
                 </p>
               </section>
             </>

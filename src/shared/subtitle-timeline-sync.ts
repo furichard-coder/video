@@ -28,16 +28,19 @@ function containsSource(clip: TimelinePlanClip, timeMs: number): boolean {
 
 function anchorCue(cue: SubtitleCue, clips: TimelinePlanClip[]): CueAnchor | undefined {
   const outputCandidates = clips.filter((clip) => containsOutput(clip, cue.startMs));
-  const sourceCandidates = cue.sourceAssetId && cue.sourceInMs !== undefined
-    ? clips.filter((clip) => clip.assetId === cue.sourceAssetId && containsSource(clip, cue.sourceInMs!))
-    : [];
-  const clip = sourceCandidates.find((candidate) => outputCandidates.includes(candidate))
-    ?? sourceCandidates[0]
-    ?? outputCandidates.at(-1);
+  const sourceCandidates =
+    cue.sourceAssetId && cue.sourceInMs !== undefined
+      ? clips.filter((clip) => clip.assetId === cue.sourceAssetId && containsSource(clip, cue.sourceInMs!))
+      : [];
+  const clip =
+    sourceCandidates.find((candidate) => outputCandidates.includes(candidate)) ??
+    sourceCandidates[0] ??
+    outputCandidates.at(-1);
   if (!clip) return undefined;
-  const sourceStartMs = cue.sourceAssetId === clip.assetId && cue.sourceInMs !== undefined
-    ? Math.max(clip.inMs, Math.min(clip.outMs - 1, cue.sourceInMs))
-    : Math.max(clip.inMs, Math.min(clip.outMs - 1, clip.inMs + cue.startMs - clip.outputStartMs));
+  const sourceStartMs =
+    cue.sourceAssetId === clip.assetId && cue.sourceInMs !== undefined
+      ? Math.max(clip.inMs, Math.min(clip.outMs - 1, cue.sourceInMs))
+      : Math.max(clip.inMs, Math.min(clip.outMs - 1, clip.inMs + cue.startMs - clip.outputStartMs));
   return { cue, clip, sourceStartMs };
 }
 
@@ -48,17 +51,32 @@ function sameLogicalClip(anchor: CueAnchor, clip: TimelinePlanClip): boolean {
   return anchor.clip.assetId === clip.assetId && containsSource(clip, anchor.sourceStartMs);
 }
 
-function normalizeConfirmedOverlaps(cues: SubtitleCue[], scope: SubtitleTimelineScope): { cues: SubtitleCue[]; safe: boolean } {
-  const sorted = cues.map((cue) => ({ ...cue })).sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs);
+function normalizeConfirmedOverlaps(
+  cues: SubtitleCue[],
+  scope: SubtitleTimelineScope,
+): { cues: SubtitleCue[]; safe: boolean } {
+  const sorted = cues
+    .map((cue) => ({ ...cue }))
+    .sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs);
   let safe = true;
   for (let index = 1; index < sorted.length; index += 1) {
     const previous = sorted[index - 1];
     const current = sorted[index];
-    if ((previous.reviewStatus ?? "CONFIRMED") !== "CONFIRMED" || (current.reviewStatus ?? "CONFIRMED") !== "CONFIRMED" || previous.endMs <= current.startMs) continue;
+    if (
+      (previous.reviewStatus ?? "CONFIRMED") !== "CONFIRMED" ||
+      (current.reviewStatus ?? "CONFIRMED") !== "CONFIRMED" ||
+      previous.endMs <= current.startMs
+    )
+      continue;
     if (current.startMs - previous.startMs >= 100) previous.endMs = current.startMs;
     else {
       current.reviewStatus = "DRAFT";
-      current.aiWarnings = [...new Set([...(current.aiWarnings ?? []), `${scope === "INTRO" ? "片頭" : "正片"}順序調整後字幕時間重疊，請人工調整。`])];
+      current.aiWarnings = [
+        ...new Set([
+          ...(current.aiWarnings ?? []),
+          `${scope === "INTRO" ? "片頭" : "正片"}順序調整後字幕時間重疊，請人工調整。`,
+        ]),
+      ];
       safe = false;
     }
   }
@@ -97,14 +115,25 @@ export function syncSubtitlesToTimeline(
         mapped.push({
           ...originalCue,
           reviewStatus: originalCue.reviewStatus === "REJECTED" ? "REJECTED" : "DRAFT",
-          aiWarnings: [...new Set([...(originalCue.aiWarnings ?? []), "素材順序或範圍改變後無法可靠對應，已保留原時間並改為待確認。"])],
+          aiWarnings: [
+            ...new Set([
+              ...(originalCue.aiWarnings ?? []),
+              "素材順序或範圍改變後無法可靠對應，已保留原時間並改為待確認。",
+            ]),
+          ],
         });
         continue;
       }
       const durationMs = Math.max(1, originalCue.endMs - originalCue.startMs);
-      const startMs = Math.max(target.outputStartMs, Math.min(target.outputEndMs - 1, target.outputStartMs + anchor.sourceStartMs - target.inMs));
+      const startMs = Math.max(
+        target.outputStartMs,
+        Math.min(target.outputEndMs - 1, target.outputStartMs + anchor.sourceStartMs - target.inMs),
+      );
       const endMs = Math.max(startMs + 1, Math.min(target.outputEndMs, startMs + durationMs));
-      const sourceOutMs = Math.max(anchor.sourceStartMs + 1, Math.min(target.outMs, anchor.sourceStartMs + endMs - startMs));
+      const sourceOutMs = Math.max(
+        anchor.sourceStartMs + 1,
+        Math.min(target.outMs, anchor.sourceStartMs + endMs - startMs),
+      );
       if (startMs !== originalCue.startMs || endMs !== originalCue.endMs) movedCueCount += 1;
       mapped.push({
         ...originalCue,
@@ -122,7 +151,12 @@ export function syncSubtitlesToTimeline(
   }
 
   return {
-    cues: [...synced, ...untouched].sort((left, right) => ((left.timelineScope ?? "MAIN") === "INTRO" ? 0 : 1) - ((right.timelineScope ?? "MAIN") === "INTRO" ? 0 : 1) || left.startMs - right.startMs || left.endMs - right.endMs),
+    cues: [...synced, ...untouched].sort(
+      (left, right) =>
+        ((left.timelineScope ?? "MAIN") === "INTRO" ? 0 : 1) - ((right.timelineScope ?? "MAIN") === "INTRO" ? 0 : 1) ||
+        left.startMs - right.startMs ||
+        left.endMs - right.endMs,
+    ),
     fullyMapped,
     movedCueCount,
   };

@@ -8,7 +8,8 @@ const appRoot = fileURLToPath(new URL("..", import.meta.url));
 const packageMeta = JSON.parse(await readFile(path.join(appRoot, "package.json"), "utf8"));
 const outputRoot = path.join(appRoot, "release", `v${packageMeta.version}`);
 const executableName = `SceneryWalkerSourceOrganizer-v${packageMeta.version}`;
-const dunesShutterSource = "C:\\草漯沙丘地質公園 YT長片\\camera shutter sound\\freesound_community-camera-shutter-click-14671.mp3";
+const dunesShutterSource =
+  "C:\\草漯沙丘地質公園 YT長片\\camera shutter sound\\freesound_community-camera-shutter-click-14671.mp3";
 const dunesShutterHash = "0AC71ECABF302784F5FFB9483C2939C46B1784AA0D016A322CB6D1A0ECA07B93";
 
 const shutterBytes = await readFile(dunesShutterSource);

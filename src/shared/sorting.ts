@@ -6,11 +6,7 @@ const naturalCollator = new Intl.Collator("zh-Hant", {
 });
 
 function timestamp(asset: SourceAsset): number {
-  const values = [
-    asset.mediaInfo?.captureTime,
-    asset.fileCreatedAt,
-    asset.fileModifiedAt,
-  ];
+  const values = [asset.mediaInfo?.captureTime, asset.fileCreatedAt, asset.fileModifiedAt];
 
   for (const value of values) {
     if (!value) continue;
@@ -34,7 +30,10 @@ export function sortAssets(assets: SourceAsset[], mode: SortMode, timelineOrder:
     if (mode === "MANUAL_ORDER") {
       const left = timelineOrder.indexOf(a.id);
       const right = timelineOrder.indexOf(b.id);
-      return (left < 0 ? Number.MAX_SAFE_INTEGER : left) - (right < 0 ? Number.MAX_SAFE_INTEGER : right) || byAddedOrder(a, b);
+      return (
+        (left < 0 ? Number.MAX_SAFE_INTEGER : left) - (right < 0 ? Number.MAX_SAFE_INTEGER : right) ||
+        byAddedOrder(a, b)
+      );
     }
     if (mode === "FILE_NAME") {
       return byName(a, b) || byAddedOrder(a, b);

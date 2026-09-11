@@ -53,7 +53,8 @@ export type AiCredentialStatus = "SAVED_ENCRYPTED" | "ENVIRONMENT" | "MISSING";
 export type SubtitleCueOrigin = "MANUAL" | "IMPORTED_SRT" | "AI_SPEECH" | "AI_VISUAL";
 export type SubtitleCueReviewStatus = "DRAFT" | "CONFIRMED" | "REJECTED";
 export type SubtitleTimelineScope = "INTRO" | "MAIN";
-export type AiAnalysisPhase = "PREPARING" | "EXTRACTING_AUDIO" | "TRANSCRIBING" | "SAMPLING_FRAMES" | "MATCHING_STORY" | "SAVING_DRAFTS";
+export type AiAnalysisPhase =
+  "PREPARING" | "EXTRACTING_AUDIO" | "TRANSCRIBING" | "SAMPLING_FRAMES" | "MATCHING_STORY" | "SAVING_DRAFTS";
 export type MaterialAnalysisProvider = "CHATGPT" | "GEMINI";
 export type YoutubeBrowser = "CHROME" | "EDGE";
 export type YoutubePrivacyStatus = "unlisted" | "private";
@@ -543,7 +544,10 @@ export interface AiPublishGenerationResult {
   provider: PublishAiProvider;
   model?: string;
 }
-export interface PublishProgress { percent: number; detail: string; }
+export interface PublishProgress {
+  percent: number;
+  detail: string;
+}
 export interface ThumbnailRenderRequest {
   candidateId: string;
   outputToken: string;
@@ -931,7 +935,14 @@ export interface IntroAnalysisResult {
   cloudFallbackReason?: string;
 }
 
-export type BackgroundJobKind = "MUSIC_SUGGESTIONS" | "INTRO_ANALYSIS" | "AI_SUBTITLES" | "AI_MATERIAL_ANALYSIS" | "SUBTITLE_PREVIEW" | "CONCAT_RENDER" | "AI_PUBLISH_ASSETS";
+export type BackgroundJobKind =
+  | "MUSIC_SUGGESTIONS"
+  | "INTRO_ANALYSIS"
+  | "AI_SUBTITLES"
+  | "AI_MATERIAL_ANALYSIS"
+  | "SUBTITLE_PREVIEW"
+  | "CONCAT_RENDER"
+  | "AI_PUBLISH_ASSETS";
 export type BackgroundJobStatus = "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
 
 export interface BackgroundJobSnapshot {
@@ -949,7 +960,8 @@ export interface BackgroundJobSnapshot {
   projectRevision?: number;
 }
 
-export type ProjectChangeSection = "SOURCES" | "MAIN_TIMELINE" | "INTRO_TIMELINE" | "BGM" | "SUBTITLES" | "AI_CONTEXT" | "SETTINGS" | "OUTPUTS";
+export type ProjectChangeSection =
+  "SOURCES" | "MAIN_TIMELINE" | "INTRO_TIMELINE" | "BGM" | "SUBTITLES" | "AI_CONTEXT" | "SETTINGS" | "OUTPUTS";
 export interface ProjectChangedEvent {
   projectId: string;
   revision: number;
@@ -1168,7 +1180,12 @@ export interface AppApi {
   setPreviewRange(assetId: string, range: PreviewRange): Promise<PreviewRangeUpdateResult>;
   setImageDuration(assetId: string, durationMs: number): Promise<ImageDurationUpdateResult>;
   setPhotoSoundEnabled(assetId: string, enabled: boolean): Promise<ProjectManifest>;
-  addMediaInsertion(anchorVideoAssetId: string, insertedAssetId: string, atMs: number, sourceRange?: PreviewRange): Promise<ProjectManifest>;
+  addMediaInsertion(
+    anchorVideoAssetId: string,
+    insertedAssetId: string,
+    atMs: number,
+    sourceRange?: PreviewRange,
+  ): Promise<ProjectManifest>;
   updateMediaInsertion(insertionId: string, atMs: number, sourceRange: PreviewRange): Promise<ProjectManifest>;
   removeMediaInsertion(insertionId: string): Promise<ProjectManifest>;
   moveMediaInsertion(insertionId: string, toIndex: number): Promise<ProjectManifest>;
@@ -1217,7 +1234,9 @@ export interface AppApi {
   setAiPublishAssets?(assets: AiPublishAssets): Promise<ProjectManifest>;
   generateAiPublishAssets?(options: AiPublishGenerationOptions): Promise<AiPublishGenerationResult>;
   cancelAiPublishAssets?(): Promise<void>;
-  choosePublishThumbnailOutput?(format: "jpg" | "png"): Promise<{ token: string; displayPath: string; format: "jpg" | "png" } | null>;
+  choosePublishThumbnailOutput?(
+    format: "jpg" | "png",
+  ): Promise<{ token: string; displayPath: string; format: "jpg" | "png" } | null>;
   choosePublishThumbnailImport?(): Promise<{ path: string; format: "jpg" | "png" } | null>;
   renderPublishThumbnail?(request: ThumbnailRenderRequest): Promise<ThumbnailRenderResult>;
   onPublishProgress?(callback: (progress: PublishProgress) => void): void;

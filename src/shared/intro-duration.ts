@@ -36,10 +36,17 @@ function segmentCapacity(segment: IntroSuggestion, asset: SourceAsset, maxSegmen
 
 function equalAllocations(capacities: SegmentCapacity[], targetDurationMs: number): number[] {
   if (!capacities.length) return [];
-  if (capacities.some((item) => item.maximumMs < item.minimumMs)) throw new Error("至少一個片頭來源的可用範圍少於 3 秒，無法均衡分配。");
+  if (capacities.some((item) => item.maximumMs < item.minimumMs))
+    throw new Error("至少一個片頭來源的可用範圍少於 3 秒，無法均衡分配。");
   const minimumTotal = capacities.reduce((sum, item) => sum + item.minimumMs, 0);
-  if (targetDurationMs < minimumTotal) throw new Error(`目前 ${capacities.length} 段至少需要 ${Math.ceil(minimumTotal / 1000)} 秒；請提高片頭總長或移除部分片段。`);
-  const desiredTotal = Math.min(targetDurationMs, capacities.reduce((sum, item) => sum + item.maximumMs, 0));
+  if (targetDurationMs < minimumTotal)
+    throw new Error(
+      `目前 ${capacities.length} 段至少需要 ${Math.ceil(minimumTotal / 1000)} 秒；請提高片頭總長或移除部分片段。`,
+    );
+  const desiredTotal = Math.min(
+    targetDurationMs,
+    capacities.reduce((sum, item) => sum + item.maximumMs, 0),
+  );
   const allocations = capacities.map((item) => item.minimumMs);
   let remaining = desiredTotal - minimumTotal;
   let active = capacities.map((_item, index) => index);
@@ -97,10 +104,7 @@ export function balanceIntroSegments(
  * the configured output maximum. Rendering always keeps the chosen IN point
  * and takes at most the configured duration from there.
  */
-export function introSegmentsForOutput(
-  segments: IntroSuggestion[],
-  maxSegmentDurationMs: number,
-): IntroSuggestion[] {
+export function introSegmentsForOutput(segments: IntroSuggestion[], maxSegmentDurationMs: number): IntroSuggestion[] {
   const maximumMs = normalizeIntroSegmentMaxDuration(maxSegmentDurationMs);
   return segments.map((segment) => ({
     ...segment,

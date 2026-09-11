@@ -24,8 +24,16 @@ import { DEFAULT_AUDIO_PROTECTION_OPTIONS, DEFAULT_MAIN_START_CARD_OPTIONS } fro
 import { finalizePartialOutput } from "./atomic-output";
 
 const DIRECTORY_KEYS = new Set<PreferenceDirectoryKey>([
-  "SOURCE_MEDIA", "SOURCE_FOLDER", "INTRO_MEDIA", "PROJECT", "PREVIEW_OUTPUT", "OUTPUT_HISTORY",
-  "SUBTITLE_OUTPUT", "BGM", "CUSTOM_PLAYER", "OAUTH_CLIENT",
+  "SOURCE_MEDIA",
+  "SOURCE_FOLDER",
+  "INTRO_MEDIA",
+  "PROJECT",
+  "PREVIEW_OUTPUT",
+  "OUTPUT_HISTORY",
+  "SUBTITLE_OUTPUT",
+  "BGM",
+  "CUSTOM_PLAYER",
+  "OAUTH_CLIENT",
 ]);
 const VIEW_MODES = new Set<ViewMode>(["GRID", "LIST"]);
 const TRANSITIONS = new Set<TransitionDurationSec>([0.3, 0.5, 0.7]);
@@ -43,9 +51,7 @@ export function sanitizeAudioProtectionOptions(value: unknown): AudioProtectionO
   const candidate = value as Partial<AudioProtectionOptions>;
   const halfStep = (input: unknown, minimum: number, maximum: number, defaultValue: number) => {
     const parsed = Number(input);
-    return Number.isFinite(parsed)
-      ? Math.max(minimum, Math.min(maximum, Math.round(parsed * 2) / 2))
-      : defaultValue;
+    return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, Math.round(parsed * 2) / 2)) : defaultValue;
   };
   return {
     enabled: candidate.enabled !== false,
@@ -60,7 +66,7 @@ export function sanitizeAudioProtectionOptions(value: unknown): AudioProtectionO
 }
 
 export function sanitizeBgmScopeSelection(value: unknown): BgmScopeSelection {
-  const candidate = value && typeof value === "object" ? value as Partial<BgmScopeSelection> : {};
+  const candidate = value && typeof value === "object" ? (value as Partial<BgmScopeSelection>) : {};
   return {
     intro: typeof candidate.intro === "boolean" ? candidate.intro : true,
     main: typeof candidate.main === "boolean" ? candidate.main : true,
@@ -75,9 +81,13 @@ export function sanitizeMainStartCardOptions(value: unknown): MainStartCardOptio
     const parsed = Number(input);
     return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, Math.round(parsed))) : defaultValue;
   };
-  const text = (input: unknown, defaultValue: string) => typeof input === "string" && input.trim()
-    ? input.replace(/[\r\n]+/g, " ").trim().slice(0, 80)
-    : defaultValue;
+  const text = (input: unknown, defaultValue: string) =>
+    typeof input === "string" && input.trim()
+      ? input
+          .replace(/[\r\n]+/g, " ")
+          .trim()
+          .slice(0, 80)
+      : defaultValue;
   return {
     durationSeconds: number(candidate.durationSeconds, 3, 7, fallback.durationSeconds),
     line1: text(candidate.line1, fallback.line1),
@@ -86,10 +96,16 @@ export function sanitizeMainStartCardOptions(value: unknown): MainStartCardOptio
     line2FontSize1080p: number(candidate.line2FontSize1080p, 30, 160, fallback.line2FontSize1080p),
     lineGap1080p: number(candidate.lineGap1080p, 50, 240, fallback.lineGap1080p),
     overlayOpacityPercent: number(candidate.overlayOpacityPercent, 30, 85, fallback.overlayOpacityPercent),
-    transitionStyle: MAIN_START_TRANSITIONS.has(candidate.transitionStyle as MainStartCardTransition) ? candidate.transitionStyle as MainStartCardTransition : fallback.transitionStyle,
-    backgroundIntroSegmentId: typeof candidate.backgroundIntroSegmentId === "string" && candidate.backgroundIntroSegmentId.trim() && candidate.backgroundIntroSegmentId.length <= 200 && !/[\r\n\0]/.test(candidate.backgroundIntroSegmentId)
-      ? candidate.backgroundIntroSegmentId.trim()
-      : undefined,
+    transitionStyle: MAIN_START_TRANSITIONS.has(candidate.transitionStyle as MainStartCardTransition)
+      ? (candidate.transitionStyle as MainStartCardTransition)
+      : fallback.transitionStyle,
+    backgroundIntroSegmentId:
+      typeof candidate.backgroundIntroSegmentId === "string" &&
+      candidate.backgroundIntroSegmentId.trim() &&
+      candidate.backgroundIntroSegmentId.length <= 200 &&
+      !/[\r\n\0]/.test(candidate.backgroundIntroSegmentId)
+        ? candidate.backgroundIntroSegmentId.trim()
+        : undefined,
   };
 }
 
@@ -101,7 +117,13 @@ export function sanitizeSubtitleGenerationScope(value: unknown): SubtitleGenerat
 }
 
 export function sanitizeSubtitlePreviewStyle(value: unknown): SubtitlePreviewStyle {
-  const fallback: SubtitlePreviewStyle = { verticalPositionPercent: 82, fontSizePx: 28, textColor: "#FFFFFF", shadowEnabled: true, outlineWidthPx: 2 };
+  const fallback: SubtitlePreviewStyle = {
+    verticalPositionPercent: 82,
+    fontSizePx: 28,
+    textColor: "#FFFFFF",
+    shadowEnabled: true,
+    outlineWidthPx: 2,
+  };
   if (!value || typeof value !== "object") return fallback;
   const candidate = value as Partial<SubtitlePreviewStyle>;
   const number = (input: unknown, minimum: number, maximum: number, defaultValue: number) => {
@@ -111,7 +133,10 @@ export function sanitizeSubtitlePreviewStyle(value: unknown): SubtitlePreviewSty
   return {
     verticalPositionPercent: number(candidate.verticalPositionPercent, 10, 92, fallback.verticalPositionPercent),
     fontSizePx: number(candidate.fontSizePx, 16, 72, fallback.fontSizePx),
-    textColor: typeof candidate.textColor === "string" && HEX_COLOR.test(candidate.textColor) ? candidate.textColor.toUpperCase() : fallback.textColor,
+    textColor:
+      typeof candidate.textColor === "string" && HEX_COLOR.test(candidate.textColor)
+        ? candidate.textColor.toUpperCase()
+        : fallback.textColor,
     shadowEnabled: candidate.shadowEnabled !== false,
     outlineWidthPx: number(candidate.outlineWidthPx, 0, 8, fallback.outlineWidthPx),
   };
@@ -131,28 +156,67 @@ export function sanitizeSubtitleBurnInOptions(value: unknown): SubtitleBurnInOpt
     const language = track.language as SubtitleRenderLanguage;
     const position = track.position as SubtitleRenderPosition;
     const fontSize = Math.round(Number(track.fontSize1080p));
-    if (!SUBTITLE_LANGUAGES.has(language) || languages.has(language) || !SUBTITLE_POSITIONS.has(position) || !Number.isFinite(fontSize)) return [];
+    if (
+      !SUBTITLE_LANGUAGES.has(language) ||
+      languages.has(language) ||
+      !SUBTITLE_POSITIONS.has(position) ||
+      !Number.isFinite(fontSize)
+    )
+      return [];
     languages.add(language);
     return [{ language, position, fontSize1080p: Math.max(24, Math.min(96, fontSize)) }];
   });
   const style = candidate.styleProfile;
-  const styleProfile = style && typeof style === "object"
-    ? {
-      verticalPositionPercent: Math.max(10, Math.min(92, Number.isFinite(Number(style.verticalPositionPercent)) ? Number(style.verticalPositionPercent) : 82)),
-      fontSizePx: Math.max(16, Math.min(72, Number.isFinite(Number(style.fontSizePx)) ? Number(style.fontSizePx) : 28)),
-      textColor: typeof style.textColor === "string" && HEX_COLOR.test(style.textColor) ? style.textColor.toUpperCase() : "#FFFFFF",
-      shadowEnabled: style.shadowEnabled !== false,
-      outlineWidthPx: Math.max(0, Math.min(8, Number.isFinite(Number(style.outlineWidthPx)) ? Number(style.outlineWidthPx) : 2)),
-    }
-    : undefined;
-  return { enabled: Boolean(candidate.enabled), tracks: tracks.length ? tracks : fallback.tracks, ...(styleProfile ? { styleProfile } : {}) };
+  const styleProfile =
+    style && typeof style === "object"
+      ? {
+          verticalPositionPercent: Math.max(
+            10,
+            Math.min(
+              92,
+              Number.isFinite(Number(style.verticalPositionPercent)) ? Number(style.verticalPositionPercent) : 82,
+            ),
+          ),
+          fontSizePx: Math.max(
+            16,
+            Math.min(72, Number.isFinite(Number(style.fontSizePx)) ? Number(style.fontSizePx) : 28),
+          ),
+          textColor:
+            typeof style.textColor === "string" && HEX_COLOR.test(style.textColor)
+              ? style.textColor.toUpperCase()
+              : "#FFFFFF",
+          shadowEnabled: style.shadowEnabled !== false,
+          outlineWidthPx: Math.max(
+            0,
+            Math.min(8, Number.isFinite(Number(style.outlineWidthPx)) ? Number(style.outlineWidthPx) : 2),
+          ),
+        }
+      : undefined;
+  return {
+    enabled: Boolean(candidate.enabled),
+    tracks: tracks.length ? tracks : fallback.tracks,
+    ...(styleProfile ? { styleProfile } : {}),
+  };
 }
 
 function defaults(): UserPreferences {
   return {
     schemaVersion: 1,
     viewMode: "GRID",
-    renderDefaults: { transitionSeconds: 0.3, resolution: "480P", videoCodec: "H265_QSV", includeWatermark: true, audioProtection: sanitizeAudioProtectionOptions(undefined), mainBgmScopes: sanitizeBgmScopeSelection(undefined), youtubeHandoffMode: "CHROME_DRAG_DROP", prependIntro: true, autoUpload: true, introPreviewIncludeBgm: false, mainPreviewIncludeBgm: true, mainStartCard: sanitizeMainStartCardOptions(undefined) },
+    renderDefaults: {
+      transitionSeconds: 0.3,
+      resolution: "480P",
+      videoCodec: "H265_QSV",
+      includeWatermark: true,
+      audioProtection: sanitizeAudioProtectionOptions(undefined),
+      mainBgmScopes: sanitizeBgmScopeSelection(undefined),
+      youtubeHandoffMode: "CHROME_DRAG_DROP",
+      prependIntro: true,
+      autoUpload: true,
+      introPreviewIncludeBgm: false,
+      mainPreviewIncludeBgm: true,
+      mainStartCard: sanitizeMainStartCardOptions(undefined),
+    },
     youtubeUploadDefaults: { privacyStatus: "unlisted" },
     voiceInputLanguage: "zh-TW",
     subtitleBurnInDefaults: sanitizeSubtitleBurnInOptions(undefined),
@@ -181,29 +245,59 @@ function sanitize(value: unknown): UserPreferences {
   }
   return {
     schemaVersion: 1,
-    viewMode: VIEW_MODES.has(candidate.viewMode as ViewMode) ? candidate.viewMode as ViewMode : fallback.viewMode,
+    viewMode: VIEW_MODES.has(candidate.viewMode as ViewMode) ? (candidate.viewMode as ViewMode) : fallback.viewMode,
     renderDefaults: {
-      transitionSeconds: TRANSITIONS.has(render?.transitionSeconds as TransitionDurationSec) ? render?.transitionSeconds as TransitionDurationSec : fallback.renderDefaults.transitionSeconds,
-      resolution: RESOLUTIONS.has(render?.resolution as PreviewResolution) ? render?.resolution as PreviewResolution : fallback.renderDefaults.resolution,
-      videoCodec: render?.videoCodec === "H264" || render?.videoCodec === "H265" || render?.videoCodec === "H264_QSV" || render?.videoCodec === "H265_QSV" ? render.videoCodec : fallback.renderDefaults.videoCodec,
-      includeWatermark: typeof render?.includeWatermark === "boolean" ? render.includeWatermark : fallback.renderDefaults.includeWatermark,
+      transitionSeconds: TRANSITIONS.has(render?.transitionSeconds as TransitionDurationSec)
+        ? (render?.transitionSeconds as TransitionDurationSec)
+        : fallback.renderDefaults.transitionSeconds,
+      resolution: RESOLUTIONS.has(render?.resolution as PreviewResolution)
+        ? (render?.resolution as PreviewResolution)
+        : fallback.renderDefaults.resolution,
+      videoCodec:
+        render?.videoCodec === "H264" ||
+        render?.videoCodec === "H265" ||
+        render?.videoCodec === "H264_QSV" ||
+        render?.videoCodec === "H265_QSV"
+          ? render.videoCodec
+          : fallback.renderDefaults.videoCodec,
+      includeWatermark:
+        typeof render?.includeWatermark === "boolean"
+          ? render.includeWatermark
+          : fallback.renderDefaults.includeWatermark,
       audioProtection: sanitizeAudioProtectionOptions(render?.audioProtection),
       mainBgmScopes: sanitizeBgmScopeSelection(render?.mainBgmScopes),
-      youtubeHandoffMode: render?.youtubeHandoffMode === "OFFICIAL_API" || render?.youtubeHandoffMode === "CHROME_DRAG_DROP" ? render.youtubeHandoffMode : fallback.renderDefaults.youtubeHandoffMode,
-      prependIntro: typeof render?.prependIntro === "boolean" ? render.prependIntro : fallback.renderDefaults.prependIntro,
+      youtubeHandoffMode:
+        render?.youtubeHandoffMode === "OFFICIAL_API" || render?.youtubeHandoffMode === "CHROME_DRAG_DROP"
+          ? render.youtubeHandoffMode
+          : fallback.renderDefaults.youtubeHandoffMode,
+      prependIntro:
+        typeof render?.prependIntro === "boolean" ? render.prependIntro : fallback.renderDefaults.prependIntro,
       autoUpload: typeof render?.autoUpload === "boolean" ? render.autoUpload : fallback.renderDefaults.autoUpload,
-      introPreviewIncludeBgm: typeof render?.introPreviewIncludeBgm === "boolean" ? render.introPreviewIncludeBgm : fallback.renderDefaults.introPreviewIncludeBgm,
-      mainPreviewIncludeBgm: typeof render?.mainPreviewIncludeBgm === "boolean" ? render.mainPreviewIncludeBgm : fallback.renderDefaults.mainPreviewIncludeBgm,
+      introPreviewIncludeBgm:
+        typeof render?.introPreviewIncludeBgm === "boolean"
+          ? render.introPreviewIncludeBgm
+          : fallback.renderDefaults.introPreviewIncludeBgm,
+      mainPreviewIncludeBgm:
+        typeof render?.mainPreviewIncludeBgm === "boolean"
+          ? render.mainPreviewIncludeBgm
+          : fallback.renderDefaults.mainPreviewIncludeBgm,
       mainStartCard: sanitizeMainStartCardOptions(render?.mainStartCard),
     },
     youtubeUploadDefaults: {
-      privacyStatus: PRIVACY.has(upload?.privacyStatus as YoutubePrivacyStatus) ? upload?.privacyStatus as YoutubePrivacyStatus : fallback.youtubeUploadDefaults.privacyStatus,
+      privacyStatus: PRIVACY.has(upload?.privacyStatus as YoutubePrivacyStatus)
+        ? (upload?.privacyStatus as YoutubePrivacyStatus)
+        : fallback.youtubeUploadDefaults.privacyStatus,
     },
-    voiceInputLanguage: VOICE_LANGUAGES.has(candidate.voiceInputLanguage as VoiceInputLanguage) ? candidate.voiceInputLanguage as VoiceInputLanguage : fallback.voiceInputLanguage,
+    voiceInputLanguage: VOICE_LANGUAGES.has(candidate.voiceInputLanguage as VoiceInputLanguage)
+      ? (candidate.voiceInputLanguage as VoiceInputLanguage)
+      : fallback.voiceInputLanguage,
     subtitleBurnInDefaults: sanitizeSubtitleBurnInOptions(candidate.subtitleBurnInDefaults),
     subtitleGenerationScope: sanitizeSubtitleGenerationScope(candidate.subtitleGenerationScope),
     subtitlePreviewStyle: sanitizeSubtitlePreviewStyle(candidate.subtitlePreviewStyle),
-    musicSuggestionDefaults: { includeTikTokTrending: candidate.musicSuggestionDefaults?.includeTikTokTrending === true, royaltyFreeOnly: candidate.musicSuggestionDefaults?.royaltyFreeOnly === true },
+    musicSuggestionDefaults: {
+      includeTikTokTrending: candidate.musicSuggestionDefaults?.includeTikTokTrending === true,
+      royaltyFreeOnly: candidate.musicSuggestionDefaults?.royaltyFreeOnly === true,
+    },
     lastDirectories: directories,
     updatedAt: typeof candidate.updatedAt === "string" ? candidate.updatedAt : fallback.updatedAt,
   };
@@ -238,11 +332,17 @@ export class UserPreferencesStore {
     return this.current.lastDirectories[key] ?? fallback;
   }
 
-  async rememberDirectory(key: PreferenceDirectoryKey, selectedPath: string, selectedIsDirectory = false): Promise<void> {
+  async rememberDirectory(
+    key: PreferenceDirectoryKey,
+    selectedPath: string,
+    selectedIsDirectory = false,
+  ): Promise<void> {
     if (!DIRECTORY_KEYS.has(key)) throw new Error("偏好路徑類型無效。");
     if (typeof selectedPath !== "string" || !path.isAbsolute(selectedPath)) throw new Error("只能記住絕對路徑。");
     const directory = path.resolve(selectedIsDirectory ? selectedPath : path.dirname(selectedPath));
-    await this.mutate((next) => { next.lastDirectories[key] = directory; });
+    await this.mutate((next) => {
+      next.lastDirectories[key] = directory;
+    });
   }
 
   async update(update: UserPreferencesUpdate): Promise<UserPreferences> {
@@ -263,21 +363,34 @@ export class UserPreferencesStore {
           next.renderDefaults.resolution = render.resolution;
         }
         if (render.videoCodec !== undefined) {
-          if (render.videoCodec !== "H265" && render.videoCodec !== "H264" && render.videoCodec !== "H265_QSV" && render.videoCodec !== "H264_QSV") throw new Error("影片格式無效。");
+          if (
+            render.videoCodec !== "H265" &&
+            render.videoCodec !== "H264" &&
+            render.videoCodec !== "H265_QSV" &&
+            render.videoCodec !== "H264_QSV"
+          )
+            throw new Error("影片格式無效。");
           next.renderDefaults.videoCodec = render.videoCodec;
         }
-        if (render.includeWatermark !== undefined) next.renderDefaults.includeWatermark = Boolean(render.includeWatermark);
-        if (render.audioProtection !== undefined) next.renderDefaults.audioProtection = sanitizeAudioProtectionOptions(render.audioProtection);
-        if (render.mainBgmScopes !== undefined) next.renderDefaults.mainBgmScopes = sanitizeBgmScopeSelection(render.mainBgmScopes);
+        if (render.includeWatermark !== undefined)
+          next.renderDefaults.includeWatermark = Boolean(render.includeWatermark);
+        if (render.audioProtection !== undefined)
+          next.renderDefaults.audioProtection = sanitizeAudioProtectionOptions(render.audioProtection);
+        if (render.mainBgmScopes !== undefined)
+          next.renderDefaults.mainBgmScopes = sanitizeBgmScopeSelection(render.mainBgmScopes);
         if (render.youtubeHandoffMode !== undefined) {
-          if (render.youtubeHandoffMode !== "CHROME_DRAG_DROP" && render.youtubeHandoffMode !== "OFFICIAL_API") throw new Error("YouTube 上傳交接方式無效。");
+          if (render.youtubeHandoffMode !== "CHROME_DRAG_DROP" && render.youtubeHandoffMode !== "OFFICIAL_API")
+            throw new Error("YouTube 上傳交接方式無效。");
           next.renderDefaults.youtubeHandoffMode = render.youtubeHandoffMode;
         }
         if (render.prependIntro !== undefined) next.renderDefaults.prependIntro = Boolean(render.prependIntro);
         if (render.autoUpload !== undefined) next.renderDefaults.autoUpload = Boolean(render.autoUpload);
-        if (render.introPreviewIncludeBgm !== undefined) next.renderDefaults.introPreviewIncludeBgm = Boolean(render.introPreviewIncludeBgm);
-        if (render.mainPreviewIncludeBgm !== undefined) next.renderDefaults.mainPreviewIncludeBgm = Boolean(render.mainPreviewIncludeBgm);
-        if (render.mainStartCard !== undefined) next.renderDefaults.mainStartCard = sanitizeMainStartCardOptions(render.mainStartCard);
+        if (render.introPreviewIncludeBgm !== undefined)
+          next.renderDefaults.introPreviewIncludeBgm = Boolean(render.introPreviewIncludeBgm);
+        if (render.mainPreviewIncludeBgm !== undefined)
+          next.renderDefaults.mainPreviewIncludeBgm = Boolean(render.mainPreviewIncludeBgm);
+        if (render.mainStartCard !== undefined)
+          next.renderDefaults.mainStartCard = sanitizeMainStartCardOptions(render.mainStartCard);
       }
       if (update.youtubeUploadDefaults?.privacyStatus !== undefined) {
         if (!PRIVACY.has(update.youtubeUploadDefaults.privacyStatus)) throw new Error("YouTube 可見度設定無效。");
@@ -294,14 +407,17 @@ export class UserPreferencesStore {
       }
       if (update.subtitleGenerationScope !== undefined) {
         const sanitized = sanitizeSubtitleGenerationScope(update.subtitleGenerationScope);
-        if (!update.subtitleGenerationScope.intro && !update.subtitleGenerationScope.main) throw new Error("片頭與正片至少需要選擇一項字幕範圍。");
+        if (!update.subtitleGenerationScope.intro && !update.subtitleGenerationScope.main)
+          throw new Error("片頭與正片至少需要選擇一項字幕範圍。");
         next.subtitleGenerationScope = sanitized;
       }
       if (update.subtitlePreviewStyle !== undefined) {
         next.subtitlePreviewStyle = sanitizeSubtitlePreviewStyle(update.subtitlePreviewStyle);
       }
       if (update.musicSuggestionDefaults?.includeTikTokTrending !== undefined) {
-        next.musicSuggestionDefaults.includeTikTokTrending = Boolean(update.musicSuggestionDefaults.includeTikTokTrending);
+        next.musicSuggestionDefaults.includeTikTokTrending = Boolean(
+          update.musicSuggestionDefaults.includeTikTokTrending,
+        );
       }
       if (update.musicSuggestionDefaults?.royaltyFreeOnly !== undefined) {
         next.musicSuggestionDefaults.royaltyFreeOnly = Boolean(update.musicSuggestionDefaults.royaltyFreeOnly);

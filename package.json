@@ -2,6 +2,9 @@
   "name": "scenerywalker-source-organizer",
   "version": "0.56.0",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "productName": "SceneryWalker 素材整理",
   "description": "Windows-first read-only media source organizer and preview module",
   "main": "dist-electron/main/main.js",
@@ -16,6 +19,8 @@
     "smoke:packaged": "node scripts/smoke-packaged.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.main.json --noEmit"
   },
   "dependencies": {
@@ -33,6 +38,7 @@
     "@vitejs/plugin-react": "6.1.1",
     "electron": "44.0.0",
     "jsdom": "30.0.1",
+    "prettier": "^3.9.6",
     "typescript": "7.0.2",
     "vite": "8.2.2",
     "vitest": "4.1.11"

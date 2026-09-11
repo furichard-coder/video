@@ -41,7 +41,8 @@ export function parseMinuteSecondInput(value: string): number | undefined {
   const hours = hasHours ? Number(match[1]) : 0;
   const minutes = Number(match[2]);
   const seconds = Number(match[3]);
-  if (!Number.isSafeInteger(hours) || !Number.isSafeInteger(minutes) || minutes < 0 || (hasHours && minutes > 59)) return undefined;
+  if (!Number.isSafeInteger(hours) || !Number.isSafeInteger(minutes) || minutes < 0 || (hasHours && minutes > 59))
+    return undefined;
   const fraction = (match[4] ?? "").padEnd(3, "0");
   const milliseconds = fraction ? Number(fraction) : 0;
   const result = ((hours * 60 + minutes) * 60 + seconds) * 1_000 + milliseconds;

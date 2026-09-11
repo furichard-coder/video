@@ -55,22 +55,16 @@ export class MediaProbe {
   async probe(sourcePath: string, signal?: AbortSignal): Promise<BasicMediaInfo> {
     const { stdout } = await runProcess(
       this.executable,
-      [
-        "-v",
-        "error",
-        "-print_format",
-        "json",
-        "-show_format",
-        "-show_streams",
-        sourcePath,
-      ],
+      ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", sourcePath],
       signal,
     );
     const output = JSON.parse(stdout) as ProbeOutput;
     const video = output.streams?.find((stream) => stream.codec_type === "video");
     const audio = output.streams?.find((stream) => stream.codec_type === "audio");
     const durationSeconds = positiveNumber(video?.duration) ?? positiveNumber(output.format?.duration);
-    const rawRotation = video?.side_data_list?.find((item) => Number.isFinite(item.rotation))?.rotation ?? Number(video?.tags?.rotate ?? 0);
+    const rawRotation =
+      video?.side_data_list?.find((item) => Number.isFinite(item.rotation))?.rotation ??
+      Number(video?.tags?.rotate ?? 0);
     const rotationDegrees = Number.isFinite(rawRotation) ? ((Math.round(rawRotation) % 360) + 360) % 360 : 0;
     const swapsAxes = rotationDegrees === 90 || rotationDegrees === 270;
     const displayWidth = swapsAxes ? video?.height : video?.width;

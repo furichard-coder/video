@@ -1,9 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  AiPublishAssets,
-  ProjectManifest,
-  PublishTopicSnapshot,
-} from "../../shared/domain";
+import type { AiPublishAssets, ProjectManifest, PublishTopicSnapshot } from "../../shared/domain";
 import {
   chapterText,
   isValidYoutubeChapterSet,
@@ -31,9 +27,7 @@ function topicOf(project: ProjectManifest): PublishTopicSnapshot {
   };
 }
 function exportText(text: string): void {
-  const url = URL.createObjectURL(
-    new Blob([text], { type: "text/plain;charset=utf-8" }),
-  );
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
   const a = document.createElement("a");
   a.href = url;
   a.download = "youtube-description.txt";
@@ -58,17 +52,10 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
   const [closePrompt, setClosePrompt] = useState(false);
   const [externalJson, setExternalJson] = useState("");
   const stale = assets
-    ? publishAssetsNeedReview(
-        assets,
-        project.mainTimelineRevision ?? project.timelineRevision,
-      )
+    ? publishAssetsNeedReview(assets, project.mainTimelineRevision ?? project.timelineRevision)
     : false;
-  const selectedTitle = assets?.titles.find(
-    (item) => item.id === assets.selectedTitleId,
-  );
-  const selectedThumbnail = assets?.thumbnails.find(
-    (item) => item.id === assets.selectedThumbnailId,
-  );
+  const selectedTitle = assets?.titles.find((item) => item.id === assets.selectedTitleId);
+  const selectedThumbnail = assets?.thumbnails.find((item) => item.id === assets.selectedThumbnailId);
   useEffect(() => {
     void window.sourceApp
       .getAiPublishAssets?.()
@@ -151,28 +138,17 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
   );
   return (
     <div className="modal-backdrop" role="presentation">
-      <section
-        className="editor-modal publish-assets-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="AI 發布素材"
-      >
+      <section className="editor-modal publish-assets-modal" role="dialog" aria-modal="true" aria-label="AI 發布素材">
         <header className="modal-header">
           <div>
-            <span className="eyebrow">
-              AI PUBLISHING ASSETS · CHATGPT FIRST
-            </span>
+            <span className="eyebrow">AI PUBLISHING ASSETS · CHATGPT FIRST</span>
             <h2>標題與縮圖工作台</h2>
             <p>
               ChatGPT 先依主題、片頭候選畫面與正片內容產生；Gemini
               若已設定，只做第二次復核。標題、縮圖與說明都可在這裡直接修改。
             </p>
           </div>
-          <button
-            className="icon-button"
-            onClick={requestClose}
-            aria-label="關閉"
-          >
+          <button className="icon-button" onClick={requestClose} aria-label="關閉">
             ×
           </button>
         </header>
@@ -182,12 +158,7 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
             <div className="publish-topic-grid">
               <label>
                 主題
-                <input
-                  value={topic.topic}
-                  onChange={(e) =>
-                    setTopic({ ...topic, topic: e.target.value })
-                  }
-                />
+                <input value={topic.topic} onChange={(e) => setTopic({ ...topic, topic: e.target.value })} />
               </label>
               <label>
                 地點
@@ -208,36 +179,23 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
                 故事／特色
                 <textarea
                   value={topic.storySummary}
-                  onChange={(e) =>
-                    setTopic({ ...topic, storySummary: e.target.value })
-                  }
+                  onChange={(e) => setTopic({ ...topic, storySummary: e.target.value })}
                 />
               </label>
               <label>
                 觀眾承諾
                 <textarea
                   value={topic.audiencePromise}
-                  onChange={(e) =>
-                    setTopic({ ...topic, audiencePromise: e.target.value })
-                  }
+                  onChange={(e) => setTopic({ ...topic, audiencePromise: e.target.value })}
                 />
               </label>
             </div>
             <div className="concat-footer-actions">
-              <button
-                className="ai-intro-button"
-                disabled={busy}
-                onClick={() => void generate()}
-              >
+              <button className="ai-intro-button" disabled={busy} onClick={() => void generate()}>
                 ✦ 產生／重跑
               </button>
               {busy && (
-                <button
-                  className="cancel-button"
-                  onClick={() =>
-                    void window.sourceApp.cancelAiPublishAssets?.()
-                  }
-                >
+                <button className="cancel-button" onClick={() => void window.sourceApp.cancelAiPublishAssets?.()}>
                   取消
                 </button>
               )}
@@ -260,11 +218,7 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
           )}
           {assets && (
             <>
-              <section
-                className="publish-results-summary"
-                ref={resultsRef}
-                aria-label="AI 標題與縮圖產生結果"
-              >
+              <section className="publish-results-summary" ref={resultsRef} aria-label="AI 標題與縮圖產生結果">
                 <div>
                   <span className="eyebrow">CHATGPT PRIMARY RESULT</span>
                   <h3>
@@ -280,24 +234,16 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
                         : "本機備援"}
                     {assets.model ? ` · ${assets.model}` : ""}
                   </p>
-                  <div
-                    className={`gemini-review-badge status-${assets.geminiReview?.status ?? "NOT_CONFIGURED"}`}
-                  >
+                  <div className={`gemini-review-badge status-${assets.geminiReview?.status ?? "NOT_CONFIGURED"}`}>
                     <strong>Gemini 輔助</strong>
-                    <span>
-                      {assets.geminiReview?.summary ??
-                        "未啟用；沒有執行第二次復核。"}
-                    </span>
+                    <span>{assets.geminiReview?.summary ?? "未啟用；沒有執行第二次復核。"}</span>
                     {assets.geminiReview?.warnings.map((warning) => (
                       <small key={warning}>{warning}</small>
                     ))}
                   </div>
                 </div>
                 {selectedThumbnail?.previewUrl && (
-                  <img
-                    src={selectedThumbnail.previewUrl}
-                    alt="目前選用的 AI 縮圖結果"
-                  />
+                  <img src={selectedThumbnail.previewUrl} alt="目前選用的 AI 縮圖結果" />
                 )}
                 <strong>{selectedTitle?.text ?? "請在下方選擇標題"}</strong>
                 {assets.warnings.length > 0 && (
@@ -313,7 +259,10 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
                 <h3>02 選擇與微調標題</h3>
                 <p>先點選要使用的標題，再直接修改文字；每一筆都會即時計算 YouTube 的 100 字限制。</p>
                 {assets.titles.map((item) => (
-                  <label className={`publish-title-row ${item.id === assets.selectedTitleId ? "is-selected" : ""}`} key={item.id}>
+                  <label
+                    className={`publish-title-row ${item.id === assets.selectedTitleId ? "is-selected" : ""}`}
+                    key={item.id}
+                  >
                     <input
                       type="radio"
                       checked={item.id === assets.selectedTitleId}
@@ -408,8 +357,8 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
               <section className="setting-block publish-external-section">
                 <h3>04 外部 AI 提示詞／貼回</h3>
                 <p>
-                  貼回內容必須包含完整標題、說明、英文摘要、hashtags、三個可追溯縮圖概念與章節；通過
-                  schema 後仍需人工確認。
+                  貼回內容必須包含完整標題、說明、英文摘要、hashtags、三個可追溯縮圖概念與章節；通過 schema
+                  後仍需人工確認。
                 </p>
                 <textarea
                   className="publish-prompt-box"
@@ -417,10 +366,7 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
                   onChange={(e) => setExternalJson(e.target.value)}
                 />
                 <div className="concat-footer-actions">
-                  <button
-                    className="secondary-button"
-                    onClick={() => navigator.clipboard?.writeText(prompt)}
-                  >
+                  <button className="secondary-button" onClick={() => navigator.clipboard?.writeText(prompt)}>
                     複製提示詞
                   </button>
                   <button
@@ -442,9 +388,7 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
                           };
                         });
                         const thumbnails = parsed.thumbnails.map((item) => {
-                          const current = assets.thumbnails.find(
-                            (candidate) => candidate.id === item.candidateId,
-                          )!;
+                          const current = assets.thumbnails.find((candidate) => candidate.id === item.candidateId)!;
                           return {
                             ...current,
                             layout: item.layout,
@@ -474,15 +418,9 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
                           warnings: parsed.warnings,
                           userEdited: true,
                         });
-                        setNotice(
-                          "外部發布素材已通過完整 schema 驗證；請逐項確認後保存。",
-                        );
+                        setNotice("外部發布素材已通過完整 schema 驗證；請逐項確認後保存。");
                       } catch (reason) {
-                        setError(
-                          reason instanceof Error
-                            ? reason.message
-                            : String(reason),
-                        );
+                        setError(reason instanceof Error ? reason.message : String(reason));
                       }
                     }}
                   >
@@ -492,16 +430,14 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
               </section>
               <section className="setting-block publish-thumbnail-section">
                 <h3>05 縮圖候選（1280×720／≤2MB）</h3>
-                <p>
-                  已自動合成可見結果；片頭畫面會優先成為候選，檔名與時間碼保留供追溯。
-                </p>
+                <p>已自動合成可見結果；片頭畫面會優先成為候選，檔名與時間碼保留供追溯。</p>
                 <div className="publish-thumbnail-grid">
                   {assets.thumbnails.map((item, index) => (
-                    <article className={`publish-thumbnail-card ${item.id === assets.selectedThumbnailId ? "is-selected" : ""}`} key={item.id}>
-                      <img
-                        src={item.previewUrl ?? ""}
-                        alt={`AI 縮圖候選 ${index + 1}：${item.reason}`}
-                      />
+                    <article
+                      className={`publish-thumbnail-card ${item.id === assets.selectedThumbnailId ? "is-selected" : ""}`}
+                      key={item.id}
+                    >
+                      <img src={item.previewUrl ?? ""} alt={`AI 縮圖候選 ${index + 1}：${item.reason}`} />
                       <label>
                         <input
                           type="radio"
@@ -517,8 +453,7 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
                         選用第 {index + 1} 張
                       </label>
                       <small>
-                        {item.sourceFileName} ·{" "}
-                        {formatDuration(item.sourceTimeMs)}
+                        {item.sourceFileName} · {formatDuration(item.sourceTimeMs)}
                         <br />
                         {item.reason}
                       </small>
@@ -547,24 +482,18 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
                       <button
                         className="secondary-button"
                         onClick={async () => {
-                          const output =
-                            await window.sourceApp.choosePublishThumbnailOutput?.(
-                              "jpg",
-                            );
+                          const output = await window.sourceApp.choosePublishThumbnailOutput?.("jpg");
                           if (!output) return;
-                          const rendered =
-                            await window.sourceApp.renderPublishThumbnail?.({
-                              candidateId: item.id,
-                              outputToken: output.token,
-                              format: "jpg",
-                            });
+                          const rendered = await window.sourceApp.renderPublishThumbnail?.({
+                            candidateId: item.id,
+                            outputToken: output.token,
+                            format: "jpg",
+                          });
                           if (rendered) {
                             update({
                               ...assets,
                               thumbnails: assets.thumbnails.map((old) =>
-                                old.id === item.id
-                                  ? { ...old, outputPath: rendered.outputPath }
-                                  : old,
+                                old.id === item.id ? { ...old, outputPath: rendered.outputPath } : old,
                               ),
                             });
                             setNotice(`縮圖已保存：${rendered.outputPath}`);
@@ -576,8 +505,7 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
                       <button
                         className="secondary-button"
                         onClick={async () => {
-                          const imported =
-                            await window.sourceApp.choosePublishThumbnailImport?.();
+                          const imported = await window.sourceApp.choosePublishThumbnailImport?.();
                           if (imported) {
                             update({
                               ...assets,
@@ -604,10 +532,7 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
                 </div>
               </section>
               <section className="setting-block publish-chapter-section">
-                <h3>
-                  06 章節候選{" "}
-                  {stale && <span className="stale-badge">需複核</span>}
-                </h3>
+                <h3>06 章節候選 {stale && <span className="stale-badge">需複核</span>}</h3>
                 {assets.chapters.map((cue) => (
                   <div className="publish-chapter-row" key={cue.id}>
                     <input
@@ -620,10 +545,7 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
                             old.id === cue.id
                               ? {
                                   ...old,
-                                  startMs: Math.max(
-                                    0,
-                                    Number(e.target.value) || 0,
-                                  ),
+                                  startMs: Math.max(0, Number(e.target.value) || 0),
                                   userEdited: true,
                                 }
                               : old,
@@ -655,9 +577,7 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
                       onClick={() =>
                         update({
                           ...assets,
-                          chapters: assets.chapters.filter(
-                            (old) => old.id !== cue.id,
-                          ),
+                          chapters: assets.chapters.filter((old) => old.id !== cue.id),
                           userEdited: true,
                         })
                       }
@@ -667,14 +587,9 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
                   </div>
                 ))}
                 <p
-                  className={
-                    isValidYoutubeChapterSet(assets.chapters, 999999999)
-                      ? "inline-notice"
-                      : "inline-warning"
-                  }
+                  className={isValidYoutubeChapterSet(assets.chapters, 999999999) ? "inline-notice" : "inline-warning"}
                 >
-                  第一段 00:00、至少 3 段、遞增、每段至少 10 秒；目前{" "}
-                  {assets.chapters.length} 段。
+                  第一段 00:00、至少 3 段、遞增、每段至少 10 秒；目前 {assets.chapters.length} 段。
                 </p>
                 <button
                   className="secondary-button"
@@ -701,19 +616,12 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
               </section>
               <section className="setting-block publish-save-row">
                 <span>{assets.userEdited ? "有未保存編輯" : "已保存"}</span>
-                <button
-                  className="primary-button"
-                  disabled={!dirty}
-                  onClick={() => void save()}
-                >
+                <button className="primary-button" disabled={!dirty} onClick={() => void save()}>
                   保存
                 </button>
                 <button
                   className="secondary-button"
-                  onClick={() =>
-                    selectedTitle &&
-                    navigator.clipboard?.writeText(selectedTitle.text)
-                  }
+                  onClick={() => selectedTitle && navigator.clipboard?.writeText(selectedTitle.text)}
                 >
                   複製選定標題
                 </button>
@@ -722,9 +630,7 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
           )}
         </div>
         <footer className="settings-footer">
-          <p>
-            縮圖會自動以片頭優先的可追溯影格合成；本版不捏造來源畫面，也不會改寫原始素材。
-          </p>
+          <p>縮圖會自動以片頭優先的可追溯影格合成；本版不捏造來源畫面，也不會改寫原始素材。</p>
           <button className="primary-button" onClick={requestClose}>
             完成
           </button>
@@ -752,10 +658,7 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
             >
               放棄並離開
             </button>
-            <SafeDefaultButton
-              className="secondary-button"
-              onClick={() => setClosePrompt(false)}
-            >
+            <SafeDefaultButton className="secondary-button" onClick={() => setClosePrompt(false)}>
               返回編輯
             </SafeDefaultButton>
           </div>

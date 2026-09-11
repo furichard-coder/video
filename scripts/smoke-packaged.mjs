@@ -45,12 +45,12 @@ for (let attempt = 0; attempt < 120; attempt += 1) {
         ? child.exitCode
         : observedExitCode !== undefined
           ? observedExitCode
-        : await Promise.race([
-            childExit,
-            // Windows can keep Electron's parent process alive briefly while its
-            // sandboxed children finish shutting down, even after the ready marker.
-            delay(20_000).then(() => 124),
-          ]);
+          : await Promise.race([
+              childExit,
+              // Windows can keep Electron's parent process alive briefly while its
+              // sandboxed children finish shutting down, even after the ready marker.
+              delay(20_000).then(() => 124),
+            ]);
     break;
   } catch {
     if (child.exitCode !== null) {

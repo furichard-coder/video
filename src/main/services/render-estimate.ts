@@ -35,7 +35,7 @@ export function buildRenderEstimate(
   const isH265 = videoCodec === "H265" || videoCodec === "H265_QSV";
   const videoMbps = VIDEO_MEGABITS_PER_SECOND[resolution][isH265 ? "h265" : "h264"];
   const audioMbps = 0.192;
-  const estimatedOutputBytes = Math.ceil(durationMs / 1000 * (videoMbps + audioMbps) * 1_000_000 / 8 * 1.08);
+  const estimatedOutputBytes = Math.ceil((((durationMs / 1000) * (videoMbps + audioMbps) * 1_000_000) / 8) * 1.08);
   const estimatedRenderTimeMs = Math.ceil(20_000 + durationMs * REALTIME_FACTOR[resolution][videoCodec]);
   const estimatedFreeAfterBytes = Math.max(0, Math.floor(currentFreeBytes - estimatedOutputBytes));
   const canRender = currentFreeBytes - estimatedOutputBytes >= MINIMUM_RENDER_RESERVE_BYTES;
@@ -48,7 +48,9 @@ export function buildRenderEstimate(
     estimatedFreeAfterBytes,
     minimumReserveBytes: MINIMUM_RENDER_RESERVE_BYTES,
     canRender,
-    ...(canRender ? {} : { warning: "預估輸出後磁碟餘量將低於 1 GB。請先清理硬碟空間或改選其他磁碟；本次不會開始轉檔。" }),
+    ...(canRender
+      ? {}
+      : { warning: "預估輸出後磁碟餘量將低於 1 GB。請先清理硬碟空間或改選其他磁碟；本次不會開始轉檔。" }),
   };
 }
 
@@ -60,8 +62,13 @@ export async function estimateRenderOnDisk(
 ): Promise<ConcatRenderEstimate> {
   const targetDirectory = path.dirname(path.resolve(outputPath));
   let disk;
-  try { disk = await statfs(targetDirectory); }
-  catch (error) { throw new Error(`無法讀取輸出磁碟的剩餘空間，為避免不完整影片，本次不會開始轉檔：${error instanceof Error ? error.message : String(error)}`); }
+  try {
+    disk = await statfs(targetDirectory);
+  } catch (error) {
+    throw new Error(
+      `無法讀取輸出磁碟的剩餘空間，為避免不完整影片，本次不會開始轉檔：${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   const currentFreeBytes = Number(disk.bavail) * Number(disk.bsize);
   return buildRenderEstimate(path.resolve(outputPath), currentFreeBytes, expectedDurationMs, resolution, videoCodec);
 }

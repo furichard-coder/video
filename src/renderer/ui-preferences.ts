@@ -18,7 +18,9 @@ export const UI_TEXT_SIZE_OPTIONS: Array<{ value: UiTextSize; label: string; det
 export function readUiTextSize(storage: Pick<Storage, "getItem"> = window.localStorage): UiTextSize {
   try {
     const parsed = Number(storage.getItem(UI_TEXT_SIZE_STORAGE_KEY));
-    return UI_TEXT_SIZE_OPTIONS.some((option) => option.value === parsed) ? parsed as UiTextSize : DEFAULT_UI_TEXT_SIZE;
+    return UI_TEXT_SIZE_OPTIONS.some((option) => option.value === parsed)
+      ? (parsed as UiTextSize)
+      : DEFAULT_UI_TEXT_SIZE;
   } catch {
     return DEFAULT_UI_TEXT_SIZE;
   }
@@ -37,7 +39,7 @@ export function applyUiTextSize(size: UiTextSize, storage: Pick<Storage, "setIte
 export function readUiZoom(storage: Pick<Storage, "getItem"> = window.localStorage): UiZoomPercent {
   try {
     const parsed = Number(storage.getItem(UI_ZOOM_STORAGE_KEY));
-    return UI_ZOOM_LEVELS.includes(parsed as UiZoomPercent) ? parsed as UiZoomPercent : DEFAULT_UI_ZOOM_PERCENT;
+    return UI_ZOOM_LEVELS.includes(parsed as UiZoomPercent) ? (parsed as UiZoomPercent) : DEFAULT_UI_ZOOM_PERCENT;
   } catch {
     return DEFAULT_UI_ZOOM_PERCENT;
   }

@@ -51,4 +51,3 @@ electronProcess = spawn(electron, [appRoot], {
   windowsHide: true,
 });
 electronProcess.once("exit", (code) => void stop(code ?? 0));
-

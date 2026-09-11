@@ -22,7 +22,11 @@ export class PlatformUploadHandoffService {
     const uploadUrl = PLATFORM_URLS[platform];
     await this.adapter.openExternal(uploadUrl);
     const label = platform === "BILIBILI" ? "BiliBili" : "TikTok";
-    return { platform, uploadUrl, message: `已開啟 ${label} 官方登入／投稿頁；帳號、密碼與登入狀態由官方網站和瀏覽器管理，本 App 不會讀取或保存。` };
+    return {
+      platform,
+      uploadUrl,
+      message: `已開啟 ${label} 官方登入／投稿頁；帳號、密碼與登入狀態由官方網站和瀏覽器管理，本 App 不會讀取或保存。`,
+    };
   }
 
   async open(outputPath: string, platform: BrowserUploadPlatform): Promise<PlatformUploadHandoffResult> {
@@ -58,7 +62,8 @@ export class PlatformUploadHandoffService {
       platform: "YOUTUBE",
       outputPath: resolved,
       uploadUrl,
-      message: "已在 Chrome 開啟 YouTube Studio 上傳頁，並在檔案總管選取最新 MP4。請用滑鼠把已選取的檔案拖到 Chrome 上傳區；檔案路徑也已複製。",
+      message:
+        "已在 Chrome 開啟 YouTube Studio 上傳頁，並在檔案總管選取最新 MP4。請用滑鼠把已選取的檔案拖到 Chrome 上傳區；檔案路徑也已複製。",
     };
   }
 }

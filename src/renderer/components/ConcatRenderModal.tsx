@@ -104,10 +104,8 @@ function suggestedFileName(purpose: PreviewRenderPurpose): string {
 }
 
 function progressLabel(progress?: ConcatRenderProgress): string {
-  if (!progress || progress.phase === "PREPARING")
-    return "正在檢查來源與媒體資訊…";
-  if (progress.phase === "TRANSLATING_SUBTITLES")
-    return "正在翻譯並排版已確認字幕…";
+  if (!progress || progress.phase === "PREPARING") return "正在檢查來源與媒體資訊…";
+  if (progress.phase === "TRANSLATING_SUBTITLES") return "正在翻譯並排版已確認字幕…";
   if (progress.phase === "FINALIZING") return "正在驗證並完成 MP4…";
   return "正在編碼串連預覽…";
 }
@@ -125,15 +123,11 @@ export function ConcatRenderModal({
   onPurposeChange,
   onClose,
 }: ConcatRenderModalProps) {
-  const [transitionSeconds, setTransitionSeconds] =
-    useState<TransitionDurationSec>(0.3);
-  const [resolution, setResolution] = useState<PreviewResolution>(
-    initialResolution ?? "480P",
-  );
+  const [transitionSeconds, setTransitionSeconds] = useState<TransitionDurationSec>(0.3);
+  const [resolution, setResolution] = useState<PreviewResolution>(initialResolution ?? "480P");
   const [videoCodec, setVideoCodec] = useState<RenderVideoCodec>("H265_QSV");
   const [includeWatermark, setIncludeWatermark] = useState(true);
-  const [youtubeHandoffMode, setYoutubeHandoffMode] =
-    useState<YoutubeHandoffMode>("CHROME_DRAG_DROP");
+  const [youtubeHandoffMode, setYoutubeHandoffMode] = useState<YoutubeHandoffMode>("CHROME_DRAG_DROP");
   const [output, setOutput] = useState<OutputSelection>();
   const [renderEstimate, setRenderEstimate] = useState<ConcatRenderEstimate>();
   const [estimateBusy, setEstimateBusy] = useState(false);
@@ -147,32 +141,20 @@ export function ConcatRenderModal({
   const [showYoutubeSettings, setShowYoutubeSettings] = useState(false);
   const [youtubeSettingsRevision, setYoutubeSettingsRevision] = useState(0);
   const [outputOpenError, setOutputOpenError] = useState<string>();
-  const [platformHandoffBusy, setPlatformHandoffBusy] = useState<
-    "YOUTUBE" | "BILIBILI" | "TIKTOK"
-  >();
+  const [platformHandoffBusy, setPlatformHandoffBusy] = useState<"YOUTUBE" | "BILIBILI" | "TIKTOK">();
   const [platformHandoffNotice, setPlatformHandoffNotice] = useState<string>();
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const isIntro = purpose === "INTRO";
   const isClip = purpose === "CLIP";
   const isMain = purpose === "CONCAT";
   const isYoutubeEligible = isMain || isIntro;
-  const purposeTitle = isIntro
-    ? "產出 Intro 預覽"
-    : isClip
-      ? "輸出最高 4K 時間段"
-      : "產出串連預覽";
-  const historyTitle = isIntro
-    ? "曾經輸出的片頭預覽"
-    : isClip
-      ? "曾經輸出的 4K 時間段"
-      : "曾經輸出的正片預覽";
-  const [prependIntro, setPrependIntro] = useState(
-    () => isMain && Boolean(introClips?.length),
-  );
+  const purposeTitle = isIntro ? "產出 Intro 預覽" : isClip ? "輸出最高 4K 時間段" : "產出串連預覽";
+  const historyTitle = isIntro ? "曾經輸出的片頭預覽" : isClip ? "曾經輸出的 4K 時間段" : "曾經輸出的正片預覽";
+  const [prependIntro, setPrependIntro] = useState(() => isMain && Boolean(introClips?.length));
   const [autoUploadEnabled, setAutoUploadEnabled] = useState(() => isMain);
-  const [autoUploadStatus, setAutoUploadStatus] = useState<
-    "DISABLED" | "ARMED" | "COUNTING" | "CANCELLED" | "OPENED"
-  >(() => (isMain ? "ARMED" : "DISABLED"));
+  const [autoUploadStatus, setAutoUploadStatus] = useState<"DISABLED" | "ARMED" | "COUNTING" | "CANCELLED" | "OPENED">(
+    () => (isMain ? "ARMED" : "DISABLED"),
+  );
   const [subtitleBurnIn, setSubtitleBurnIn] = useState<SubtitleBurnInOptions>({
     enabled: false,
     tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }],
@@ -180,29 +162,23 @@ export function ConcatRenderModal({
   });
   const [includeBgm, setIncludeBgm] = useState(() => isMain);
   const [bgmScopes, setBgmScopes] = useState<BgmScopeSelection>(() => ({ intro: true, main: true }));
-  const [audioProtection, setAudioProtection] = useState<AudioProtectionOptions>(
-    () => ({ ...DEFAULT_AUDIO_PROTECTION_OPTIONS }),
-  );
-  const [mainStartCard, setMainStartCard] = useState<MainStartCardOptions>(
-    () => ({
-      ...DEFAULT_MAIN_START_CARD_OPTIONS,
-      line1: projectName?.trim() || DEFAULT_MAIN_START_CARD_OPTIONS.line1,
-    }),
-  );
+  const [audioProtection, setAudioProtection] = useState<AudioProtectionOptions>(() => ({
+    ...DEFAULT_AUDIO_PROTECTION_OPTIONS,
+  }));
+  const [mainStartCard, setMainStartCard] = useState<MainStartCardOptions>(() => ({
+    ...DEFAULT_MAIN_START_CARD_OPTIONS,
+    line1: projectName?.trim() || DEFAULT_MAIN_START_CARD_OPTIONS.line1,
+  }));
   const [mainStartCardConfirmed, setMainStartCardConfirmed] = useState(false);
   const [showMainStartCard, setShowMainStartCard] = useState(false);
-  const [uploadCountdownSeconds, setUploadCountdownSeconds] =
-    useState<number>();
+  const [uploadCountdownSeconds, setUploadCountdownSeconds] = useState<number>();
   const preferencesTouchedRef = useRef(false);
   const effectiveIntroClips = useMemo(
     () => introSegmentsForOutput(introClips ?? [], introSegmentMaxDurationMs),
     [introClips, introSegmentMaxDurationMs],
   );
   const cappedIntroCount = useMemo(
-    () =>
-      (introClips ?? []).filter(
-        (clip) => clip.outMs - clip.inMs > introSegmentMaxDurationMs,
-      ).length,
+    () => (introClips ?? []).filter((clip) => clip.outMs - clip.inMs > introSegmentMaxDurationMs).length,
     [introClips, introSegmentMaxDurationMs],
   );
   const renderItems = useMemo(
@@ -232,9 +208,7 @@ export function ConcatRenderModal({
             ...(mainClips ?? []).map((clip, index) => ({
               key: `${clip.assetId}:${clip.inMs}:${clip.outMs}:${clip.mediaInsertionId ?? "main"}:${index}`,
               assetId: clip.assetId,
-              fileName:
-                assets.find((asset) => asset.id === clip.assetId)?.fileName ??
-                clip.assetId,
+              fileName: assets.find((asset) => asset.id === clip.assetId)?.fileName ?? clip.assetId,
               inMs: clip.inMs,
               outMs: clip.outMs,
               mediaInsertionId: clip.mediaInsertionId,
@@ -247,12 +221,9 @@ export function ConcatRenderModal({
   const prepareAutomaticOutput = async (preserveExistingError = false) => {
     if (!preserveExistingError) setError(undefined);
     try {
-      setOutput(
-        await window.sourceApp.prepareConcatOutput(suggestedFileName(purpose)),
-      );
+      setOutput(await window.sourceApp.prepareConcatOutput(suggestedFileName(purpose)));
     } catch (reason) {
-      if (!preserveExistingError)
-        setError(reason instanceof Error ? reason.message : String(reason));
+      if (!preserveExistingError) setError(reason instanceof Error ? reason.message : String(reason));
     }
   };
 
@@ -264,79 +235,50 @@ export function ConcatRenderModal({
       .then((preferences) => {
         if (preferencesTouchedRef.current) return;
         setTransitionSeconds(preferences.renderDefaults.transitionSeconds);
-        setResolution(
-          isClip
-            ? "4K"
-            : (initialResolution ?? preferences.renderDefaults.resolution),
-        );
+        setResolution(isClip ? "4K" : (initialResolution ?? preferences.renderDefaults.resolution));
         // Older renderer harnesses and v0.49 preference files may omit the
         // field; the persisted v0.50 defaults are H265_QSV.
         setVideoCodec(preferences.renderDefaults.videoCodec ?? "H265");
-        setIncludeWatermark(
-          preferences.renderDefaults.includeWatermark !== false,
-        );
+        setIncludeWatermark(preferences.renderDefaults.includeWatermark !== false);
         setAudioProtection({
           ...DEFAULT_AUDIO_PROTECTION_OPTIONS,
           ...(preferences.renderDefaults.audioProtection ?? {}),
         });
         setBgmScopes({ intro: true, main: true, ...(preferences.renderDefaults.mainBgmScopes ?? {}) });
-        setYoutubeHandoffMode(
-          preferences.renderDefaults.youtubeHandoffMode ?? "CHROME_DRAG_DROP",
-        );
+        setYoutubeHandoffMode(preferences.renderDefaults.youtubeHandoffMode ?? "CHROME_DRAG_DROP");
         if (isYoutubeEligible)
           setSubtitleBurnIn({
             ...preferences.subtitleBurnInDefaults,
             styleProfile: preferences.subtitlePreviewStyle,
           });
-        if (isIntro)
-          setIncludeBgm(preferences.renderDefaults.introPreviewIncludeBgm);
-        if (isMain)
-          setIncludeBgm(preferences.renderDefaults.mainPreviewIncludeBgm);
+        if (isIntro) setIncludeBgm(preferences.renderDefaults.introPreviewIncludeBgm);
+        if (isMain) setIncludeBgm(preferences.renderDefaults.mainPreviewIncludeBgm);
         if (isMain) {
-          const shouldPrepend =
-            Boolean(introClips?.length) &&
-            preferences.renderDefaults.prependIntro;
+          const shouldPrepend = Boolean(introClips?.length) && preferences.renderDefaults.prependIntro;
           setPrependIntro(shouldPrepend);
           setMainStartCard(
             preferences.renderDefaults.mainStartCard ?? {
               ...DEFAULT_MAIN_START_CARD_OPTIONS,
-              line1:
-                projectName?.trim() || DEFAULT_MAIN_START_CARD_OPTIONS.line1,
+              line1: projectName?.trim() || DEFAULT_MAIN_START_CARD_OPTIONS.line1,
             },
           );
           setMainStartCardConfirmed(false);
           if (shouldPrepend) setShowMainStartCard(true);
           setAutoUploadEnabled(preferences.renderDefaults.autoUpload);
-          setAutoUploadStatus(
-            preferences.renderDefaults.autoUpload ? "ARMED" : "DISABLED",
-          );
+          setAutoUploadStatus(preferences.renderDefaults.autoUpload ? "ARMED" : "DISABLED");
         }
       })
-      .catch((reason: unknown) =>
-        setError(reason instanceof Error ? reason.message : String(reason)),
-      );
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
     return () => window.sourceApp.clearConcatProgressListeners();
-  }, [
-    initialResolution,
-    introClips?.length,
-    isClip,
-    isIntro,
-    isMain,
-    isYoutubeEligible,
-    projectName,
-  ]);
+  }, [initialResolution, introClips?.length, isClip, isIntro, isMain, isYoutubeEligible, projectName]);
 
   const rememberRenderDefaults = (
-    update: Parameters<
-      typeof window.sourceApp.updateUserPreferences
-    >[0]["renderDefaults"],
+    update: Parameters<typeof window.sourceApp.updateUserPreferences>[0]["renderDefaults"],
   ) => {
     preferencesTouchedRef.current = true;
     void window.sourceApp
       .updateUserPreferences({ renderDefaults: update })
-      .catch((reason: unknown) =>
-        setError(reason instanceof Error ? reason.message : String(reason)),
-      );
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
   };
 
   const updateSubtitleBurnIn = (next: SubtitleBurnInOptions) => {
@@ -344,9 +286,7 @@ export function ConcatRenderModal({
     setSubtitleBurnIn(next);
     void window.sourceApp
       .updateUserPreferences({ subtitleBurnInDefaults: next })
-      .catch((reason: unknown) =>
-        setError(reason instanceof Error ? reason.message : String(reason)),
-      );
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
   };
 
   // The checkbox must always remain usable for turning permanent subtitle burn-in
@@ -365,13 +305,8 @@ export function ConcatRenderModal({
     updateSubtitleBurnIn({ ...subtitleBurnIn, enabled });
   };
 
-  const patchSubtitleTrack = (
-    index: number,
-    patch: Partial<SubtitleBurnInOptions["tracks"][number]>,
-  ) => {
-    const tracks = subtitleBurnIn.tracks.map((track, current) =>
-      current === index ? { ...track, ...patch } : track,
-    );
+  const patchSubtitleTrack = (index: number, patch: Partial<SubtitleBurnInOptions["tracks"][number]>) => {
+    const tracks = subtitleBurnIn.tracks.map((track, current) => (current === index ? { ...track, ...patch } : track));
     updateSubtitleBurnIn({ ...subtitleBurnIn, tracks });
   };
 
@@ -400,9 +335,7 @@ export function ConcatRenderModal({
         subtitleBurnInDefaults: next,
         subtitlePreviewStyle: styleProfile,
       })
-      .catch((reason: unknown) =>
-        setError(reason instanceof Error ? reason.message : String(reason)),
-      );
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
   };
 
   useEffect(() => {
@@ -414,8 +347,7 @@ export function ConcatRenderModal({
       return;
     }
     const timer = window.setTimeout(
-      () =>
-        setUploadCountdownSeconds((current) => Math.max(0, (current ?? 0) - 1)),
+      () => setUploadCountdownSeconds((current) => Math.max(0, (current ?? 0) - 1)),
       1_000,
     );
     return () => window.clearTimeout(timer);
@@ -430,29 +362,67 @@ export function ConcatRenderModal({
     );
   }, [renderItems, transitionSeconds]);
 
-  const totalEstimatedDurationMs = useMemo(() => estimatedDurationMs === undefined ? undefined : Math.max(0,
-    estimatedDurationMs + (isMain && prependIntro
-      ? mainStartCard.durationSeconds * 1000 + (mainStartCard.transitionStyle === "HARD_CUT" ? transitionSeconds * 1000 : -transitionSeconds * 1000)
-      : 0),
-  ), [estimatedDurationMs, isMain, mainStartCard.durationSeconds, mainStartCard.transitionStyle, prependIntro, transitionSeconds]);
+  const totalEstimatedDurationMs = useMemo(
+    () =>
+      estimatedDurationMs === undefined
+        ? undefined
+        : Math.max(
+            0,
+            estimatedDurationMs +
+              (isMain && prependIntro
+                ? mainStartCard.durationSeconds * 1000 +
+                  (mainStartCard.transitionStyle === "HARD_CUT" ? transitionSeconds * 1000 : -transitionSeconds * 1000)
+                : 0),
+          ),
+    [
+      estimatedDurationMs,
+      isMain,
+      mainStartCard.durationSeconds,
+      mainStartCard.transitionStyle,
+      prependIntro,
+      transitionSeconds,
+    ],
+  );
 
   useEffect(() => {
-    if (!output || totalEstimatedDurationMs === undefined || !window.sourceApp.estimateConcatRender) { setRenderEstimate(undefined); setEstimateError(undefined); return; }
+    if (!output || totalEstimatedDurationMs === undefined || !window.sourceApp.estimateConcatRender) {
+      setRenderEstimate(undefined);
+      setEstimateError(undefined);
+      return;
+    }
     let active = true;
     setEstimateBusy(true);
-    void window.sourceApp.estimateConcatRender({ outputToken: output.token, expectedDurationMs: totalEstimatedDurationMs, resolution, videoCodec })
-      .then((estimate) => { if (active) { setRenderEstimate(estimate); setEstimateError(estimate.canRender ? undefined : estimate.warning); } })
-      .catch((reason: unknown) => { if (active) { setRenderEstimate(undefined); setEstimateError(reason instanceof Error ? reason.message : String(reason)); } })
-      .finally(() => { if (active) setEstimateBusy(false); });
-    return () => { active = false; };
+    void window.sourceApp
+      .estimateConcatRender({
+        outputToken: output.token,
+        expectedDurationMs: totalEstimatedDurationMs,
+        resolution,
+        videoCodec,
+      })
+      .then((estimate) => {
+        if (active) {
+          setRenderEstimate(estimate);
+          setEstimateError(estimate.canRender ? undefined : estimate.warning);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setRenderEstimate(undefined);
+          setEstimateError(reason instanceof Error ? reason.message : String(reason));
+        }
+      })
+      .finally(() => {
+        if (active) setEstimateBusy(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [output?.token, resolution, totalEstimatedDurationMs, videoCodec]);
 
   const chooseOutput = async () => {
     setError(undefined);
     try {
-      const selected = await window.sourceApp.chooseConcatOutput(
-        suggestedFileName(purpose),
-      );
+      const selected = await window.sourceApp.chooseConcatOutput(suggestedFileName(purpose));
       if (selected) setOutput(selected);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -467,16 +437,33 @@ export function ConcatRenderModal({
       return;
     }
     if (window.sourceApp.setTimelineTransitionSeconds) {
-      try { await window.sourceApp.setTimelineTransitionSeconds(transitionSeconds); }
-      catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); return; }
+      try {
+        await window.sourceApp.setTimelineTransitionSeconds(transitionSeconds);
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+        return;
+      }
     }
     if (window.sourceApp.estimateConcatRender && totalEstimatedDurationMs !== undefined) {
       try {
-        const latestEstimate = await window.sourceApp.estimateConcatRender({ outputToken: output.token, expectedDurationMs: totalEstimatedDurationMs, resolution, videoCodec });
+        const latestEstimate = await window.sourceApp.estimateConcatRender({
+          outputToken: output.token,
+          expectedDurationMs: totalEstimatedDurationMs,
+          resolution,
+          videoCodec,
+        });
         setRenderEstimate(latestEstimate);
         setEstimateError(latestEstimate.canRender ? undefined : latestEstimate.warning);
-        if (!latestEstimate.canRender) { setError(latestEstimate.warning ?? "磁碟空間不足，本次不會開始轉檔。"); return; }
-      } catch (reason) { const message = reason instanceof Error ? reason.message : String(reason); setEstimateError(message); setError(message); return; }
+        if (!latestEstimate.canRender) {
+          setError(latestEstimate.warning ?? "磁碟空間不足，本次不會開始轉檔。");
+          return;
+        }
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message : String(reason);
+        setEstimateError(message);
+        setError(message);
+        return;
+      }
     }
     setRendering(true);
     setCancelling(false);
@@ -496,9 +483,7 @@ export function ConcatRenderModal({
           assetId: item.assetId,
           inMs: item.inMs,
           outMs: item.outMs,
-          ...(item.mediaInsertionId
-            ? { mediaInsertionId: item.mediaInsertionId }
-            : {}),
+          ...(item.mediaInsertionId ? { mediaInsertionId: item.mediaInsertionId } : {}),
         })),
         transitionSeconds,
         resolution,
@@ -507,9 +492,7 @@ export function ConcatRenderModal({
         audioProtection,
         purpose,
         prependIntro: isMain && prependIntro,
-        subtitleBurnIn: isYoutubeEligible
-          ? subtitleBurnIn
-          : { enabled: false, tracks: [] },
+        subtitleBurnIn: isYoutubeEligible ? subtitleBurnIn : { enabled: false, tracks: [] },
         includeBgm: isClip ? false : includeBgm,
         ...(isMain ? { bgmScopes: { intro: prependIntro && bgmScopes.intro, main: bgmScopes.main } } : {}),
         estimatedDurationMs: totalEstimatedDurationMs,
@@ -533,11 +516,7 @@ export function ConcatRenderModal({
       }));
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason);
-      setError(
-        message.includes("取消")
-          ? "已取消產出；未留下不完整的輸出檔。"
-          : message,
-      );
+      setError(message.includes("取消") ? "已取消產出；未留下不完整的輸出檔。" : message);
       await prepareAutomaticOutput(true);
       setProgress(undefined);
     } finally {
@@ -562,14 +541,9 @@ export function ConcatRenderModal({
     setOutputOpenError(undefined);
     setPlatformHandoffNotice(undefined);
     try {
-      setPlatformHandoffNotice(
-        (await window.sourceApp.openPlatformUpload(result.jobId, platform))
-          .message,
-      );
+      setPlatformHandoffNotice((await window.sourceApp.openPlatformUpload(result.jobId, platform)).message);
     } catch (reason) {
-      setOutputOpenError(
-        reason instanceof Error ? reason.message : String(reason),
-      );
+      setOutputOpenError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setPlatformHandoffBusy(undefined);
     }
@@ -581,14 +555,9 @@ export function ConcatRenderModal({
     setOutputOpenError(undefined);
     setPlatformHandoffNotice(undefined);
     try {
-      setPlatformHandoffNotice(
-        (await window.sourceApp.prepareYoutubeChromeHandoff(result.jobId))
-          .message,
-      );
+      setPlatformHandoffNotice((await window.sourceApp.prepareYoutubeChromeHandoff(result.jobId)).message);
     } catch (reason) {
-      setOutputOpenError(
-        reason instanceof Error ? reason.message : String(reason),
-      );
+      setOutputOpenError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setPlatformHandoffBusy(undefined);
     }
@@ -596,30 +565,15 @@ export function ConcatRenderModal({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section
-        className="concat-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={purposeTitle}
-      >
+      <section className="concat-modal" role="dialog" aria-modal="true" aria-label={purposeTitle}>
         <header className="modal-header">
           <div>
             <span className="eyebrow">
-              {isIntro
-                ? "INTRO PREVIEW OUTPUT"
-                : isClip
-                  ? "SOURCE-BASED 4K CLIP"
-                  : "CONCAT PREVIEW OUTPUT"}
+              {isIntro ? "INTRO PREVIEW OUTPUT" : isClip ? "SOURCE-BASED 4K CLIP" : "CONCAT PREVIEW OUTPUT"}
             </span>
             <h2>{purposeTitle}</h2>
           </div>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="關閉"
-            disabled={rendering}
-            onClick={onClose}
-          >
+          <button className="icon-button" type="button" aria-label="關閉" disabled={rendering} onClick={onClose}>
             ×
           </button>
         </header>
@@ -628,12 +582,34 @@ export function ConcatRenderModal({
           <fieldset className="preview-purpose-selector">
             <legend>這次要輸出哪一段？</legend>
             <label className={isMain ? "is-selected" : ""}>
-              <input type="radio" name="preview-purpose" checked={isMain} disabled={rendering} onChange={() => onPurposeChange("CONCAT")} />
-              <span><strong>正片預覽</strong><small>依目前正片順序輸出；可選擇在前方串接片頭。</small></span>
+              <input
+                type="radio"
+                name="preview-purpose"
+                checked={isMain}
+                disabled={rendering}
+                onChange={() => onPurposeChange("CONCAT")}
+              />
+              <span>
+                <strong>正片預覽</strong>
+                <small>依目前正片順序輸出；可選擇在前方串接片頭。</small>
+              </span>
             </label>
             <label className={isIntro ? "is-selected" : !introClips?.length ? "is-disabled" : ""}>
-              <input type="radio" name="preview-purpose" checked={isIntro} disabled={rendering || !introClips?.length} onChange={() => onPurposeChange("INTRO")} />
-              <span><strong>僅片頭預覽</strong><small>{introClips?.length ? `只輸出目前 ${introClips.length} 個片頭片段，完成後可上傳 YouTube 測試。` : "目前尚無片頭片段，請先到片頭頁建立。"}</small></span>
+              <input
+                type="radio"
+                name="preview-purpose"
+                checked={isIntro}
+                disabled={rendering || !introClips?.length}
+                onChange={() => onPurposeChange("INTRO")}
+              />
+              <span>
+                <strong>僅片頭預覽</strong>
+                <small>
+                  {introClips?.length
+                    ? `只輸出目前 ${introClips.length} 個片頭片段，完成後可上傳 YouTube 測試。`
+                    : "目前尚無片頭片段，請先到片頭頁建立。"}
+                </small>
+              </span>
             </label>
           </fieldset>
         )}
@@ -642,9 +618,7 @@ export function ConcatRenderModal({
           <div className="concat-complete">
             <span className="complete-mark">✓</span>
             <div>
-              <span className="eyebrow">
-                {result.cancelled ? "CANCELLED PREVIEW SAVED" : "PREVIEW READY"}
-              </span>
+              <span className="eyebrow">{result.cancelled ? "CANCELLED PREVIEW SAVED" : "PREVIEW READY"}</span>
               <h3>
                 {result.cancelled
                   ? "已停止產出並完成較短的可播放 MP4"
@@ -666,11 +640,7 @@ export function ConcatRenderModal({
               <p className="inline-notice">
                 已永久嵌入{" "}
                 {result.subtitleBurnedLanguages
-                  .map(
-                    (language) =>
-                      SUBTITLE_LANGUAGES.find((item) => item.value === language)
-                        ?.label ?? language,
-                  )
+                  .map((language) => SUBTITLE_LANGUAGES.find((item) => item.value === language)?.label ?? language)
                   .join("＋")}{" "}
                 字幕；翻譯來源：
                 {result.subtitleTranslationProviders?.join("、")}。
@@ -678,7 +648,8 @@ export function ConcatRenderModal({
             ) : null}
             {result.audioProtectionApplied && (
               <p className="inline-notice">
-                已套用本機人聲／突發聲保護、平滑壓低包絡線、Compressor 與 {result.audioPeakCeilingDb ?? -1} dB Peak Ceiling；請播放完成檔人工確認保留的環境聲是否自然。
+                已套用本機人聲／突發聲保護、平滑壓低包絡線、Compressor 與 {result.audioPeakCeilingDb ?? -1} dB Peak
+                Ceiling；請播放完成檔人工確認保留的環境聲是否自然。
               </p>
             )}
             <dl className="result-facts">
@@ -721,9 +692,7 @@ export function ConcatRenderModal({
                   <span className="eyebrow">UPLOAD HANDOFF READY</span>
                   <strong>
                     {uploadCountdownSeconds} 秒後開啟 YouTube 上傳確認
-                    {youtubeHandoffMode === "CHROME_DRAG_DROP"
-                      ? "（預設為 Chrome 拖放交接）"
-                      : "（YouTube API 交接）"}
+                    {youtubeHandoffMode === "CHROME_DRAG_DROP" ? "（預設為 Chrome 拖放交接）" : "（YouTube API 交接）"}
                   </strong>
                   <p>
                     {youtubeHandoffMode === "CHROME_DRAG_DROP"
@@ -760,8 +729,7 @@ export function ConcatRenderModal({
             )}
             {isYoutubeEligible && autoUploadStatus === "CANCELLED" && (
               <p className="inline-notice" role="status">
-                已取消 60 秒自動上傳準備；本機 MP4
-                完整保留，仍可按下方按鈕手動上傳。
+                已取消 60 秒自動上傳準備；本機 MP4 完整保留，仍可按下方按鈕手動上傳。
               </p>
             )}
             {outputOpenError && (
@@ -786,11 +754,7 @@ export function ConcatRenderModal({
                   void window.sourceApp
                     .playConcatOutput(result.jobId)
                     .catch((reason: unknown) =>
-                      setOutputOpenError(
-                        reason instanceof Error
-                          ? reason.message
-                          : String(reason),
-                      ),
+                      setOutputOpenError(reason instanceof Error ? reason.message : String(reason)),
                     );
                 }}
               >
@@ -799,9 +763,7 @@ export function ConcatRenderModal({
               <button
                 className="secondary-button"
                 type="button"
-                onClick={() =>
-                  void window.sourceApp.revealConcatOutput(result.jobId)
-                }
+                onClick={() => void window.sourceApp.revealConcatOutput(result.jobId)}
               >
                 在檔案總管中顯示
               </button>
@@ -812,9 +774,7 @@ export function ConcatRenderModal({
                   disabled={Boolean(platformHandoffBusy)}
                   onClick={() => void openYoutubeChromeHandoff()}
                 >
-                  {platformHandoffBusy === "YOUTUBE"
-                    ? "正在準備…"
-                    : "用 Chrome 拖放上傳（預設）"}
+                  {platformHandoffBusy === "YOUTUBE" ? "正在準備…" : "用 Chrome 拖放上傳（預設）"}
                 </button>
               )}
               {isYoutubeEligible && (
@@ -837,9 +797,7 @@ export function ConcatRenderModal({
                   disabled={Boolean(platformHandoffBusy)}
                   onClick={() => void openPlatformHandoff("BILIBILI")}
                 >
-                  {platformHandoffBusy === "BILIBILI"
-                    ? "開啟中…"
-                    : "前往 BiliBili 投稿"}
+                  {platformHandoffBusy === "BILIBILI" ? "開啟中…" : "前往 BiliBili 投稿"}
                 </button>
               )}
               {isMain && (
@@ -849,16 +807,10 @@ export function ConcatRenderModal({
                   disabled={Boolean(platformHandoffBusy)}
                   onClick={() => void openPlatformHandoff("TIKTOK")}
                 >
-                  {platformHandoffBusy === "TIKTOK"
-                    ? "開啟中…"
-                    : "前往 TikTok 投稿"}
+                  {platformHandoffBusy === "TIKTOK" ? "開啟中…" : "前往 TikTok 投稿"}
                 </button>
               )}
-              <button
-                className="primary-button"
-                type="button"
-                onClick={onClose}
-              >
+              <button className="primary-button" type="button" onClick={onClose}>
                 完成
               </button>
             </div>
@@ -876,22 +828,15 @@ export function ConcatRenderModal({
                     <span className="setting-step">01</span>
                     <div>
                       <h3>交接疊化秒數</h3>
-                      <p>
-                        每兩個影片／照片片段交接時，同步套用影像疊化與音訊淡入淡出。
-                      </p>
+                      <p>每兩個影片／照片片段交接時，同步套用影像疊化與音訊淡入淡出。</p>
                     </div>
                   </div>
-                  <div
-                    className="option-grid transition-options"
-                    aria-label="交接疊化秒數"
-                  >
+                  <div className="option-grid transition-options" aria-label="交接疊化秒數">
                     {TRANSITIONS.map((value) => (
                       <button
                         key={value}
                         type="button"
-                        className={
-                          transitionSeconds === value ? "is-selected" : ""
-                        }
+                        className={transitionSeconds === value ? "is-selected" : ""}
                         disabled={rendering}
                         aria-pressed={transitionSeconds === value}
                         onClick={() => {
@@ -919,13 +864,8 @@ export function ConcatRenderModal({
                     </p>
                   </div>
                 </div>
-                <div
-                  className="option-grid resolution-options"
-                  aria-label="預覽解析度"
-                >
-                  {RESOLUTIONS.filter(
-                    (item) => !isClip || item.value === "4K",
-                  ).map((item) => (
+                <div className="option-grid resolution-options" aria-label="預覽解析度">
+                  {RESOLUTIONS.filter((item) => !isClip || item.value === "4K").map((item) => (
                     <button
                       key={item.value}
                       type="button"
@@ -934,8 +874,7 @@ export function ConcatRenderModal({
                       aria-pressed={resolution === item.value}
                       onClick={() => {
                         setResolution(item.value);
-                        if (!isClip)
-                          rememberRenderDefaults({ resolution: item.value });
+                        if (!isClip) rememberRenderDefaults({ resolution: item.value });
                       }}
                     >
                       <strong>{item.label}</strong>
@@ -951,14 +890,12 @@ export function ConcatRenderModal({
                   <div>
                     <h3>影片格式</h3>
                     <p>
-                      新版預設先用 Intel QSV GPU 的 H.265／HEVC；若這台電腦的硬體編碼器無法啟動，再手動改選 CPU 備援。需要舊裝置相容性時可改用 H.264。
+                      新版預設先用 Intel QSV GPU 的 H.265／HEVC；若這台電腦的硬體編碼器無法啟動，再手動改選 CPU
+                      備援。需要舊裝置相容性時可改用 H.264。
                     </p>
                   </div>
                 </div>
-                <div
-                  className="option-grid codec-options"
-                  aria-label="影片格式"
-                >
+                <div className="option-grid codec-options" aria-label="影片格式">
                   <button
                     type="button"
                     className={videoCodec === "H265_QSV" ? "is-selected" : ""}
@@ -990,7 +927,10 @@ export function ConcatRenderModal({
                     className={videoCodec === "H265" ? "is-selected" : ""}
                     disabled={rendering}
                     aria-pressed={videoCodec === "H265"}
-                    onClick={() => { setVideoCodec("H265"); rememberRenderDefaults({ videoCodec: "H265" }); }}
+                    onClick={() => {
+                      setVideoCodec("H265");
+                      rememberRenderDefaults({ videoCodec: "H265" });
+                    }}
                   >
                     <strong>H.265／HEVC · CPU</strong>
                     <span>GPU 不可用時的備援</span>
@@ -1000,7 +940,10 @@ export function ConcatRenderModal({
                     className={videoCodec === "H264" ? "is-selected" : ""}
                     disabled={rendering}
                     aria-pressed={videoCodec === "H264"}
-                    onClick={() => { setVideoCodec("H264"); rememberRenderDefaults({ videoCodec: "H264" }); }}
+                    onClick={() => {
+                      setVideoCodec("H264");
+                      rememberRenderDefaults({ videoCodec: "H264" });
+                    }}
                   >
                     <strong>H.264／AVC · CPU</strong>
                     <span>最廣相容性備援</span>
@@ -1011,14 +954,10 @@ export function ConcatRenderModal({
               {!isClip && (
                 <section className="setting-block watermark-render-setting">
                   <div>
-                    <span className="setting-step">
-                      04
-                    </span>
+                    <span className="setting-step">04</span>
                     <div>
                       <h3>浮水印</h3>
-                      <p>
-                        沿用浮水印設定頁的文字、位置、間隔與顯示時間；只控制這一次輸出是否套用。
-                      </p>
+                      <p>沿用浮水印設定頁的文字、位置、間隔與顯示時間；只控制這一次輸出是否套用。</p>
                     </div>
                   </div>
                   <label className="subtitle-burn-toggle">
@@ -1036,9 +975,7 @@ export function ConcatRenderModal({
                     />
                     <span>
                       <strong>這次輸出套用浮水印（預設勾選）</strong>
-                      <small>
-                        取消只影響本次轉檔，不會清除浮水印設定，也不會修改來源。
-                      </small>
+                      <small>取消只影響本次轉檔，不會清除浮水印設定，也不會修改來源。</small>
                     </span>
                   </label>
                 </section>
@@ -1050,10 +987,7 @@ export function ConcatRenderModal({
                     <span className="setting-step">05</span>
                     <div>
                       <h3>MP3 配樂</h3>
-                      <p>
-                        依配樂頁保存的 MP3 時間、source
-                        IN／OUT、淡入淡出與音量混入；素材原音也使用配樂頁的百分比。
-                      </p>
+                      <p>依配樂頁保存的 MP3 時間、source IN／OUT、淡入淡出與音量混入；素材原音也使用配樂頁的百分比。</p>
                     </div>
                   </div>
                   <label className="subtitle-burn-toggle">
@@ -1067,18 +1001,13 @@ export function ConcatRenderModal({
                         setIncludeBgm(enabled);
                         if (enabled && isMain && !bgmScopes.intro && !bgmScopes.main) updateBgmScopes({ main: true });
                         rememberRenderDefaults(
-                          isIntro
-                            ? { introPreviewIncludeBgm: enabled }
-                            : { mainPreviewIncludeBgm: enabled },
+                          isIntro ? { introPreviewIncludeBgm: enabled } : { mainPreviewIncludeBgm: enabled },
                         );
                       }}
                     />
                     <span>
                       <strong>將 MP3 配樂嵌入這次產出的 MP4</strong>
-                      <small>
-                        取消時只播放素材原音；勾選時若 MP3
-                        離線，輸出會安全阻擋並指出檔名。
-                      </small>
+                      <small>取消時只播放素材原音；勾選時若 MP3 離線，輸出會安全阻擋並指出檔名。</small>
                     </span>
                   </label>
                   {isMain && (
@@ -1092,7 +1021,10 @@ export function ConcatRenderModal({
                           disabled={!prependIntro}
                           onChange={(event) => updateBgmScopes({ intro: event.target.checked })}
                         />
-                        <span><strong>片頭</strong><small>只有選片頭時，配樂會在「正片即將開始」提示頁前平滑淡出並停止。</small></span>
+                        <span>
+                          <strong>片頭</strong>
+                          <small>只有選片頭時，配樂會在「正片即將開始」提示頁前平滑淡出並停止。</small>
+                        </span>
                       </label>
                       <label>
                         <input
@@ -1101,9 +1033,14 @@ export function ConcatRenderModal({
                           checked={bgmScopes.main}
                           onChange={(event) => updateBgmScopes({ main: event.target.checked })}
                         />
-                        <span><strong>正片</strong><small>只有選正片時，配樂會在提示頁結束、正片開始時播放。</small></span>
+                        <span>
+                          <strong>正片</strong>
+                          <small>只有選正片時，配樂會在提示頁結束、正片開始時播放。</small>
+                        </span>
                       </label>
-                      {!bgmScopes.main && !(prependIntro && bgmScopes.intro) && <small className="inline-warning">目前未選任何範圍，這次輸出不會混入配樂。</small>}
+                      {!bgmScopes.main && !(prependIntro && bgmScopes.intro) && (
+                        <small className="inline-warning">目前未選任何範圍，這次輸出不會混入配樂。</small>
+                      )}
                     </fieldset>
                   )}
                 </section>
@@ -1124,8 +1061,7 @@ export function ConcatRenderModal({
                       <h3>嵌入影片字幕（最多兩種語言）</h3>
                       <p>
                         使用字幕頁中「已確認」的{isIntro ? "片頭" : "正片"}繁體中文。選擇其他語言時，OpenAI
-                        新的無狀態請求優先，失敗才使用已設定的 Google Cloud
-                        翻譯。
+                        新的無狀態請求優先，失敗才使用已設定的 Google Cloud 翻譯。
                       </p>
                     </div>
                   </div>
@@ -1138,9 +1074,7 @@ export function ConcatRenderModal({
                       type="checkbox"
                       checked={subtitleBurnIn.enabled}
                       disabled={rendering}
-                      onChange={(event) =>
-                        toggleSubtitleBurnIn(event.target.checked)
-                      }
+                      onChange={(event) => toggleSubtitleBurnIn(event.target.checked)}
                     />
                     <span>
                       <strong>將字幕永久嵌入這次 MP4</strong>
@@ -1162,10 +1096,7 @@ export function ConcatRenderModal({
                   {subtitleBurnIn.enabled && (
                     <div className="subtitle-track-settings">
                       {subtitleBurnIn.tracks.map((track, index) => (
-                        <div
-                          className="subtitle-track-row"
-                          key={`${index}:${track.language}`}
-                        >
+                        <div className="subtitle-track-row" key={`${index}:${track.language}`}>
                           <strong>第 {index + 1} 種語言</strong>
                           <label>
                             語言
@@ -1174,8 +1105,7 @@ export function ConcatRenderModal({
                               value={track.language}
                               onChange={(event) =>
                                 patchSubtitleTrack(index, {
-                                  language: event.target
-                                    .value as SubtitleRenderLanguage,
+                                  language: event.target.value as SubtitleRenderLanguage,
                                 })
                               }
                             >
@@ -1184,9 +1114,7 @@ export function ConcatRenderModal({
                                   key={language.value}
                                   value={language.value}
                                   disabled={subtitleBurnIn.tracks.some(
-                                    (item, itemIndex) =>
-                                      itemIndex !== index &&
-                                      item.language === language.value,
+                                    (item, itemIndex) => itemIndex !== index && item.language === language.value,
                                   )}
                                 >
                                   {language.label}
@@ -1201,25 +1129,19 @@ export function ConcatRenderModal({
                               value={track.position}
                               onChange={(event) =>
                                 patchSubtitleTrack(index, {
-                                  position: event.target
-                                    .value as SubtitleRenderPosition,
+                                  position: event.target.value as SubtitleRenderPosition,
                                 })
                               }
                             >
                               {SUBTITLE_POSITIONS.map((position) => (
-                                <option
-                                  key={position.value}
-                                  value={position.value}
-                                >
+                                <option key={position.value} value={position.value}>
                                   {position.label}
                                 </option>
                               ))}
                             </select>
                           </label>
                           <label>
-                            {index === 0
-                              ? "文字大小（與字幕頁預覽一致）"
-                              : "文字大小（1080p 基準）"}
+                            {index === 0 ? "文字大小（與字幕頁預覽一致）" : "文字大小（1080p 基準）"}
                             <input
                               aria-label={`第 ${index + 1} 種字幕文字大小`}
                               type="number"
@@ -1239,10 +1161,7 @@ export function ConcatRenderModal({
                                   return;
                                 }
                                 patchSubtitleTrack(index, {
-                                  fontSize1080p: Math.max(
-                                    24,
-                                    Math.min(96, value || 24),
-                                  ),
+                                  fontSize1080p: Math.max(24, Math.min(96, value || 24)),
                                 });
                               }}
                             />
@@ -1269,15 +1188,8 @@ export function ConcatRenderModal({
                           className="secondary-button"
                           type="button"
                           onClick={() => {
-                            const used = new Set(
-                              subtitleBurnIn.tracks.map(
-                                (track) => track.language,
-                              ),
-                            );
-                            const language =
-                              SUBTITLE_LANGUAGES.find(
-                                (item) => !used.has(item.value),
-                              )?.value ?? "en";
+                            const used = new Set(subtitleBurnIn.tracks.map((track) => track.language));
+                            const language = SUBTITLE_LANGUAGES.find((item) => !used.has(item.value))?.value ?? "en";
                             updateSubtitleBurnIn({
                               ...subtitleBurnIn,
                               tracks: [
@@ -1295,7 +1207,8 @@ export function ConcatRenderModal({
                         </button>
                       )}
                       <small>
-                        第一種字幕沿用字幕頁的 480p 預覽字級與位置，輸出時依解析度等比例換算；第二種語言可另設位置與 1080p 字級。若選在相同位置，App 會自動分層避免互相覆蓋。
+                        第一種字幕沿用字幕頁的 480p 預覽字級與位置，輸出時依解析度等比例換算；第二種語言可另設位置與
+                        1080p 字級。若選在相同位置，App 會自動分層避免互相覆蓋。
                       </small>
                     </div>
                   )}
@@ -1304,14 +1217,10 @@ export function ConcatRenderModal({
 
               <section className="setting-block">
                 <div>
-                  <span className="setting-step">
-                    {isClip ? "05" : "08"}
-                  </span>
+                  <span className="setting-step">{isClip ? "05" : "08"}</span>
                   <div>
                     <h3>輸出位置</h3>
-                    <p>
-                      自動沿用上一次指定的資料夾並產生不覆寫舊檔的名稱；只有按下此欄才另外指定。
-                    </p>
+                    <p>自動沿用上一次指定的資料夾並產生不覆寫舊檔的名稱；只有按下此欄才另外指定。</p>
                   </div>
                 </div>
                 <button
@@ -1321,16 +1230,8 @@ export function ConcatRenderModal({
                   disabled={rendering}
                   onClick={() => void chooseOutput()}
                 >
-                  <span>
-                    {output?.automatic
-                      ? "自動位置"
-                      : output
-                        ? "已另外指定"
-                        : "正在準備"}
-                  </span>
-                  <strong title={output?.displayPath}>
-                    {output?.displayPath ?? "正在依上次位置產生檔名…"}
-                  </strong>
+                  <span>{output?.automatic ? "自動位置" : output ? "已另外指定" : "正在準備"}</span>
+                  <strong title={output?.displayPath}>{output?.displayPath ?? "正在依上次位置產生檔名…"}</strong>
                 </button>
                 <button
                   className="secondary-button regenerate-output-button"
@@ -1342,16 +1243,53 @@ export function ConcatRenderModal({
                 </button>
               </section>
 
-              <section className={`render-preflight ${renderEstimate && !renderEstimate.canRender ? "is-blocked" : ""}`} aria-label="轉檔前容量與時間預估">
-                <header><div><span className="eyebrow">RENDER PREFLIGHT</span><h3>轉檔前預估</h3></div>{estimateBusy && <span className="spinner" />}</header>
-                {renderEstimate ? <dl>
-                  <div><dt>預估檔案大小</dt><dd>約 {formatBytes(renderEstimate.estimatedOutputBytes)}</dd></div>
-                  <div><dt>預估所需時間</dt><dd>約 {formatDuration(renderEstimate.estimatedRenderTimeMs)}</dd></div>
-                  <div><dt>{renderEstimate.driveRoot || "輸出磁碟"} 目前剩餘</dt><dd>{formatBytes(renderEstimate.currentFreeBytes)}</dd></div>
-                  <div><dt>完成後預估剩餘</dt><dd>{formatBytes(renderEstimate.estimatedFreeAfterBytes)}</dd></div>
-                </dl> : <p>{estimateError ?? (estimateBusy ? "正在讀取輸出磁碟與編碼設定…" : "選定輸出位置後會顯示預估檔案大小、時間與硬碟餘量。")}</p>}
-                {(estimateError || renderEstimate?.warning) && <p className="render-preflight-warning" role="alert">⚠ {estimateError ?? renderEstimate?.warning}</p>}
-                <small>估算會因畫面複雜度、字幕、浮水印、配樂及其他程式負載而變動；App 會在真正開始前再次檢查。預估完成後若無法保留至少 1 GB，轉檔會被阻擋。</small>
+              <section
+                className={`render-preflight ${renderEstimate && !renderEstimate.canRender ? "is-blocked" : ""}`}
+                aria-label="轉檔前容量與時間預估"
+              >
+                <header>
+                  <div>
+                    <span className="eyebrow">RENDER PREFLIGHT</span>
+                    <h3>轉檔前預估</h3>
+                  </div>
+                  {estimateBusy && <span className="spinner" />}
+                </header>
+                {renderEstimate ? (
+                  <dl>
+                    <div>
+                      <dt>預估檔案大小</dt>
+                      <dd>約 {formatBytes(renderEstimate.estimatedOutputBytes)}</dd>
+                    </div>
+                    <div>
+                      <dt>預估所需時間</dt>
+                      <dd>約 {formatDuration(renderEstimate.estimatedRenderTimeMs)}</dd>
+                    </div>
+                    <div>
+                      <dt>{renderEstimate.driveRoot || "輸出磁碟"} 目前剩餘</dt>
+                      <dd>{formatBytes(renderEstimate.currentFreeBytes)}</dd>
+                    </div>
+                    <div>
+                      <dt>完成後預估剩餘</dt>
+                      <dd>{formatBytes(renderEstimate.estimatedFreeAfterBytes)}</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <p>
+                    {estimateError ??
+                      (estimateBusy
+                        ? "正在讀取輸出磁碟與編碼設定…"
+                        : "選定輸出位置後會顯示預估檔案大小、時間與硬碟餘量。")}
+                  </p>
+                )}
+                {(estimateError || renderEstimate?.warning) && (
+                  <p className="render-preflight-warning" role="alert">
+                    ⚠ {estimateError ?? renderEstimate?.warning}
+                  </p>
+                )}
+                <small>
+                  估算會因畫面複雜度、字幕、浮水印、配樂及其他程式負載而變動；App
+                  會在真正開始前再次檢查。預估完成後若無法保留至少 1 GB，轉檔會被阻擋。
+                </small>
               </section>
 
               {isYoutubeEligible && (
@@ -1361,38 +1299,41 @@ export function ConcatRenderModal({
                     <div>
                       <h3>{isIntro ? "片頭 YouTube 測試上傳" : "片頭串接與 YouTube 上傳交接"}</h3>
                       <p>
-                        {isIntro ? "這次只輸出片頭；完成後可打開 Chrome 上傳頁與檔案總管，或使用 YouTube 官方 API 作不公開測試。" : "片頭可自動放在正片最前方；輸出完成後預設打開 Chrome 上傳頁與檔案總管，由您拖放最新 MP4。"}
+                        {isIntro
+                          ? "這次只輸出片頭；完成後可打開 Chrome 上傳頁與檔案總管，或使用 YouTube 官方 API 作不公開測試。"
+                          : "片頭可自動放在正片最前方；輸出完成後預設打開 Chrome 上傳頁與檔案總管，由您拖放最新 MP4。"}
                       </p>
                     </div>
                   </div>
                   <div className="post-render-options">
-                    {isMain && <label className={!introClips?.length ? "is-disabled" : ""}>
-                      <input
-                        type="checkbox"
-                        checked={prependIntro}
-                        disabled={rendering || !introClips?.length}
-                        onChange={(event) => {
-                          const enabled = event.target.checked;
-                          setPrependIntro(enabled);
-                          setMainStartCardConfirmed(false);
-                          if (enabled) setShowMainStartCard(true);
-                          rememberRenderDefaults({ prependIntro: enabled });
-                        }}
-                      />
-                      <span>
-                        <strong>自動串接已確認片頭＋正片</strong>
-                        <small>
-                          {introClips?.length
-                            ? `目前會在正片前加入 ${introClips.length} 段片頭；勾選後會強制設定 3–7 秒的正片開始提示頁。`
-                            : "目前沒有已確認的片頭；請先到 AI 精彩片頭頁建立。"}
-                        </small>
-                      </span>
-                    </label>}
+                    {isMain && (
+                      <label className={!introClips?.length ? "is-disabled" : ""}>
+                        <input
+                          type="checkbox"
+                          checked={prependIntro}
+                          disabled={rendering || !introClips?.length}
+                          onChange={(event) => {
+                            const enabled = event.target.checked;
+                            setPrependIntro(enabled);
+                            setMainStartCardConfirmed(false);
+                            if (enabled) setShowMainStartCard(true);
+                            rememberRenderDefaults({ prependIntro: enabled });
+                          }}
+                        />
+                        <span>
+                          <strong>自動串接已確認片頭＋正片</strong>
+                          <small>
+                            {introClips?.length
+                              ? `目前會在正片前加入 ${introClips.length} 段片頭；勾選後會強制設定 3–7 秒的正片開始提示頁。`
+                              : "目前沒有已確認的片頭；請先到 AI 精彩片頭頁建立。"}
+                          </small>
+                        </span>
+                      </label>
+                    )}
                     {isMain && prependIntro && (
                       <div className="main-start-card-summary">
                         <span>
-                          {mainStartCardConfirmed ? "✓ 已確認" : "尚未確認"} ·{" "}
-                          {mainStartCard.durationSeconds} 秒 · 「
+                          {mainStartCardConfirmed ? "✓ 已確認" : "尚未確認"} · {mainStartCard.durationSeconds} 秒 · 「
                           {mainStartCard.line1}／{mainStartCard.line2}」
                         </span>
                         <button
@@ -1405,11 +1346,7 @@ export function ConcatRenderModal({
                         </button>
                       </div>
                     )}
-                    <div
-                      className="upload-method-options"
-                      role="radiogroup"
-                      aria-label="YouTube 上傳方式"
-                    >
+                    <div className="upload-method-options" role="radiogroup" aria-label="YouTube 上傳方式">
                       <label>
                         <input
                           type="radio"
@@ -1425,10 +1362,7 @@ export function ConcatRenderModal({
                         />
                         <span>
                           <strong>Chrome＋檔案總管拖放（預設）</strong>
-                          <small>
-                            App 打開 YouTube Studio 並選取最新
-                            MP4；您用滑鼠拖入上傳區。
-                          </small>
+                          <small>App 打開 YouTube Studio 並選取最新 MP4；您用滑鼠拖入上傳區。</small>
                         </span>
                       </label>
                       <label>
@@ -1446,9 +1380,7 @@ export function ConcatRenderModal({
                         />
                         <span>
                           <strong>YouTube 官方 API</strong>
-                          <small>
-                            沿用現有的頻道連線、標題、縮圖與說明確認流程。
-                          </small>
+                          <small>沿用現有的頻道連線、標題、縮圖與說明確認流程。</small>
                         </span>
                       </label>
                     </div>
@@ -1459,19 +1391,15 @@ export function ConcatRenderModal({
                         disabled={rendering}
                         onChange={(event) => {
                           setAutoUploadEnabled(event.target.checked);
-                          setAutoUploadStatus(
-                            event.target.checked ? "ARMED" : "DISABLED",
-                          );
+                          setAutoUploadStatus(event.target.checked ? "ARMED" : "DISABLED");
                           rememberRenderDefaults({
                             autoUpload: event.target.checked,
                           });
                         }}
                       />
                       <span>
-                          <strong>輸出後自動準備 YouTube 上傳交接</strong>
-                        <small>
-                          完成後倒數 60 秒；不會替您按下公開或發布。
-                        </small>
+                        <strong>輸出後自動準備 YouTube 上傳交接</strong>
+                        <small>完成後倒數 60 秒；不會替您按下公開或發布。</small>
                       </span>
                     </label>
                   </div>
@@ -1492,8 +1420,7 @@ export function ConcatRenderModal({
                   <progress max="100" value={progress?.percent ?? 0} />
                   <small>
                     可取消；若已有足夠畫面，App 會要求編碼器安全寫完 MP4
-                    結尾並保留較短成品。太早取消、無法驗證播放時才會清除
-                    partial。來源不受影響。
+                    結尾並保留較短成品。太早取消、無法驗證播放時才會清除 partial。來源不受影響。
                   </small>
                 </section>
               )}
@@ -1510,17 +1437,19 @@ export function ConcatRenderModal({
                   </button>
                 ) : (
                   <>
-                    <button
-                      className="secondary-button"
-                      type="button"
-                      onClick={onClose}
-                    >
+                    <button className="secondary-button" type="button" onClick={onClose}>
                       返回
                     </button>
                     <button
                       className="primary-button"
                       type="button"
-                      disabled={!output || renderItems.length < 1 || estimateBusy || renderEstimate?.canRender === false || Boolean(estimateError)}
+                      disabled={
+                        !output ||
+                        renderItems.length < 1 ||
+                        estimateBusy ||
+                        renderEstimate?.canRender === false ||
+                        Boolean(estimateError)
+                      }
                       onClick={() => void startRender()}
                     >
                       OK，開始產出
@@ -1540,14 +1469,12 @@ export function ConcatRenderModal({
                     ? "輸出這一個固定來源時間段，並套用重疊於此時間內的局部放大設定。"
                     : "輸出依照目前素材順序、影片 IN／OUT 與每張照片設定的 3–7 秒顯示時間。"}
               </p>
-              {cappedIntroCount > 0 &&
-                (isIntro || (isMain && prependIntro)) && (
-                  <p className="inline-notice" role="status">
-                    有 {cappedIntroCount}{" "}
-                    段檢看片段超時；實際輸出會保留各段起點，並截取最多{" "}
-                    {formatDuration(introSegmentMaxDurationMs)}。
-                  </p>
-                )}
+              {cappedIntroCount > 0 && (isIntro || (isMain && prependIntro)) && (
+                <p className="inline-notice" role="status">
+                  有 {cappedIntroCount} 段檢看片段超時；實際輸出會保留各段起點，並截取最多{" "}
+                  {formatDuration(introSegmentMaxDurationMs)}。
+                </p>
+              )}
               <ol>
                 {renderItems.map((item, index) => (
                   <li key={item.key}>
@@ -1556,8 +1483,7 @@ export function ConcatRenderModal({
                       <strong title={item.fileName}>{item.fileName}</strong>
                       <small>
                         {item.section === "INTRO" && !isIntro ? "片頭 · " : ""}
-                        {formatDuration(item.inMs)} →{" "}
-                        {formatDuration(item.outMs)}
+                        {formatDuration(item.inMs)} → {formatDuration(item.outMs)}
                       </small>
                     </div>
                   </li>
@@ -1581,9 +1507,7 @@ export function ConcatRenderModal({
                   <span>♫</span>
                   <div>
                     <strong>混音保護</strong>
-                    <small>
-                      片段原音＋BGM 分離控制；預設另套用人聲包絡線、Compressor 與 -1 dB Peak Ceiling
-                    </small>
+                    <small>片段原音＋BGM 分離控制；預設另套用人聲包絡線、Compressor 與 -1 dB Peak Ceiling</small>
                   </div>
                 </div>
               )}
@@ -1617,9 +1541,7 @@ export function ConcatRenderModal({
       {showMainStartCard && isMain && prependIntro && (
         <MainStartCardModal
           value={mainStartCard}
-          backgroundFileName={
-            renderItems.find((item) => item.section === "MAIN")?.fileName
-          }
+          backgroundFileName={renderItems.find((item) => item.section === "MAIN")?.fileName}
           introClips={effectiveIntroClips}
           assets={assets}
           onCancel={() => {

@@ -38,18 +38,34 @@ function streamBody(filePath: string, start?: number, end?: number): BodyInit {
 
 function sourceMimeType(filePath: string): string {
   switch (path.extname(filePath).toLowerCase()) {
-    case ".mp4": case ".m4v": return "video/mp4";
-    case ".mov": return "video/quicktime";
-    case ".webm": return "video/webm";
-    case ".mkv": return "video/x-matroska";
-    case ".mpeg": case ".mpg": return "video/mpeg";
-    case ".wmv": return "video/x-ms-wmv";
-    case ".avi": return "video/x-msvideo";
-    default: return "application/octet-stream";
+    case ".mp4":
+    case ".m4v":
+      return "video/mp4";
+    case ".mov":
+      return "video/quicktime";
+    case ".webm":
+      return "video/webm";
+    case ".mkv":
+      return "video/x-matroska";
+    case ".mpeg":
+    case ".mpg":
+      return "video/mpeg";
+    case ".wmv":
+      return "video/x-ms-wmv";
+    case ".avi":
+      return "video/x-msvideo";
+    default:
+      return "application/octet-stream";
   }
 }
 
-export function registerPreviewProtocol(cache: PreviewCache, store: ProjectStore, photoSoundPath?: string, subtitlePreviews?: SubtitlePreviewService, outputHistory?: OutputHistoryStore): void {
+export function registerPreviewProtocol(
+  cache: PreviewCache,
+  store: ProjectStore,
+  photoSoundPath?: string,
+  subtitlePreviews?: SubtitlePreviewService,
+  outputHistory?: OutputHistoryStore,
+): void {
   protocol.handle("preview-media", async (request) => {
     try {
       const url = new URL(request.url);
@@ -58,33 +74,88 @@ export function registerPreviewProtocol(cache: PreviewCache, store: ProjectStore
         const output = await outputHistory.get(jobId);
         const fileStat = await stat(output.outputPath);
         const range = parseRange(request.headers.get("range"), fileStat.size);
-        const baseHeaders = { "Accept-Ranges": "bytes", "Content-Type": "video/mp4", "Cache-Control": "private, no-store" };
-        if (range) return new Response(streamBody(output.outputPath, range.start, range.end), { status: 206, headers: { ...baseHeaders, "Content-Range": `bytes ${range.start}-${range.end}/${fileStat.size}`, "Content-Length": String(range.end - range.start + 1) } });
-        return new Response(streamBody(output.outputPath), { headers: { ...baseHeaders, "Content-Length": String(fileStat.size) } });
+        const baseHeaders = {
+          "Accept-Ranges": "bytes",
+          "Content-Type": "video/mp4",
+          "Cache-Control": "private, no-store",
+        };
+        if (range)
+          return new Response(streamBody(output.outputPath, range.start, range.end), {
+            status: 206,
+            headers: {
+              ...baseHeaders,
+              "Content-Range": `bytes ${range.start}-${range.end}/${fileStat.size}`,
+              "Content-Length": String(range.end - range.start + 1),
+            },
+          });
+        return new Response(streamBody(output.outputPath), {
+          headers: { ...baseHeaders, "Content-Length": String(fileStat.size) },
+        });
       }
       if (url.hostname === "publish-thumbnail") {
         const candidateId = decodeURIComponent(url.pathname.split("/").filter(Boolean)[0] ?? "");
         const candidate = store.getProject().aiPublishAssets?.thumbnails.find((item) => item.id === candidateId);
         const filePath = candidate?.outputPath;
         const extension = filePath ? path.extname(filePath).toLowerCase() : "";
-        if (!filePath || ![".jpg", ".jpeg", ".png"].includes(extension)) return new Response("Not found", { status: 404 });
+        if (!filePath || ![".jpg", ".jpeg", ".png"].includes(extension))
+          return new Response("Not found", { status: 404 });
         const fileStat = await stat(filePath);
         if (!fileStat.isFile() || fileStat.size <= 0) return new Response("Not found", { status: 404 });
-        return new Response(streamBody(filePath), { headers: { "Content-Length": String(fileStat.size), "Content-Type": extension === ".png" ? "image/png" : "image/jpeg", "Cache-Control": "private, no-store" } });
+        return new Response(streamBody(filePath), {
+          headers: {
+            "Content-Length": String(fileStat.size),
+            "Content-Type": extension === ".png" ? "image/png" : "image/jpeg",
+            "Cache-Control": "private, no-store",
+          },
+        });
       }
       if (url.hostname === "asset" && url.pathname === "/dunes-shutter.mp3" && photoSoundPath) {
         const fileStat = await stat(photoSoundPath);
         const range = parseRange(request.headers.get("range"), fileStat.size);
-        if (range) return new Response(streamBody(photoSoundPath, range.start, range.end), { status: 206, headers: { "Accept-Ranges": "bytes", "Content-Range": `bytes ${range.start}-${range.end}/${fileStat.size}`, "Content-Length": String(range.end - range.start + 1), "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=31536000, immutable" } });
-        return new Response(streamBody(photoSoundPath), { headers: { "Accept-Ranges": "bytes", "Content-Length": String(fileStat.size), "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=31536000, immutable" } });
+        if (range)
+          return new Response(streamBody(photoSoundPath, range.start, range.end), {
+            status: 206,
+            headers: {
+              "Accept-Ranges": "bytes",
+              "Content-Range": `bytes ${range.start}-${range.end}/${fileStat.size}`,
+              "Content-Length": String(range.end - range.start + 1),
+              "Content-Type": "audio/mpeg",
+              "Cache-Control": "private, max-age=31536000, immutable",
+            },
+          });
+        return new Response(streamBody(photoSoundPath), {
+          headers: {
+            "Accept-Ranges": "bytes",
+            "Content-Length": String(fileStat.size),
+            "Content-Type": "audio/mpeg",
+            "Cache-Control": "private, max-age=31536000, immutable",
+          },
+        });
       }
       if (url.hostname === "subtitle" && subtitlePreviews) {
         const cacheKey = url.pathname.split("/").filter(Boolean)[0];
         const filePath = await subtitlePreviews.resolveExisting(cacheKey ?? "");
         const fileStat = await stat(filePath);
         const range = parseRange(request.headers.get("range"), fileStat.size);
-        if (range) return new Response(streamBody(filePath, range.start, range.end), { status: 206, headers: { "Accept-Ranges": "bytes", "Content-Range": `bytes ${range.start}-${range.end}/${fileStat.size}`, "Content-Length": String(range.end - range.start + 1), "Content-Type": "video/mp4", "Cache-Control": "private, max-age=31536000, immutable" } });
-        return new Response(streamBody(filePath), { headers: { "Accept-Ranges": "bytes", "Content-Length": String(fileStat.size), "Content-Type": "video/mp4", "Cache-Control": "private, max-age=31536000, immutable" } });
+        if (range)
+          return new Response(streamBody(filePath, range.start, range.end), {
+            status: 206,
+            headers: {
+              "Accept-Ranges": "bytes",
+              "Content-Range": `bytes ${range.start}-${range.end}/${fileStat.size}`,
+              "Content-Length": String(range.end - range.start + 1),
+              "Content-Type": "video/mp4",
+              "Cache-Control": "private, max-age=31536000, immutable",
+            },
+          });
+        return new Response(streamBody(filePath), {
+          headers: {
+            "Accept-Ranges": "bytes",
+            "Content-Length": String(fileStat.size),
+            "Content-Type": "video/mp4",
+            "Cache-Control": "private, max-age=31536000, immutable",
+          },
+        });
       }
       const parts = url.pathname.split("/").filter(Boolean);
       const assetId = parts[0];
@@ -94,11 +165,15 @@ export function registerPreviewProtocol(cache: PreviewCache, store: ProjectStore
       }
 
       const clipKey = parts[2];
-      const filePath = variant === "VIDEO_CLIP_PROXY"
-        ? await cache.resolveClipExisting(assetId, clipKey ?? "")
-        : await cache.resolveExisting(assetId, variant);
+      const filePath =
+        variant === "VIDEO_CLIP_PROXY"
+          ? await cache.resolveClipExisting(assetId, clipKey ?? "")
+          : await cache.resolveExisting(assetId, variant);
       const fileStat = await stat(filePath);
-      const range = variant === "VIDEO_PROXY" || variant === "VIDEO_CLIP_PROXY" ? parseRange(request.headers.get("range"), fileStat.size) : undefined;
+      const range =
+        variant === "VIDEO_PROXY" || variant === "VIDEO_CLIP_PROXY"
+          ? parseRange(request.headers.get("range"), fileStat.size)
+          : undefined;
       if (range) {
         return new Response(streamBody(filePath, range.start, range.end), {
           status: 206,
@@ -129,20 +204,32 @@ export function registerPreviewProtocol(cache: PreviewCache, store: ProjectStore
     try {
       const url = new URL(request.url);
       const assetId = url.pathname.split("/").filter(Boolean)[0];
-      if (url.hostname !== "asset" || !assetId || !/^[a-f0-9]{64}$/i.test(assetId)) return new Response("Not found", { status: 404 });
+      if (url.hostname !== "asset" || !assetId || !/^[a-f0-9]{64}$/i.test(assetId))
+        return new Response("Not found", { status: 404 });
       const asset = store.getAsset(assetId);
-      if (!asset || asset.kind !== "VIDEO" || asset.sourcePolicy !== "READ_ONLY") return new Response("Not found", { status: 404 });
+      if (!asset || asset.kind !== "VIDEO" || asset.sourcePolicy !== "READ_ONLY")
+        return new Response("Not found", { status: 404 });
       const fileStat = await stat(asset.sourcePath);
       if (!fileStat.isFile()) return new Response("Source unavailable", { status: 404 });
       const range = parseRange(request.headers.get("range"), fileStat.size);
-      const baseHeaders = { "Accept-Ranges": "bytes", "Content-Type": sourceMimeType(asset.sourcePath), "Cache-Control": "private, no-store" };
+      const baseHeaders = {
+        "Accept-Ranges": "bytes",
+        "Content-Type": sourceMimeType(asset.sourcePath),
+        "Cache-Control": "private, no-store",
+      };
       if (range) {
         return new Response(streamBody(asset.sourcePath, range.start, range.end), {
           status: 206,
-          headers: { ...baseHeaders, "Content-Range": `bytes ${range.start}-${range.end}/${fileStat.size}`, "Content-Length": String(range.end - range.start + 1) },
+          headers: {
+            ...baseHeaders,
+            "Content-Range": `bytes ${range.start}-${range.end}/${fileStat.size}`,
+            "Content-Length": String(range.end - range.start + 1),
+          },
         });
       }
-      return new Response(streamBody(asset.sourcePath), { headers: { ...baseHeaders, "Content-Length": String(fileStat.size) } });
+      return new Response(streamBody(asset.sourcePath), {
+        headers: { ...baseHeaders, "Content-Length": String(fileStat.size) },
+      });
     } catch {
       return new Response("Source unavailable", { status: 404 });
     }

@@ -19,7 +19,9 @@ let sources: SourceService;
 let previews: PreviewCache;
 
 async function sha256(filePath: string): Promise<string> {
-  return createHash("sha256").update(await readFile(filePath)).digest("hex");
+  return createHash("sha256")
+    .update(await readFile(filePath))
+    .digest("hex");
 }
 
 beforeAll(async () => {
@@ -30,22 +32,100 @@ beforeAll(async () => {
   const hevcBasePath = path.join(root, "apple-hevc-base.mp4");
   appleHevcMovPath = path.join(root, "iPhone 中文 空格.MOV");
   await runProcess("ffmpeg", [
-    "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0x4477aa:s=640x360",
-    "-frames:v", "1", "-y", imagePath,
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "color=c=0x4477aa:s=640x360",
+    "-frames:v",
+    "1",
+    "-y",
+    imagePath,
   ]);
   await runProcess("ffmpeg", [
-    "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=30",
-    "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000", "-t", "1",
-    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "-y", videoPath,
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc=size=640x360:rate=30",
+    "-f",
+    "lavfi",
+    "-i",
+    "sine=frequency=880:sample_rate=48000",
+    "-t",
+    "1",
+    "-c:v",
+    "libx264",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-shortest",
+    "-y",
+    videoPath,
   ]);
-  await runProcess("ffmpeg", ["-hide_banner", "-loglevel", "error", "-display_rotation:v:0", "90", "-i", videoPath, "-c", "copy", "-y", rotatedVideoPath]);
   await runProcess("ffmpeg", [
-    "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=30",
-    "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "1",
-    "-vf", "format=yuv420p10le", "-c:v", "libx265", "-preset", "ultrafast", "-x265-params", "log-level=error",
-    "-tag:v", "hvc1", "-c:a", "aac", "-shortest", "-y", hevcBasePath,
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-display_rotation:v:0",
+    "90",
+    "-i",
+    videoPath,
+    "-c",
+    "copy",
+    "-y",
+    rotatedVideoPath,
   ]);
-  await runProcess("ffmpeg", ["-hide_banner", "-loglevel", "error", "-display_rotation:v:0", "90", "-i", hevcBasePath, "-map", "0", "-c", "copy", "-y", appleHevcMovPath]);
+  await runProcess("ffmpeg", [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc=size=320x180:rate=30",
+    "-f",
+    "lavfi",
+    "-i",
+    "sine=frequency=440:sample_rate=48000",
+    "-t",
+    "1",
+    "-vf",
+    "format=yuv420p10le",
+    "-c:v",
+    "libx265",
+    "-preset",
+    "ultrafast",
+    "-x265-params",
+    "log-level=error",
+    "-tag:v",
+    "hvc1",
+    "-c:a",
+    "aac",
+    "-shortest",
+    "-y",
+    hevcBasePath,
+  ]);
+  await runProcess("ffmpeg", [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-display_rotation:v:0",
+    "90",
+    "-i",
+    hevcBasePath,
+    "-map",
+    "0",
+    "-c",
+    "copy",
+    "-y",
+    appleHevcMovPath,
+  ]);
   store = new ProjectStore(path.join(root, "app-data"));
   await store.initialize();
   sources = new SourceService(store, new MediaProbe());
@@ -84,12 +164,25 @@ describe("preview cache integration", () => {
     const beforeHash = await sha256(videoPath);
     const created = await previews.ensureClip(video.id, 200, 800);
     const hit = await previews.ensureClip(video.id, 200, 800);
-    expect(created).toMatchObject({ variant: "VIDEO_CLIP_PROXY", cacheStatus: "CREATED", sourceStartMs: 200, sourceEndMs: 800 });
-    expect(hit).toMatchObject({ variant: "VIDEO_CLIP_PROXY", cacheStatus: "HIT", sourceStartMs: 200, sourceEndMs: 800 });
+    expect(created).toMatchObject({
+      variant: "VIDEO_CLIP_PROXY",
+      cacheStatus: "CREATED",
+      sourceStartMs: 200,
+      sourceEndMs: 800,
+    });
+    expect(hit).toMatchObject({
+      variant: "VIDEO_CLIP_PROXY",
+      cacheStatus: "HIT",
+      sourceStartMs: 200,
+      sourceEndMs: 800,
+    });
     const clipKey = /video_clip_proxy\/([a-f0-9]{64})/.exec(created.url)?.[1];
     expect(clipKey).toBeTruthy();
     const clipPath = await previews.resolveClipExisting(video.id, clipKey!);
-    const marker = JSON.parse(await readFile(path.join(path.dirname(clipPath), `clip-${clipKey}.json`), "utf8")) as { outputSizeBytes?: number; outputModifiedAt?: string };
+    const marker = JSON.parse(await readFile(path.join(path.dirname(clipPath), `clip-${clipKey}.json`), "utf8")) as {
+      outputSizeBytes?: number;
+      outputModifiedAt?: string;
+    };
     expect(marker.outputSizeBytes).toBe((await stat(clipPath)).size);
     expect(marker.outputModifiedAt).toBeTruthy();
     const clipInfo = await new MediaProbe().probe(clipPath);
@@ -137,7 +230,12 @@ describe("preview cache integration", () => {
   it("uses display rotation dimensions so a portrait proxy is not stretched", async () => {
     const portrait = store.getProject().sources.find((asset) => asset.sourcePath === rotatedVideoPath)!;
     const ready = await sources.ensureMetadata(portrait.id);
-    expect(ready.mediaInfo).toMatchObject({ displayWidth: 360, displayHeight: 640, rotationDegrees: 90, isPortrait: true });
+    expect(ready.mediaInfo).toMatchObject({
+      displayWidth: 360,
+      displayHeight: 640,
+      rotationDegrees: 90,
+      isPortrait: true,
+    });
     await previews.ensure(portrait.id, "VIDEO_PROXY");
     const proxyInfo = await new MediaProbe().probe(await previews.resolveExisting(portrait.id, "VIDEO_PROXY"));
     expect(proxyInfo.width).toBeLessThan(proxyInfo.height!);
@@ -148,7 +246,10 @@ describe("preview cache integration", () => {
     const sourceHash = await sha256(appleHevcMovPath);
     const mov = store.getProject().sources.find((asset) => asset.sourcePath === appleHevcMovPath)!;
     const ready = await sources.ensureMetadata(mov.id);
-    expect(ready).toMatchObject({ extension: ".mov", mediaInfo: { videoCodec: "hevc", displayWidth: 180, displayHeight: 320 } });
+    expect(ready).toMatchObject({
+      extension: ".mov",
+      mediaInfo: { videoCodec: "hevc", displayWidth: 180, displayHeight: 320 },
+    });
     const created = await previews.ensure(mov.id, "VIDEO_PROXY");
     expect(["CREATED", "HIT"]).toContain(created.cacheStatus);
     const proxyPath = await previews.resolveExisting(mov.id, "VIDEO_PROXY");

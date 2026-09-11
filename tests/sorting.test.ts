@@ -48,4 +48,3 @@ describe("sortAssets", () => {
     expect(sortAssets(assets, "ADDED_ORDER").map((item) => item.addedOrder)).toEqual([0, 1, 2]);
   });
 });
-

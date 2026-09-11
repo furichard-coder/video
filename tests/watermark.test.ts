@@ -4,7 +4,12 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildWatermarkFilterChain } from "../src/main/services/concat-render";
 import { ProjectStore } from "../src/main/services/project-store";
-import { DEFAULT_WATERMARK_SETTINGS, normalizeWatermarkSettings, watermarkAppliesToPurpose, watermarkRenderedText } from "../src/shared/watermark";
+import {
+  DEFAULT_WATERMARK_SETTINGS,
+  normalizeWatermarkSettings,
+  watermarkAppliesToPurpose,
+  watermarkRenderedText,
+} from "../src/shared/watermark";
 
 const tempRoots: string[] = [];
 
@@ -43,8 +48,15 @@ describe("project watermark settings", () => {
   });
 
   it("rejects overlapping corners and impossible display timing", () => {
-    expect(() => normalizeWatermarkSettings({ ...DEFAULT_WATERMARK_SETTINGS, english: { ...DEFAULT_WATERMARK_SETTINGS.english, position: "LOWER_LEFT" } })).toThrow(/避免互相重疊/);
-    expect(() => normalizeWatermarkSettings({ ...DEFAULT_WATERMARK_SETTINGS, intervalSeconds: 10, visibleDurationSeconds: 11 })).toThrow(/不可超過顯示週期/);
+    expect(() =>
+      normalizeWatermarkSettings({
+        ...DEFAULT_WATERMARK_SETTINGS,
+        english: { ...DEFAULT_WATERMARK_SETTINGS.english, position: "LOWER_LEFT" },
+      }),
+    ).toThrow(/避免互相重疊/);
+    expect(() =>
+      normalizeWatermarkSettings({ ...DEFAULT_WATERMARK_SETTINGS, intervalSeconds: 10, visibleDurationSeconds: 11 }),
+    ).toThrow(/不可超過顯示週期/);
   });
 
   it("persists changes and migrates them into manifest schema 16", async () => {
@@ -59,10 +71,15 @@ describe("project watermark settings", () => {
       visibleDurationSeconds: 12,
       chinese: { ...DEFAULT_WATERMARK_SETTINGS.chinese, text: "山海\n漫步" },
     });
-    expect(saved).toMatchObject({ schemaVersion: 17, watermarkSettings: { startSeconds: 8, intervalSeconds: 120, visibleDurationSeconds: 12 } });
+    expect(saved).toMatchObject({
+      schemaVersion: 17,
+      watermarkSettings: { startSeconds: 8, intervalSeconds: 120, visibleDurationSeconds: 12 },
+    });
     const restored = await new ProjectStore(root).initialize();
     expect(restored.watermarkSettings).toEqual(saved.watermarkSettings);
-    const raw = JSON.parse(await readFile(path.join(root, "projects", "default", "project.source-manifest.json"), "utf8"));
+    const raw = JSON.parse(
+      await readFile(path.join(root, "projects", "default", "project.source-manifest.json"), "utf8"),
+    );
     expect(raw.watermarkSettings.chinese.text).toBe("山海\n漫步");
   });
 });

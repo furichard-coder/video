@@ -3,7 +3,14 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MaterialEditorModal } from "../../src/renderer/components/MaterialEditorModal";
 
-const asset = { id: "a", kind: "VIDEO", fileName: "測試.mp4", sourcePath: "C:/測試.mp4", sourcePolicy: "READ_ONLY", sizeBytes: 1 } as never;
+const asset = {
+  id: "a",
+  kind: "VIDEO",
+  fileName: "測試.mp4",
+  sourcePath: "C:/測試.mp4",
+  sourcePolicy: "READ_ONLY",
+  sizeBytes: 1,
+} as never;
 
 describe("workspace components", () => {
   it("exposes one material editor with section tabs and initial selection", () => {

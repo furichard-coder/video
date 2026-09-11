@@ -21,12 +21,19 @@ const child = spawn(electron, [appRoot], {
 });
 
 let output = "";
-child.stdout.on("data", (chunk) => { output += chunk.toString(); });
-child.stderr.on("data", (chunk) => { output += chunk.toString(); });
+child.stdout.on("data", (chunk) => {
+  output += chunk.toString();
+});
+child.stderr.on("data", (chunk) => {
+  output += chunk.toString();
+});
 
 const exitCode = await Promise.race([
   new Promise((resolve) => child.once("exit", (code) => resolve(code ?? 1))),
-  delay(30_000).then(() => { child.kill(); return 124; }),
+  delay(30_000).then(() => {
+    child.kill();
+    return 124;
+  }),
 ]);
 
 if (exitCode !== 0 || !output.includes("SCREENSHOT_READY")) {

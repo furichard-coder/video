@@ -1,6 +1,17 @@
 import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
-import { app, BrowserWindow, clipboard, ipcMain, powerSaveBlocker, protocol, safeStorage, screen, session, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  ipcMain,
+  powerSaveBlocker,
+  protocol,
+  safeStorage,
+  screen,
+  session,
+  shell,
+} from "electron";
 import { registerIpc } from "./ipc";
 import { ConcatRenderService } from "./services/concat-render";
 import { IntroAnalyzer } from "./services/intro-analyzer";
@@ -58,7 +69,9 @@ let applicationQuitting = false;
 const renderPowerGuard = new RenderPowerGuard(powerSaveBlocker);
 const confirmedCloseWindowIds = new Set<number>();
 
-app.on("before-quit", () => { applicationQuitting = true; });
+app.on("before-quit", () => {
+  applicationQuitting = true;
+});
 
 function createWindow(): BrowserWindow {
   const smoke = process.env.APP_SMOKE_TEST === "1";
@@ -100,30 +113,33 @@ function createWindow(): BrowserWindow {
       app.exit(1);
     }, 20_000);
     window.webContents.once("did-finish-load", () => {
-      setTimeout(async () => {
-        try {
-          if (screenshotPath) {
-            await mkdir(path.dirname(screenshotPath), { recursive: true });
-            const image = await window.capturePage();
-            await writeFile(screenshotPath, image.toPNG());
-            console.log("SCREENSHOT_READY");
-          } else {
-            if (smokeMarkerPath) {
-              await mkdir(path.dirname(smokeMarkerPath), { recursive: true });
-              await writeFile(smokeMarkerPath, "SMOKE_READY\n", "utf8");
+      setTimeout(
+        async () => {
+          try {
+            if (screenshotPath) {
+              await mkdir(path.dirname(screenshotPath), { recursive: true });
+              const image = await window.capturePage();
+              await writeFile(screenshotPath, image.toPNG());
+              console.log("SCREENSHOT_READY");
+            } else {
+              if (smokeMarkerPath) {
+                await mkdir(path.dirname(smokeMarkerPath), { recursive: true });
+                await writeFile(smokeMarkerPath, "SMOKE_READY\n", "utf8");
+              }
+              console.log("SMOKE_READY");
             }
-            console.log("SMOKE_READY");
+            clearTimeout(timer);
+            // Automated smoke/screenshot sessions must terminate deterministically.
+            // Normal user closes still go through the second-confirmation flow below.
+            app.exit(0);
+          } catch (error) {
+            clearTimeout(timer);
+            console.error(error);
+            app.exit(1);
           }
-          clearTimeout(timer);
-          // Automated smoke/screenshot sessions must terminate deterministically.
-          // Normal user closes still go through the second-confirmation flow below.
-          app.exit(0);
-        } catch (error) {
-          clearTimeout(timer);
-          console.error(error);
-          app.exit(1);
-        }
-      }, screenshotPath ? 1_800 : 450);
+        },
+        screenshotPath ? 1_800 : 450,
+      );
     });
     window.webContents.once("did-fail-load", (_event, code, description) => {
       clearTimeout(timer);
@@ -150,27 +166,59 @@ void app.whenReady().then(async () => {
   await aiSettings.initialize();
   const translationSettings = new TranslationSettingsStore(app.getPath("userData"), credentialProtector);
   await translationSettings.initialize();
-  const subtitleTranslation = new SubtitleTranslationService(path.join(app.getPath("userData"), "cache", "subtitle-translations"), aiSettings, translationSettings);
+  const subtitleTranslation = new SubtitleTranslationService(
+    path.join(app.getPath("userData"), "cache", "subtitle-translations"),
+    aiSettings,
+    translationSettings,
+  );
   await subtitleTranslation.initialize();
-  const concatRenderer = new ConcatRenderService(store, sources, undefined, undefined, photoSoundPath, subtitleTranslation, path.join(app.getPath("userData"), "cache", "subtitle-burnin"));
-  const subtitlePreviews = new SubtitlePreviewService(path.join(app.getPath("userData"), "cache", "subtitle-preview"), store, concatRenderer);
+  const concatRenderer = new ConcatRenderService(
+    store,
+    sources,
+    undefined,
+    undefined,
+    photoSoundPath,
+    subtitleTranslation,
+    path.join(app.getPath("userData"), "cache", "subtitle-burnin"),
+  );
+  const subtitlePreviews = new SubtitlePreviewService(
+    path.join(app.getPath("userData"), "cache", "subtitle-preview"),
+    store,
+    concatRenderer,
+  );
   await subtitlePreviews.initialize();
   const outputHistory = new OutputHistoryStore(app.getPath("userData"));
   await outputHistory.initialize();
   registerPreviewProtocol(previews, store, photoSoundPath, subtitlePreviews, outputHistory);
   const youtubeBrowsers = new WindowsYoutubeBrowserLauncher((url) => shell.openExternal(url));
-  const youtubeSettings = new YoutubeSettingsStore(app.getPath("userData"), {
-    isAvailable: () => safeStorage.isEncryptionAvailable(),
-    protect: (value) => safeStorage.encryptString(value).toString("base64"),
-    unprotect: (value) => safeStorage.decryptString(Buffer.from(value, "base64")),
-  }, youtubeBrowsers);
+  const youtubeSettings = new YoutubeSettingsStore(
+    app.getPath("userData"),
+    {
+      isAvailable: () => safeStorage.isEncryptionAvailable(),
+      protect: (value) => safeStorage.encryptString(value).toString("base64"),
+      unprotect: (value) => safeStorage.decryptString(Buffer.from(value, "base64")),
+    },
+    youtubeBrowsers,
+  );
   await youtubeSettings.initialize();
   const youtubeUpload = new YoutubeUploadService(youtubeSettings, youtubeBrowsers);
-  const platformUploadHandoff = new PlatformUploadHandoffService({ openExternal: (url) => shell.openExternal(url), showItemInFolder: (filePath) => shell.showItemInFolder(filePath), copyText: (value) => clipboard.writeText(value), openYoutubeInChrome: async (url) => { await youtubeBrowsers.open("CHROME", url); } });
+  const platformUploadHandoff = new PlatformUploadHandoffService({
+    openExternal: (url) => shell.openExternal(url),
+    showItemInFolder: (filePath) => shell.showItemInFolder(filePath),
+    copyText: (value) => clipboard.writeText(value),
+    openYoutubeInChrome: async (url) => {
+      await youtubeBrowsers.open("CHROME", url);
+    },
+  });
   const userPreferences = new UserPreferencesStore(app.getPath("userData"));
   await userPreferences.initialize();
   await store.setTimelineTransitionSeconds(userPreferences.snapshot().renderDefaults.transitionSeconds);
-  const aiStory = new AiStoryAnalysisService(path.join(app.getPath("userData"), "cache", "ai-story"), store, sources, aiSettings);
+  const aiStory = new AiStoryAnalysisService(
+    path.join(app.getPath("userData"), "cache", "ai-story"),
+    store,
+    sources,
+    aiSettings,
+  );
   await aiStory.initialize();
   const aiPublishAssets = new AiPublishAssetsService(store, sources, previews, aiStory, aiSettings);
   const musicSuggestions = new MusicSuggestionService(
@@ -185,7 +233,9 @@ void app.whenReady().then(async () => {
     const accountId = aiSettings.getSnapshot().activeAccountId;
     try {
       const diagnostic = await aiStory.testAccount(accountId);
-      console.log(`AI_DIAGNOSTIC_OK ${JSON.stringify({ accountId, checks: diagnostic.checks, requestIds: diagnostic.requestIds })}`);
+      console.log(
+        `AI_DIAGNOSTIC_OK ${JSON.stringify({ accountId, checks: diagnostic.checks, requestIds: diagnostic.requestIds })}`,
+      );
       app.exit(0);
     } catch (error) {
       console.error(`AI_DIAGNOSTIC_ERROR ${error instanceof Error ? error.message : String(error)}`);
@@ -193,13 +243,43 @@ void app.whenReady().then(async () => {
     }
     return;
   }
-  const introAnalyzer = new IntroAnalyzer(path.join(app.getPath("userData"), "cache", "intro-analysis"), store, sources, undefined, aiStory);
+  const introAnalyzer = new IntroAnalyzer(
+    path.join(app.getPath("userData"), "cache", "intro-analysis"),
+    store,
+    sources,
+    undefined,
+    aiStory,
+  );
   await introAnalyzer.initialize();
   const playerSettings = new PlayerSettingsStore(app.getPath("userData"));
   await playerSettings.initialize();
-  const externalPlayers = new ExternalPlayerService(store, sources, previews, playerSettings, (targetPath) => shell.openPath(targetPath));
+  const externalPlayers = new ExternalPlayerService(store, sources, previews, playerSettings, (targetPath) =>
+    shell.openPath(targetPath),
+  );
   const bgm = new BgmService(store, new MediaProbe());
-  registerIpc(store, sources, previews, concatRenderer, introAnalyzer, playerSettings, externalPlayers, bgm, aiSettings, aiStory, translationSettings, subtitleTranslation, youtubeSettings, youtubeUpload, platformUploadHandoff, outputHistory, userPreferences, subtitlePreviews, musicSuggestions, aiPublishAssets, renderPowerGuard);
+  registerIpc(
+    store,
+    sources,
+    previews,
+    concatRenderer,
+    introAnalyzer,
+    playerSettings,
+    externalPlayers,
+    bgm,
+    aiSettings,
+    aiStory,
+    translationSettings,
+    subtitleTranslation,
+    youtubeSettings,
+    youtubeUpload,
+    platformUploadHandoff,
+    outputHistory,
+    userPreferences,
+    subtitlePreviews,
+    musicSuggestions,
+    aiPublishAssets,
+    renderPowerGuard,
+  );
   ipcMain.removeAllListeners("app:confirm-close");
   ipcMain.on("app:confirm-close", (event) => {
     const target = BrowserWindow.fromWebContents(event.sender);
@@ -212,18 +292,22 @@ void app.whenReady().then(async () => {
     target.close();
   });
   ipcMain.removeAllListeners("app:move-cursor-to-safe-action");
-  ipcMain.on("app:move-cursor-to-safe-action", (event, rect: { x: number; y: number; width: number; height: number }) => {
-    const target = BrowserWindow.fromWebContents(event.sender);
-    if (!target || target.isDestroyed() || typeof rect !== "object" || rect === null) return;
-    const [rendererWidth, rendererHeight] = target.getContentSize();
-    const point = safeActionCenter(target.getContentBounds(), { width: rendererWidth, height: rendererHeight }, rect);
-    if (!point) return;
-    moveWindowsCursor(screen.dipToScreenPoint(point));
-  });
+  ipcMain.on(
+    "app:move-cursor-to-safe-action",
+    (event, rect: { x: number; y: number; width: number; height: number }) => {
+      const target = BrowserWindow.fromWebContents(event.sender);
+      if (!target || target.isDestroyed() || typeof rect !== "object" || rect === null) return;
+      const [rendererWidth, rendererHeight] = target.getContentSize();
+      const point = safeActionCenter(target.getContentBounds(), { width: rendererWidth, height: rendererHeight }, rect);
+      if (!point) return;
+      moveWindowsCursor(screen.dipToScreenPoint(point));
+    },
+  );
   mainWindow = createWindow();
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    const requestedMedia = "mediaTypes" in details ? details.mediaTypes ?? [] : [];
-    const microphoneOnly = permission === "media" && requestedMedia.includes("audio") && !requestedMedia.includes("video");
+    const requestedMedia = "mediaTypes" in details ? (details.mediaTypes ?? []) : [];
+    const microphoneOnly =
+      permission === "media" && requestedMedia.includes("audio") && !requestedMedia.includes("video");
     callback(Boolean(mainWindow && webContents.id === mainWindow.webContents.id && microphoneOnly));
   });
 

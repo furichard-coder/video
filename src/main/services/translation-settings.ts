@@ -15,7 +15,10 @@ export class TranslationSettingsStore {
   private credentials: CredentialFile = { schemaVersion: 1 };
   private writeChain: Promise<void> = Promise.resolve();
 
-  constructor(dataRoot: string, private readonly protector: CredentialProtector) {
+  constructor(
+    dataRoot: string,
+    private readonly protector: CredentialProtector,
+  ) {
     this.credentialsPath = path.join(dataRoot, "settings", "translation-credentials.encrypted.json");
   }
 
@@ -23,24 +26,42 @@ export class TranslationSettingsStore {
     await mkdir(path.dirname(this.credentialsPath), { recursive: true });
     try {
       const parsed = JSON.parse(await readFile(this.credentialsPath, "utf8")) as Partial<CredentialFile>;
-      if (parsed.schemaVersion !== 1 || (parsed.encryptedGoogleCloudApiKey !== undefined && typeof parsed.encryptedGoogleCloudApiKey !== "string")) throw new Error("翻譯憑證格式不相容");
-      this.credentials = { schemaVersion: 1, ...(parsed.encryptedGoogleCloudApiKey ? { encryptedGoogleCloudApiKey: parsed.encryptedGoogleCloudApiKey } : {}) };
+      if (
+        parsed.schemaVersion !== 1 ||
+        (parsed.encryptedGoogleCloudApiKey !== undefined && typeof parsed.encryptedGoogleCloudApiKey !== "string")
+      )
+        throw new Error("翻譯憑證格式不相容");
+      this.credentials = {
+        schemaVersion: 1,
+        ...(parsed.encryptedGoogleCloudApiKey ? { encryptedGoogleCloudApiKey: parsed.encryptedGoogleCloudApiKey } : {}),
+      };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof SyntaxError) && !String(error).includes("不相容")) throw error;
+      if (
+        (error as NodeJS.ErrnoException).code !== "ENOENT" &&
+        !(error instanceof SyntaxError) &&
+        !String(error).includes("不相容")
+      )
+        throw error;
       this.credentials = { schemaVersion: 1 };
       await this.writeNow();
     }
   }
 
   snapshot(): TranslationSettingsSnapshot {
-    return { schemaVersion: 1, googleCloudConfigured: Boolean(this.credentials.encryptedGoogleCloudApiKey), encryptionAvailable: this.protector.isAvailable() };
+    return {
+      schemaVersion: 1,
+      googleCloudConfigured: Boolean(this.credentials.encryptedGoogleCloudApiKey),
+      encryptionAvailable: this.protector.isAvailable(),
+    };
   }
 
   async update(update: TranslationSettingsUpdate): Promise<TranslationSettingsSnapshot> {
     if (!update || typeof update !== "object") throw new Error("翻譯設定格式無效。");
     const apiKey = update.googleCloudApiKey?.trim();
-    if (apiKey && (apiKey.length < 20 || apiKey.length > 500 || /\s/.test(apiKey))) throw new Error("Google Cloud Translation API Key 格式無效。");
-    if (apiKey && !this.protector.isAvailable()) throw new Error("Windows 安全儲存目前不可用；為避免明文落盤，App 拒絕保存 Google API Key。");
+    if (apiKey && (apiKey.length < 20 || apiKey.length > 500 || /\s/.test(apiKey)))
+      throw new Error("Google Cloud Translation API Key 格式無效。");
+    if (apiKey && !this.protector.isAvailable())
+      throw new Error("Windows 安全儲存目前不可用；為避免明文落盤，App 拒絕保存 Google API Key。");
     const operation = this.writeChain.then(async () => {
       if (apiKey) this.credentials.encryptedGoogleCloudApiKey = this.protector.protect(apiKey);
       if (update.clearGoogleCloudApiKey) delete this.credentials.encryptedGoogleCloudApiKey;
@@ -55,8 +76,11 @@ export class TranslationSettingsStore {
     const encrypted = this.credentials.encryptedGoogleCloudApiKey;
     if (!encrypted) throw new Error("尚未設定 Google Cloud Translation API Key。");
     if (!this.protector.isAvailable()) throw new Error("Windows 安全儲存目前不可用，無法解密 Google 翻譯憑證。");
-    try { return this.protector.unprotect(encrypted); }
-    catch { throw new Error("Google 翻譯憑證無法解密，請在 AI 設定頁重新輸入。"); }
+    try {
+      return this.protector.unprotect(encrypted);
+    } catch {
+      throw new Error("Google 翻譯憑證無法解密，請在 AI 設定頁重新輸入。");
+    }
   }
 
   private async writeNow(): Promise<void> {

@@ -15,10 +15,19 @@ export function srtTimestamp(milliseconds: number): string {
 }
 
 export function serializeSrt(cues: SubtitleCue[]): string {
-  return `${validateSubtitleCues(cues).map((cue, index) => `${index + 1}\r\n${srtTimestamp(cue.startMs)} --> ${srtTimestamp(cue.endMs)}\r\n${cue.text.replace(/\n/g, "\r\n")}`).join("\r\n\r\n")}\r\n`;
+  return `${validateSubtitleCues(cues)
+    .map(
+      (cue, index) =>
+        `${index + 1}\r\n${srtTimestamp(cue.startMs)} --> ${srtTimestamp(cue.endMs)}\r\n${cue.text.replace(/\n/g, "\r\n")}`,
+    )
+    .join("\r\n\r\n")}\r\n`;
 }
 
-export async function exportSrt(cues: SubtitleCue[], outputPath: string, signal?: AbortSignal): Promise<SubtitleExportResult> {
+export async function exportSrt(
+  cues: SubtitleCue[],
+  outputPath: string,
+  signal?: AbortSignal,
+): Promise<SubtitleExportResult> {
   if (path.extname(outputPath).toLowerCase() !== ".srt") throw new Error("字幕必須輸出為 .srt。");
   if (signal?.aborted) throw new DOMException("字幕匯出已取消。", "AbortError");
   const parsed = path.parse(outputPath);

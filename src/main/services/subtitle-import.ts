@@ -15,7 +15,10 @@ function parseTimestamp(value: string): number {
 }
 
 export function parseSrt(contents: string, idFactory: () => string = randomUUID): SubtitleCue[] {
-  const normalized = contents.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
+  const normalized = contents
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n?/g, "\n")
+    .trim();
   if (!normalized) throw new Error("SRT 檔案沒有字幕內容。");
   const blocks = normalized.split(/\n{2,}/);
   if (blocks.length > MAX_SRT_CUES) throw new Error(`SRT 最多支援 ${MAX_SRT_CUES} 筆字幕。`);
@@ -27,7 +30,10 @@ export function parseSrt(contents: string, idFactory: () => string = randomUUID)
     if (timing.length !== 2) throw new Error(`SRT 第 ${index + 1} 段時間範圍無效。`);
     const startToken = timing[0].trim().split(/\s+/)[0];
     const endToken = timing[1].trim().split(/\s+/)[0];
-    const text = lines.slice(timingIndex + 1).join("\n").trim();
+    const text = lines
+      .slice(timingIndex + 1)
+      .join("\n")
+      .trim();
     if (!text) throw new Error(`SRT 第 ${index + 1} 段字幕文字不可空白。`);
     return {
       id: idFactory(),

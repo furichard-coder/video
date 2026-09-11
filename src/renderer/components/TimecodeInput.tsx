@@ -20,7 +20,12 @@ export function TimecodeInput({ valueMs, maxMs, onChange, label, disabled }: Pro
   const millis = safe % 1_000;
   const update = (part: "m" | "s" | "ms", raw: string) => {
     const number = Math.max(0, Number.parseInt(raw || "0", 10) || 0);
-    const next = part === "m" ? number * 60_000 + seconds * 1_000 + millis : part === "s" ? minutes * 60_000 + Math.min(59, number) * 1_000 + millis : minutes * 60_000 + seconds * 1_000 + Math.min(999, number);
+    const next =
+      part === "m"
+        ? number * 60_000 + seconds * 1_000 + millis
+        : part === "s"
+          ? minutes * 60_000 + Math.min(59, number) * 1_000 + millis
+          : minutes * 60_000 + seconds * 1_000 + Math.min(999, number);
     onChange(Math.min(maxMs ?? Number.MAX_SAFE_INTEGER, next));
   };
   useEffect(() => {
@@ -29,11 +34,48 @@ export function TimecodeInput({ valueMs, maxMs, onChange, label, disabled }: Pro
     if (milliRef.current) milliRef.current.value = String(millis).padStart(3, "0");
   }, [minutes, seconds, millis]);
   const advance = (event: KeyboardEvent<HTMLInputElement>, next: RefObject<HTMLInputElement | null>) => {
-    if (event.key === "Enter") { event.preventDefault(); next.current?.focus(); next.current?.select(); }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      next.current?.focus();
+      next.current?.select();
+    }
   };
-  return <span className="timecode-input" aria-label={label}>
-    <input ref={minuteRef} aria-label={`${label} 分`} type="number" min="0" max="999" defaultValue={minutes} disabled={disabled} onChange={(event) => update("m", event.target.value)} onKeyDown={(event) => advance(event, secondRef)} />
-    <span>:</span><input ref={secondRef} aria-label={`${label} 秒`} type="number" min="0" max="59" defaultValue={seconds} disabled={disabled} onChange={(event) => update("s", event.target.value)} onKeyDown={(event) => advance(event, milliRef)} />
-    <span>.</span><input ref={milliRef} aria-label={`${label} 毫秒`} type="number" min="0" max="999" defaultValue={millis} disabled={disabled} onChange={(event) => update("ms", event.target.value)} />
-  </span>;
+  return (
+    <span className="timecode-input" aria-label={label}>
+      <input
+        ref={minuteRef}
+        aria-label={`${label} 分`}
+        type="number"
+        min="0"
+        max="999"
+        defaultValue={minutes}
+        disabled={disabled}
+        onChange={(event) => update("m", event.target.value)}
+        onKeyDown={(event) => advance(event, secondRef)}
+      />
+      <span>:</span>
+      <input
+        ref={secondRef}
+        aria-label={`${label} 秒`}
+        type="number"
+        min="0"
+        max="59"
+        defaultValue={seconds}
+        disabled={disabled}
+        onChange={(event) => update("s", event.target.value)}
+        onKeyDown={(event) => advance(event, milliRef)}
+      />
+      <span>.</span>
+      <input
+        ref={milliRef}
+        aria-label={`${label} 毫秒`}
+        type="number"
+        min="0"
+        max="999"
+        defaultValue={millis}
+        disabled={disabled}
+        onChange={(event) => update("ms", event.target.value)}
+      />
+    </span>
+  );
 }

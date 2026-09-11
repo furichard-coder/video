@@ -1,0 +1,26 @@
+# Normalize line endings on commit; check out native endings on each OS.
+* text=auto
+
+# Windows batch scripts keep CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Media, fonts, archives and binaries are not text.
+*.mp3 binary
+*.mp4 binary
+*.mov binary
+*.m4a binary
+*.wav binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.exe binary
+*.dll binary
+*.zip binary
+*.7z binary

@@ -22,12 +22,17 @@ export interface TimelinePlanOptions {
 }
 
 export function buildTimelinePlan(project: ProjectManifest, options: TimelinePlanOptions = {}): TimelinePlan {
-  const transitionMs = Math.max(0, Math.round((options.transitionSeconds ?? project.timelineTransitionSeconds ?? 0.3) * 1000));
+  const transitionMs = Math.max(
+    0,
+    Math.round((options.transitionSeconds ?? project.timelineTransitionSeconds ?? 0.3) * 1000),
+  );
   const source: TimelinePlanClip[] = [];
   if (options.includeIntro) {
-    for (const clip of project.introSegments) source.push({ ...clip, segmentId: clip.id, scope: "INTRO", outputStartMs: 0, outputEndMs: 0 });
+    for (const clip of project.introSegments)
+      source.push({ ...clip, segmentId: clip.id, scope: "INTRO", outputStartMs: 0, outputEndMs: 0 });
   }
-  for (const clip of mainRenderSelections(project)) source.push({ ...clip, scope: "MAIN", outputStartMs: 0, outputEndMs: 0 });
+  for (const clip of mainRenderSelections(project))
+    source.push({ ...clip, scope: "MAIN", outputStartMs: 0, outputEndMs: 0 });
   let cursor = 0;
   source.forEach((clip, index) => {
     const span = Math.max(0, clip.outMs - clip.inMs);
@@ -47,17 +52,26 @@ export function mapTimelineCueToPlan(cue: SubtitleCue, plan: TimelinePlan): Subt
   // Subtitle cue times are relative to their own Main/Intro timeline, while a
   // combined plan may place Intro before Main. Convert to a scope-local origin.
   const scopeOrigin = scoped[0].outputStartMs;
-  const clip = scoped.find((item) => cue.startMs >= item.outputStartMs - scopeOrigin && cue.startMs < item.outputEndMs - scopeOrigin);
+  const clip = scoped.find(
+    (item) => cue.startMs >= item.outputStartMs - scopeOrigin && cue.startMs < item.outputEndMs - scopeOrigin,
+  );
   if (!clip) return undefined;
   const offset = cue.startMs - (clip.outputStartMs - scopeOrigin);
   const duration = Math.max(1, cue.endMs - cue.startMs);
-  return { ...cue, startMs: clip.outputStartMs + offset, endMs: Math.min(plan.durationMs, clip.outputStartMs + offset + duration) };
+  return {
+    ...cue,
+    startMs: clip.outputStartMs + offset,
+    endMs: Math.min(plan.durationMs, clip.outputStartMs + offset + duration),
+  };
 }
 
 export function bgmTracksForPlan(tracks: BgmTrack[], plan: TimelinePlan): BgmTrack[] {
-  return tracks.filter((track) => track.resolutionStatus !== "NEEDS_LOCAL_FILE").map((track) => ({
-    ...track,
-    timelineInMs: Math.max(0, Math.min(plan.durationMs, track.timelineInMs)),
-    timelineOutMs: Math.max(0, Math.min(plan.durationMs, track.timelineOutMs)),
-  })).filter((track) => track.timelineOutMs > track.timelineInMs);
+  return tracks
+    .filter((track) => track.resolutionStatus !== "NEEDS_LOCAL_FILE")
+    .map((track) => ({
+      ...track,
+      timelineInMs: Math.max(0, Math.min(plan.durationMs, track.timelineInMs)),
+      timelineOutMs: Math.max(0, Math.min(plan.durationMs, track.timelineOutMs)),
+    }))
+    .filter((track) => track.timelineOutMs > track.timelineInMs);
 }

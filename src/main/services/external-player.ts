@@ -65,7 +65,11 @@ export class ExternalPlayerService {
     return this.openResolvedPath(targetPath, pathExtension(targetPath), "ORIGINAL");
   }
 
-  private async openResolvedPath(targetPath: string, extension: string, target: ExternalMediaTarget): Promise<ExternalOpenResult> {
+  private async openResolvedPath(
+    targetPath: string,
+    extension: string,
+    target: ExternalMediaTarget,
+  ): Promise<ExternalOpenResult> {
     const player = await this.settings.resolve(extension);
     if (player.id === "SYSTEM_DEFAULT") return this.openWithSystemDefault(targetPath, target, player.label);
     if (!player.available || !player.executablePath) {

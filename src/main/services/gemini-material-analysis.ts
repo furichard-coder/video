@@ -6,7 +6,10 @@ type FetchLike = typeof fetch;
 
 function strings(value: unknown): string[] {
   return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()).slice(0, 20)
+    ? value
+        .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+        .map((item) => item.trim())
+        .slice(0, 20)
     : [];
 }
 
@@ -39,50 +42,77 @@ export class GeminiMaterialAnalysisProvider {
       "請嚴格依指定 JSON schema 回傳。",
     ].join("\n\n");
     const image = (await readFile(framePath)).toString("base64");
-    const response = await this.fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.model)}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": settings.apiKey },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: image } }] }],
-        generationConfig: {
-          temperature: 0.2,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT",
-            properties: {
-              suggestedSubtitle: { type: "STRING" },
-              visualSummary: { type: "STRING" },
-              eventSummary: { type: "STRING" },
-              peopleSummary: { type: "ARRAY", items: { type: "STRING" } },
-              locationSummary: { type: "ARRAY", items: { type: "STRING" } },
-              animalSpecies: { type: "ARRAY", items: { type: "STRING" } },
-              speciesExplanation: { type: "STRING" },
-              topicRelevanceScore: { type: "INTEGER", minimum: 0, maximum: 100 },
-              transcriptVisualMatchScore: { type: "INTEGER", minimum: 0, maximum: 100 },
-              confidence: { type: "INTEGER", minimum: 0, maximum: 100 },
-              warnings: { type: "ARRAY", items: { type: "STRING" } },
+    const response = await this.fetcher(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.model)}:generateContent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": settings.apiKey },
+        body: JSON.stringify({
+          contents: [
+            { role: "user", parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: image } }] },
+          ],
+          generationConfig: {
+            temperature: 0.2,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                suggestedSubtitle: { type: "STRING" },
+                visualSummary: { type: "STRING" },
+                eventSummary: { type: "STRING" },
+                peopleSummary: { type: "ARRAY", items: { type: "STRING" } },
+                locationSummary: { type: "ARRAY", items: { type: "STRING" } },
+                animalSpecies: { type: "ARRAY", items: { type: "STRING" } },
+                speciesExplanation: { type: "STRING" },
+                topicRelevanceScore: { type: "INTEGER", minimum: 0, maximum: 100 },
+                transcriptVisualMatchScore: { type: "INTEGER", minimum: 0, maximum: 100 },
+                confidence: { type: "INTEGER", minimum: 0, maximum: 100 },
+                warnings: { type: "ARRAY", items: { type: "STRING" } },
+              },
+              required: [
+                "suggestedSubtitle",
+                "visualSummary",
+                "eventSummary",
+                "peopleSummary",
+                "locationSummary",
+                "animalSpecies",
+                "speciesExplanation",
+                "topicRelevanceScore",
+                "transcriptVisualMatchScore",
+                "confidence",
+                "warnings",
+              ],
             },
-            required: ["suggestedSubtitle", "visualSummary", "eventSummary", "peopleSummary", "locationSummary", "animalSpecies", "speciesExplanation", "topicRelevanceScore", "transcriptVisualMatchScore", "confidence", "warnings"],
           },
-        },
-      }),
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
-    });
+        }),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
+      },
+    );
     if (!response.ok) throw new Error(`Gemini 圖片／物種分析失敗（HTTP ${response.status}）。`);
-    const payload = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }> };
-    const text = payload.candidates?.[0]?.content?.parts?.map((part) => typeof part.text === "string" ? part.text : "").join("").trim();
+    const payload = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }>;
+    };
+    const text = payload.candidates?.[0]?.content?.parts
+      ?.map((part) => (typeof part.text === "string" ? part.text : ""))
+      .join("")
+      .trim();
     if (!text) throw new Error("Gemini 圖片／物種分析未傳回可讀結果。");
     let parsed: Record<string, unknown>;
-    try { parsed = JSON.parse(text) as Record<string, unknown>; }
-    catch { throw new Error("Gemini 圖片／物種分析格式無法解析。"); }
+    try {
+      parsed = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new Error("Gemini 圖片／物種分析格式無法解析。");
+    }
     return {
-      suggestedSubtitle: typeof parsed.suggestedSubtitle === "string" ? parsed.suggestedSubtitle.trim().slice(0, 160) : "",
+      suggestedSubtitle:
+        typeof parsed.suggestedSubtitle === "string" ? parsed.suggestedSubtitle.trim().slice(0, 160) : "",
       visualSummary: typeof parsed.visualSummary === "string" ? parsed.visualSummary.trim().slice(0, 1_000) : "",
       eventSummary: typeof parsed.eventSummary === "string" ? parsed.eventSummary.trim().slice(0, 1_000) : "",
       peopleSummary: strings(parsed.peopleSummary),
       locationSummary: strings(parsed.locationSummary),
       animalSpecies: strings(parsed.animalSpecies),
-      speciesExplanation: typeof parsed.speciesExplanation === "string" ? parsed.speciesExplanation.trim().slice(0, 1_000) : "",
+      speciesExplanation:
+        typeof parsed.speciesExplanation === "string" ? parsed.speciesExplanation.trim().slice(0, 1_000) : "",
       topicRelevanceScore: score(parsed.topicRelevanceScore),
       transcriptVisualMatchScore: score(parsed.transcriptVisualMatchScore),
       confidence: score(parsed.confidence),

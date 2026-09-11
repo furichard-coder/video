@@ -1,12 +1,6 @@
 import { opendir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
-import type {
-  ImportProgress,
-  ImportResult,
-  ProjectManifest,
-  SourceAsset,
-  SourceKind,
-} from "../../shared/domain";
+import type { ImportProgress, ImportResult, ProjectManifest, SourceAsset, SourceKind } from "../../shared/domain";
 import { DEFAULT_IMAGE_DURATION_MS } from "../../shared/domain";
 import { normalizedPathIdentity, previewCacheKey } from "./identity";
 import { MediaProbe } from "./media-probe";
@@ -215,12 +209,14 @@ export class SourceService {
       sizeBytes: current.size,
       fileModifiedAt: modifiedAt,
       previewCacheKey: expectedPreviewCacheKey,
-      ...(sourceChanged ? {
-        metadataState: "PENDING" as const,
-        metadataError: undefined,
-        mediaInfo: undefined,
-        previewRange: undefined,
-      } : {}),
+      ...(sourceChanged
+        ? {
+            metadataState: "PENDING" as const,
+            metadataError: undefined,
+            mediaInfo: undefined,
+            previewRange: undefined,
+          }
+        : {}),
     };
     return this.store.updateAsset(refreshed);
   }

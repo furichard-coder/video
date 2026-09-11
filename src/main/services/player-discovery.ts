@@ -17,14 +17,20 @@ const DEFINITIONS: KnownPlayerDefinition[] = [
     label: "VLC media player",
     executableNames: ["vlc.exe"],
     registryNames: ["vlc.exe"],
-    relativeCandidates: [["PROGRAM_FILES", "VideoLAN\\VLC\\vlc.exe"], ["PROGRAM_FILES_X86", "VideoLAN\\VLC\\vlc.exe"]],
+    relativeCandidates: [
+      ["PROGRAM_FILES", "VideoLAN\\VLC\\vlc.exe"],
+      ["PROGRAM_FILES_X86", "VideoLAN\\VLC\\vlc.exe"],
+    ],
   },
   {
     id: "WINDOWS_MEDIA_PLAYER",
     label: "Windows Media Player",
     executableNames: ["wmplayer.exe"],
     registryNames: ["wmplayer.exe"],
-    relativeCandidates: [["PROGRAM_FILES", "Windows Media Player\\wmplayer.exe"], ["PROGRAM_FILES_X86", "Windows Media Player\\wmplayer.exe"]],
+    relativeCandidates: [
+      ["PROGRAM_FILES", "Windows Media Player\\wmplayer.exe"],
+      ["PROGRAM_FILES_X86", "Windows Media Player\\wmplayer.exe"],
+    ],
   },
   {
     id: "MPC_HC",
@@ -68,12 +74,21 @@ async function discoverDefinition(definition: KnownPlayerDefinition): Promise<st
   const candidates = new Set<string>();
   for (const executableName of definition.executableNames) {
     const output = await run("where.exe", [executableName]);
-    for (const result of output.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)) candidates.add(result);
+    for (const result of output
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean))
+      candidates.add(result);
   }
   for (const registryName of definition.registryNames) {
     for (const root of ["HKCU", "HKLM"]) {
       for (const view of ["/reg:64", "/reg:32"]) {
-        const output = await run("reg.exe", ["query", `${root}\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${registryName}`, "/ve", view]);
+        const output = await run("reg.exe", [
+          "query",
+          `${root}\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${registryName}`,
+          "/ve",
+          view,
+        ]);
         const found = registryPathFromOutput(output);
         if (found) candidates.add(found);
       }
@@ -94,19 +109,27 @@ async function discoverDefinition(definition: KnownPlayerDefinition): Promise<st
 }
 
 export async function discoverKnownPlayers(): Promise<ExternalPlayerOption[]> {
-  const discovered = await Promise.all(DEFINITIONS.map(async (definition): Promise<ExternalPlayerOption> => {
-    const executablePath = process.platform === "win32" ? await discoverDefinition(definition) : undefined;
-    return {
-      id: definition.id,
-      label: definition.label,
-      kind: "KNOWN",
-      available: Boolean(executablePath),
-      executablePath,
-      detail: executablePath ? "已偵測安裝位置" : "目前未偵測到安裝位置；開啟時將安全降級",
-    };
-  }));
+  const discovered = await Promise.all(
+    DEFINITIONS.map(async (definition): Promise<ExternalPlayerOption> => {
+      const executablePath = process.platform === "win32" ? await discoverDefinition(definition) : undefined;
+      return {
+        id: definition.id,
+        label: definition.label,
+        kind: "KNOWN",
+        available: Boolean(executablePath),
+        executablePath,
+        detail: executablePath ? "已偵測安裝位置" : "目前未偵測到安裝位置；開啟時將安全降級",
+      };
+    }),
+  );
   return [
-    { id: "SYSTEM_DEFAULT", label: "Windows 系統預設播放器", kind: "SYSTEM", available: true, detail: "交由目前的 Windows 檔案關聯開啟" },
+    {
+      id: "SYSTEM_DEFAULT",
+      label: "Windows 系統預設播放器",
+      kind: "SYSTEM",
+      available: true,
+      detail: "交由目前的 Windows 檔案關聯開啟",
+    },
     ...discovered,
   ];
 }

@@ -18,4 +18,3 @@ export function assertSafeHexId(value: string, label = "ID"): string {
   }
   return value.toLowerCase();
 }
-

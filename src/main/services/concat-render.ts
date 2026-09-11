@@ -22,9 +22,20 @@ import type {
   WatermarkSettings,
   RenderVideoCodec,
 } from "../../shared/domain";
-import { DEFAULT_AUDIO_PROTECTION_OPTIONS, DEFAULT_MAIN_START_CARD_OPTIONS, DEFAULT_ZOOM_ENHANCEMENT_PRESET } from "../../shared/domain";
+import {
+  DEFAULT_AUDIO_PROTECTION_OPTIONS,
+  DEFAULT_MAIN_START_CARD_OPTIONS,
+  DEFAULT_ZOOM_ENHANCEMENT_PRESET,
+} from "../../shared/domain";
 import { colorPreset } from "../../shared/color-presets";
-import { DEFAULT_INTRO_TARGET_DURATION_MS, DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT, INTRO_MAX_SEGMENTS, INTRO_MIN_SEGMENT_MS, MAX_IMAGE_DURATION_MS, MIN_IMAGE_DURATION_MS } from "../../shared/domain";
+import {
+  DEFAULT_INTRO_TARGET_DURATION_MS,
+  DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT,
+  INTRO_MAX_SEGMENTS,
+  INTRO_MIN_SEGMENT_MS,
+  MAX_IMAGE_DURATION_MS,
+  MIN_IMAGE_DURATION_MS,
+} from "../../shared/domain";
 import { assertSafeHexId } from "./path-safety";
 import { ProjectStore } from "./project-store";
 import { SourceService } from "./source-service";
@@ -32,7 +43,12 @@ import { MediaProbe } from "./media-probe";
 import { finalizePartialOutput } from "./atomic-output";
 import { imageDurationMs, mainRenderSelections } from "../../shared/editing-rules";
 import { introSegmentsForOutput } from "../../shared/intro-duration";
-import { buildSubtitleAss, escapeFfmpegFilterPath, validateSubtitleBurnInOptions, writeSubtitleAss } from "./subtitle-burn-in";
+import {
+  buildSubtitleAss,
+  escapeFfmpegFilterPath,
+  validateSubtitleBurnInOptions,
+  writeSubtitleAss,
+} from "./subtitle-burn-in";
 import type { SubtitleTranslationService } from "./subtitle-translation";
 import { normalizeWatermarkSettings, watermarkAppliesToPurpose, watermarkRenderedText } from "../../shared/watermark";
 import { sanitizeAudioProtectionOptions, sanitizeBgmScopeSelection } from "./user-preferences";
@@ -97,10 +113,12 @@ export function validateAudioProtectionOptions(raw?: AudioProtectionOptions): Au
     "preserveSceneMatchedSounds",
     "eqEnabled",
   ] as const;
-  if (booleanKeys.some((key) => typeof raw[key] !== "boolean" || raw[key] !== sanitized[key])
-    || raw.maxDuckingDb !== sanitized.maxDuckingDb
-    || raw.eqReductionDb !== sanitized.eqReductionDb
-    || raw.peakCeilingDb !== sanitized.peakCeilingDb) {
+  if (
+    booleanKeys.some((key) => typeof raw[key] !== "boolean" || raw[key] !== sanitized[key]) ||
+    raw.maxDuckingDb !== sanitized.maxDuckingDb ||
+    raw.eqReductionDb !== sanitized.eqReductionDb ||
+    raw.peakCeilingDb !== sanitized.peakCeilingDb
+  ) {
     throw new Error("人聲保護範圍無效：最大壓低須為 3–6 dB、EQ 須為 0.5–4 dB、峰值上限須為 -1 或 -2 dB。");
   }
   return sanitized;
@@ -119,7 +137,8 @@ export function concatInputStartTimesMs(inputs: ConcatInput[], transitionSeconds
   const starts = [0];
   let accumulatedMs = inputs[0].durationMs;
   for (let index = 1; index < inputs.length; index += 1) {
-    const cardTransition = inputs[index].mainStartCard?.transitionStyle ?? inputs[index - 1].mainStartCard?.transitionStyle;
+    const cardTransition =
+      inputs[index].mainStartCard?.transitionStyle ?? inputs[index - 1].mainStartCard?.transitionStyle;
     const overlapMs = cardTransition === "HARD_CUT" ? 0 : transitionSeconds * 1000;
     starts.push(Math.max(0, accumulatedMs - overlapMs));
     accumulatedMs += inputs[index].durationMs - overlapMs;
@@ -145,29 +164,46 @@ export function selectBgmTracksForScopes(
     const timelineOutMs = Math.min(track.timelineOutMs, boundaries.introEndMs);
     if (track.timelineInMs >= boundaries.introEndMs || timelineOutMs <= track.timelineInMs) return [];
     const durationMs = timelineOutMs - track.timelineInMs;
-    return [{
-      ...track,
-      timelineOutMs,
-      sourceOutMs: Math.min(track.sourceOutMs, track.sourceInMs + durationMs),
-      fadeOutMs: Math.min(durationMs, Math.max(track.fadeOutMs, 1_500)),
-    }];
+    return [
+      {
+        ...track,
+        timelineOutMs,
+        sourceOutMs: Math.min(track.sourceOutMs, track.sourceInMs + durationMs),
+        fadeOutMs: Math.min(durationMs, Math.max(track.fadeOutMs, 1_500)),
+      },
+    ];
   });
 }
 
 export function validateMainStartCardOptions(raw: MainStartCardOptions): MainStartCardOptions {
   if (!raw || typeof raw !== "object") throw new Error("請先完成正片開始提示頁設定。");
-  const integerInRange = (value: unknown, minimum: number, maximum: number) => Number.isInteger(value) && Number(value) >= minimum && Number(value) <= maximum;
+  const integerInRange = (value: unknown, minimum: number, maximum: number) =>
+    Number.isInteger(value) && Number(value) >= minimum && Number(value) <= maximum;
   if (!integerInRange(raw.durationSeconds, 3, 7)) throw new Error("正片開始提示頁須為 3–7 秒。");
-  if (typeof raw.line1 !== "string" || !raw.line1.trim() || raw.line1.length > 80 || /[\r\n]/.test(raw.line1)) throw new Error("提示頁第一行文字須為 1–80 個字且不可換行。");
-  if (typeof raw.line2 !== "string" || !raw.line2.trim() || raw.line2.length > 80 || /[\r\n]/.test(raw.line2)) throw new Error("提示頁第二行文字須為 1–80 個字且不可換行。");
-  if (!integerInRange(raw.line1FontSize1080p, 36, 180) || !integerInRange(raw.line2FontSize1080p, 30, 160)) throw new Error("提示頁文字大小設定無效。");
+  if (typeof raw.line1 !== "string" || !raw.line1.trim() || raw.line1.length > 80 || /[\r\n]/.test(raw.line1))
+    throw new Error("提示頁第一行文字須為 1–80 個字且不可換行。");
+  if (typeof raw.line2 !== "string" || !raw.line2.trim() || raw.line2.length > 80 || /[\r\n]/.test(raw.line2))
+    throw new Error("提示頁第二行文字須為 1–80 個字且不可換行。");
+  if (!integerInRange(raw.line1FontSize1080p, 36, 180) || !integerInRange(raw.line2FontSize1080p, 30, 160))
+    throw new Error("提示頁文字大小設定無效。");
   if (!integerInRange(raw.lineGap1080p, 50, 240)) throw new Error("提示頁兩行文字間距設定無效。");
   if (!integerInRange(raw.overlayOpacityPercent, 30, 85)) throw new Error("半透明遮罩須為 30%–85%。");
   if (!MAIN_START_TRANSITIONS.has(raw.transitionStyle)) throw new Error("正片開始提示頁轉場選項無效。");
-  if (raw.backgroundIntroSegmentId !== undefined && (typeof raw.backgroundIntroSegmentId !== "string" || !raw.backgroundIntroSegmentId.trim() || raw.backgroundIntroSegmentId.length > 200 || /[\r\n\0]/.test(raw.backgroundIntroSegmentId))) {
+  if (
+    raw.backgroundIntroSegmentId !== undefined &&
+    (typeof raw.backgroundIntroSegmentId !== "string" ||
+      !raw.backgroundIntroSegmentId.trim() ||
+      raw.backgroundIntroSegmentId.length > 200 ||
+      /[\r\n\0]/.test(raw.backgroundIntroSegmentId))
+  ) {
     throw new Error("提示頁背景片頭片段識別無效。");
   }
-  return { ...raw, line1: raw.line1.trim(), line2: raw.line2.trim(), backgroundIntroSegmentId: raw.backgroundIntroSegmentId?.trim() || undefined };
+  return {
+    ...raw,
+    line1: raw.line1.trim(),
+    line2: raw.line2.trim(),
+    backgroundIntroSegmentId: raw.backgroundIntroSegmentId?.trim() || undefined,
+  };
 }
 
 function resolveMainStartCardFont(): string {
@@ -180,8 +216,12 @@ function resolveMainStartCardFont(): string {
 
 function resolveWatermarkFonts(): { chinese: string; english: string } {
   const windowsRoot = process.env.WINDIR || "C:\\Windows";
-  const chinese = ["msjhbd.ttc", "msjh.ttc", "msyhbd.ttc", "msyh.ttc", "arial.ttf"].map((name) => path.join(windowsRoot, "Fonts", name)).find(existsSync);
-  const english = ["arial.ttf", "segoeuib.ttf", "msjhbd.ttc", "msjh.ttc"].map((name) => path.join(windowsRoot, "Fonts", name)).find(existsSync);
+  const chinese = ["msjhbd.ttc", "msjh.ttc", "msyhbd.ttc", "msyh.ttc", "arial.ttf"]
+    .map((name) => path.join(windowsRoot, "Fonts", name))
+    .find(existsSync);
+  const english = ["arial.ttf", "segoeuib.ttf", "msjhbd.ttc", "msjh.ttc"]
+    .map((name) => path.join(windowsRoot, "Fonts", name))
+    .find(existsSync);
   if (!chinese || !english) throw new Error("找不到可用的 Windows 浮水印字型，已阻擋輸出。");
   return { chinese, english };
 }
@@ -196,14 +236,22 @@ function watermarkAlphaExpression(settings: WatermarkSettings): string {
   const fadeIn = settings.fadeInSeconds;
   const fadeOut = settings.fadeOutSeconds;
   let envelope = "1";
-  if (fadeIn > 0 && fadeOut > 0) envelope = `if(lt(${phase},${ffmpegNumber(fadeIn)}),${phase}/${ffmpegNumber(fadeIn)},if(lt(${phase},${ffmpegNumber(settings.visibleDurationSeconds - fadeOut)}),1,(${visible}-${phase})/${ffmpegNumber(fadeOut)}))`;
+  if (fadeIn > 0 && fadeOut > 0)
+    envelope = `if(lt(${phase},${ffmpegNumber(fadeIn)}),${phase}/${ffmpegNumber(fadeIn)},if(lt(${phase},${ffmpegNumber(settings.visibleDurationSeconds - fadeOut)}),1,(${visible}-${phase})/${ffmpegNumber(fadeOut)}))`;
   else if (fadeIn > 0) envelope = `if(lt(${phase},${ffmpegNumber(fadeIn)}),${phase}/${ffmpegNumber(fadeIn)},1)`;
-  else if (fadeOut > 0) envelope = `if(lt(${phase},${ffmpegNumber(settings.visibleDurationSeconds - fadeOut)}),1,(${visible}-${phase})/${ffmpegNumber(fadeOut)})`;
+  else if (fadeOut > 0)
+    envelope = `if(lt(${phase},${ffmpegNumber(settings.visibleDurationSeconds - fadeOut)}),1,(${visible}-${phase})/${ffmpegNumber(fadeOut)})`;
   return `${ffmpegNumber(settings.textOpacityPercent / 100)}*${envelope}`;
 }
 
-export function buildWatermarkFilterChain(settings: WatermarkSettings, width: number, height: number, resources: WatermarkRenderResources): string {
-  if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) throw new Error("浮水印輸出解析度無效。");
+export function buildWatermarkFilterChain(
+  settings: WatermarkSettings,
+  width: number,
+  height: number,
+  resources: WatermarkRenderResources,
+): string {
+  if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0)
+    throw new Error("浮水印輸出解析度無效。");
   const normalized = normalizeWatermarkSettings(settings);
   const scale = height / 1080;
   const margin = Math.max(6, Math.round(normalized.safeMargin1080p * scale));
@@ -212,7 +260,12 @@ export function buildWatermarkFilterChain(settings: WatermarkSettings, width: nu
   const phase = `mod(t-${ffmpegNumber(normalized.startSeconds)},${ffmpegNumber(normalized.intervalSeconds)})`;
   const enable = `gte(t,${ffmpegNumber(normalized.startSeconds)})*lt(${phase},${ffmpegNumber(normalized.visibleDurationSeconds)})`;
   const alpha = watermarkAlphaExpression(normalized);
-  const draw = (item: WatermarkSettings["chinese"], textFilePath: string, fontFilePath: string, shadowOpacity: number) => {
+  const draw = (
+    item: WatermarkSettings["chinese"],
+    textFilePath: string,
+    fontFilePath: string,
+    shadowOpacity: number,
+  ) => {
     const x = item.position === "LOWER_LEFT" ? margin.toString() : `w-text_w-${margin}`;
     const fontSize = Math.max(10, Math.round(item.fontSize1080p * scale));
     const lineSpacing = item.layout === "STACKED_TWO_LINES" ? Math.round(-15 * scale) : 0;
@@ -229,11 +282,18 @@ function samePath(left: string, right: string): boolean {
   return normalize(left) === normalize(right);
 }
 
-function localZoomSegments(input: ConcatInput): Array<ZoomSegment & { localStartSeconds: number; localEndSeconds: number }> {
+function localZoomSegments(
+  input: ConcatInput,
+): Array<ZoomSegment & { localStartSeconds: number; localEndSeconds: number }> {
   const sourceStartMs = input.startMs ?? 0;
   const sourceEndMs = sourceStartMs + input.durationMs;
   return (input.zoomSegments ?? [])
-    .filter((segment) => segment.endMs > sourceStartMs && segment.startMs < sourceEndMs && (segment.zoomPercent > 100 || (segment.enhancementPreset ?? DEFAULT_ZOOM_ENHANCEMENT_PRESET) !== "OFF"))
+    .filter(
+      (segment) =>
+        segment.endMs > sourceStartMs &&
+        segment.startMs < sourceEndMs &&
+        (segment.zoomPercent > 100 || (segment.enhancementPreset ?? DEFAULT_ZOOM_ENHANCEMENT_PRESET) !== "OFF"),
+    )
     .map((segment) => ({
       ...segment,
       localStartSeconds: Math.max(0, segment.startMs - sourceStartMs) / 1000,
@@ -247,8 +307,16 @@ const ZOOM_ENHANCEMENT_FILTERS: Record<Exclude<ZoomEnhancementPreset, "OFF">, { 
   DENOISE: { denoise: "hqdn3d=2.2:1.8:3.2:2.6", sharpen: "unsharp=5:5:0.25:5:5:0" },
 };
 
-function zoomExpression(segments: ReturnType<typeof localZoomSegments>, value: (segment: ZoomSegment) => number, fallback: number): string {
-  return segments.reduceRight((next, segment) => `if(between(in_time,${ffmpegNumber(segment.localStartSeconds)},${ffmpegNumber(segment.localEndSeconds)}),${ffmpegNumber(value(segment))},${next})`, ffmpegNumber(fallback));
+function zoomExpression(
+  segments: ReturnType<typeof localZoomSegments>,
+  value: (segment: ZoomSegment) => number,
+  fallback: number,
+): string {
+  return segments.reduceRight(
+    (next, segment) =>
+      `if(between(in_time,${ffmpegNumber(segment.localStartSeconds)},${ffmpegNumber(segment.localEndSeconds)}),${ffmpegNumber(value(segment))},${next})`,
+    ffmpegNumber(fallback),
+  );
 }
 
 export function buildConcatFilterGraph(
@@ -267,7 +335,11 @@ export function buildConcatFilterGraph(
 
   const transitionMs = transitionSeconds * 1000;
   for (const input of inputs) {
-    if (!Number.isFinite(input.durationMs) || input.durationMs < 100 || (inputs.length > 1 && input.durationMs <= transitionMs + 50)) {
+    if (
+      !Number.isFinite(input.durationMs) ||
+      input.durationMs < 100 ||
+      (inputs.length > 1 && input.durationMs <= transitionMs + 50)
+    ) {
       throw new Error(`片段長度必須大於 ${transitionSeconds} 秒，才能建立完整疊化。`);
     }
   }
@@ -280,11 +352,19 @@ export function buildConcatFilterGraph(
     const baseVideoLabel = zooms.length || input.mainStartCard ? `vbase${index}` : `v${index}`;
     if (input.isPortrait || portrait) {
       filters.push(`[${index}:v:0]fps=30000/1001,split=2[pbg${index}][pfg${index}]`);
-      filters.push(`[pbg${index}]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},boxblur=luma_radius=min(h\\,w)/30:luma_power=1[blur${index}]`);
-      filters.push(`[pfg${index}]scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2[front${index}]`);
-      filters.push(`[blur${index}][front${index}]overlay=(W-w)/2:(H-h)/2${colorChain},setsar=1,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[${baseVideoLabel}]`);
+      filters.push(
+        `[pbg${index}]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},boxblur=luma_radius=min(h\\,w)/30:luma_power=1[blur${index}]`,
+      );
+      filters.push(
+        `[pfg${index}]scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2[front${index}]`,
+      );
+      filters.push(
+        `[blur${index}][front${index}]overlay=(W-w)/2:(H-h)/2${colorChain},setsar=1,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[${baseVideoLabel}]`,
+      );
     } else {
-      filters.push(`[${index}:v:0]fps=30000/1001,scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black${colorChain},setsar=1,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[${baseVideoLabel}]`);
+      filters.push(
+        `[${index}:v:0]fps=30000/1001,scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black${colorChain},setsar=1,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[${baseVideoLabel}]`,
+      );
     }
     if (zooms.length) {
       const zoom = zoomExpression(zooms, (segment) => segment.zoomPercent / 100, 1);
@@ -296,16 +376,27 @@ export function buildConcatFilterGraph(
         if (preset === "OFF") return;
         const nextLabel = `vdenoise${index}_${segmentIndex}`;
         const timing = `between(t,${ffmpegNumber(segment.localStartSeconds)},${ffmpegNumber(segment.localEndSeconds)})`;
-        filters.push(`[${beforeZoomLabel}]${ZOOM_ENHANCEMENT_FILTERS[preset].denoise}:enable='${timing}'[${nextLabel}]`);
+        filters.push(
+          `[${beforeZoomLabel}]${ZOOM_ENHANCEMENT_FILTERS[preset].denoise}:enable='${timing}'[${nextLabel}]`,
+        );
         beforeZoomLabel = nextLabel;
       });
-      const hasSharpen = zooms.some((segment) => (segment.enhancementPreset ?? DEFAULT_ZOOM_ENHANCEMENT_PRESET) !== "OFF");
+      const hasSharpen = zooms.some(
+        (segment) => (segment.enhancementPreset ?? DEFAULT_ZOOM_ENHANCEMENT_PRESET) !== "OFF",
+      );
       const zoomOutputLabel = hasSharpen ? `vzoom${index}` : `v${index}`;
-      filters.push(`[${beforeZoomLabel}]zoompan=z='${zoom}':x='(iw-iw/zoom)*${centerX}':y='(ih-ih/zoom)*${centerY}':d=1:s=${width}x${height}:fps=30000/1001,setsar=1,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[${zoomOutputLabel}]`);
+      filters.push(
+        `[${beforeZoomLabel}]zoompan=z='${zoom}':x='(iw-iw/zoom)*${centerX}':y='(ih-ih/zoom)*${centerY}':d=1:s=${width}x${height}:fps=30000/1001,setsar=1,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[${zoomOutputLabel}]`,
+      );
       let afterZoomLabel = zoomOutputLabel;
-      const sharpened = zooms.filter((segment) => (segment.enhancementPreset ?? DEFAULT_ZOOM_ENHANCEMENT_PRESET) !== "OFF");
+      const sharpened = zooms.filter(
+        (segment) => (segment.enhancementPreset ?? DEFAULT_ZOOM_ENHANCEMENT_PRESET) !== "OFF",
+      );
       sharpened.forEach((segment, segmentIndex) => {
-        const preset = (segment.enhancementPreset ?? DEFAULT_ZOOM_ENHANCEMENT_PRESET) as Exclude<ZoomEnhancementPreset, "OFF">;
+        const preset = (segment.enhancementPreset ?? DEFAULT_ZOOM_ENHANCEMENT_PRESET) as Exclude<
+          ZoomEnhancementPreset,
+          "OFF"
+        >;
         const nextLabel = segmentIndex === sharpened.length - 1 ? `v${index}` : `vsharpen${index}_${segmentIndex}`;
         const timing = `between(t,${ffmpegNumber(segment.localStartSeconds)},${ffmpegNumber(segment.localEndSeconds)})`;
         filters.push(`[${afterZoomLabel}]${ZOOM_ENHANCEMENT_FILTERS[preset].sharpen}:enable='${timing}'[${nextLabel}]`);
@@ -332,12 +423,18 @@ export function buildConcatFilterGraph(
       );
     } else if (input.hasAudio) {
       const startMs = input.startMs ?? 0;
-      const localSegments = (input.volumeSegments ?? []).map((segment) => ({
-        start: Math.max(0, segment.startMs - startMs) / 1000,
-        end: Math.min(input.durationMs, segment.endMs - startMs) / 1000,
-        gain: segment.volumePercent / 100,
-      })).filter((segment) => segment.end > segment.start);
-      const volumeExpression = localSegments.reduceRight((fallback, segment) => `if(between(t,${ffmpegNumber(segment.start)},${ffmpegNumber(segment.end)}),${ffmpegNumber(segment.gain)},${fallback})`, ffmpegNumber(sourceAudioVolumePercent / 100));
+      const localSegments = (input.volumeSegments ?? [])
+        .map((segment) => ({
+          start: Math.max(0, segment.startMs - startMs) / 1000,
+          end: Math.min(input.durationMs, segment.endMs - startMs) / 1000,
+          gain: segment.volumePercent / 100,
+        }))
+        .filter((segment) => segment.end > segment.start);
+      const volumeExpression = localSegments.reduceRight(
+        (fallback, segment) =>
+          `if(between(t,${ffmpegNumber(segment.start)},${ffmpegNumber(segment.end)}),${ffmpegNumber(segment.gain)},${fallback})`,
+        ffmpegNumber(sourceAudioVolumePercent / 100),
+      );
       const initialAudioLabel = audioProtection.enabled ? `abase${index}` : `a${index}`;
       filters.push(
         `[${index}:a:0]aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,volume='${volumeExpression}':eval=frame,apad,atrim=duration=${ffmpegNumber(input.durationMs / 1000)},asetpts=PTS-STARTPTS[${initialAudioLabel}]`,
@@ -352,14 +449,20 @@ export function buildConcatFilterGraph(
           const releaseMs = audioProtection.preserveSceneMatchedSounds ? 500 : 320;
           filters.push(`[${protectedLabel}]asplit=3[adry${index}][awet${index}][adet${index}]`);
           filters.push(`[adet${index}]highpass=f=1000,lowpass=f=4000[avoice${index}]`);
-          filters.push(`[awet${index}][avoice${index}]sidechaincompress=threshold=${ffmpegNumber(detectorThreshold)}:ratio=12:attack=${attackMs}:release=${releaseMs}:makeup=1[aducked${index}]`);
+          filters.push(
+            `[awet${index}][avoice${index}]sidechaincompress=threshold=${ffmpegNumber(detectorThreshold)}:ratio=12:attack=${attackMs}:release=${releaseMs}:makeup=1[aducked${index}]`,
+          );
           filters.push(`[adry${index}]volume=${ffmpegNumber(dryFloor)}[afloor${index}]`);
           filters.push(`[aducked${index}]volume=${ffmpegNumber(wetGain)}[awetgain${index}]`);
-          filters.push(`[afloor${index}][awetgain${index}]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aprivacy${index}]`);
+          filters.push(
+            `[afloor${index}][awetgain${index}]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aprivacy${index}]`,
+          );
           protectedLabel = `aprivacy${index}`;
         }
         if (audioProtection.eqEnabled) {
-          filters.push(`[${protectedLabel}]equalizer=f=2500:t=q:w=0.8:g=-${ffmpegNumber(audioProtection.eqReductionDb)}[aeq${index}]`);
+          filters.push(
+            `[${protectedLabel}]equalizer=f=2500:t=q:w=0.8:g=-${ffmpegNumber(audioProtection.eqReductionDb)}[aeq${index}]`,
+          );
           protectedLabel = `aeq${index}`;
         }
         filters.push(`[${protectedLabel}]anull[a${index}]`);
@@ -377,7 +480,8 @@ export function buildConcatFilterGraph(
   for (let index = 1; index < inputs.length; index += 1) {
     const nextVideoLabel = `vx${index}`;
     const nextAudioLabel = `ax${index}`;
-    const cardTransition = inputs[index].mainStartCard?.transitionStyle ?? inputs[index - 1].mainStartCard?.transitionStyle;
+    const cardTransition =
+      inputs[index].mainStartCard?.transitionStyle ?? inputs[index - 1].mainStartCard?.transitionStyle;
     if (cardTransition === "HARD_CUT") {
       filters.push(`[${videoOutputLabel}][v${index}]concat=n=2:v=1:a=0[${nextVideoLabel}]`);
       filters.push(`[${audioOutputLabel}][a${index}]concat=n=2:v=0:a=1[${nextAudioLabel}]`);
@@ -401,7 +505,8 @@ export function buildConcatFilterGraph(
   const originalAudioLabel = audioOutputLabel;
   const bgmLabels: string[] = [];
   bgmInputs.forEach((track, bgmIndex) => {
-    if (track.timelineInMs < 0 || track.timelineInMs >= expectedDurationMs) throw new Error(`配樂「${track.fileName}」的開始時間已超出目前影片總時間。`);
+    if (track.timelineInMs < 0 || track.timelineInMs >= expectedDurationMs)
+      throw new Error(`配樂「${track.fileName}」的開始時間已超出目前影片總時間。`);
     const shutterInputCount = inputs.filter((input) => input.photoSoundInputIndex !== undefined).length;
     const inputIndex = inputs.length + shutterInputCount + bgmIndex;
     const effectiveTimelineOutMs = Math.min(track.timelineOutMs, expectedDurationMs);
@@ -409,15 +514,23 @@ export function buildConcatFilterGraph(
     const effectiveSourceOutMs = Math.min(track.sourceOutMs, track.sourceInMs + durationSeconds * 1000);
     const chain = [
       `[${inputIndex}:a:0]atrim=start=${ffmpegNumber(track.sourceInMs / 1000)}:end=${ffmpegNumber(effectiveSourceOutMs / 1000)}`,
-      "asetpts=PTS-STARTPTS", "aresample=48000", "aformat=sample_rates=48000:channel_layouts=stereo",
+      "asetpts=PTS-STARTPTS",
+      "aresample=48000",
+      "aformat=sample_rates=48000:channel_layouts=stereo",
       `volume=${ffmpegNumber(track.volumePercent / 100)}`,
     ];
     if (track.fadeInMs > 0) chain.push(`afade=t=in:st=0:d=${ffmpegNumber(track.fadeInMs / 1000)}`);
     if (track.fadeOutMs > 0) {
       const effectiveFadeOut = Math.min(track.fadeOutMs / 1000, durationSeconds);
-      chain.push(`afade=t=out:st=${ffmpegNumber(Math.max(0, durationSeconds - effectiveFadeOut))}:d=${ffmpegNumber(effectiveFadeOut)}`);
+      chain.push(
+        `afade=t=out:st=${ffmpegNumber(Math.max(0, durationSeconds - effectiveFadeOut))}:d=${ffmpegNumber(effectiveFadeOut)}`,
+      );
     }
-    chain.push(`adelay=${Math.round(track.timelineInMs)}:all=1`, "apad", `atrim=duration=${ffmpegNumber(expectedDurationMs / 1000)}[bgm${bgmIndex}]`);
+    chain.push(
+      `adelay=${Math.round(track.timelineInMs)}:all=1`,
+      "apad",
+      `atrim=duration=${ffmpegNumber(expectedDurationMs / 1000)}[bgm${bgmIndex}]`,
+    );
     filters.push(chain.join(","));
     bgmLabels.push(`bgm${bgmIndex}`);
   });
@@ -425,7 +538,9 @@ export function buildConcatFilterGraph(
     ? `acompressor=threshold=0.501187:ratio=4:attack=15:release=300:makeup=1,alimiter=limit=${ffmpegNumber(10 ** (audioProtection.peakCeilingDb / 20))}:attack=5:release=100`
     : "alimiter=limit=0.95";
   if (bgmLabels.length) {
-    filters.push(`[${originalAudioLabel}]${bgmLabels.map((label) => `[${label}]`).join("")}amix=inputs=${bgmLabels.length + 1}:duration=first:dropout_transition=0:normalize=0,${finalDynamics}[aout]`);
+    filters.push(
+      `[${originalAudioLabel}]${bgmLabels.map((label) => `[${label}]`).join("")}amix=inputs=${bgmLabels.length + 1}:duration=first:dropout_transition=0:normalize=0,${finalDynamics}[aout]`,
+    );
     audioOutputLabel = "aout";
   } else {
     filters.push(`[${originalAudioLabel}]${finalDynamics}[aout]`);
@@ -510,7 +625,12 @@ export function runFfmpegWithProgress(
 
     const onAbort = () => {
       cancellationRequested = true;
-      try { child.stdin.write("q\n"); child.stdin.end(); } catch { child.kill(); }
+      try {
+        child.stdin.write("q\n");
+        child.stdin.end();
+      } catch {
+        child.kill();
+      }
       forceKillTimer = setTimeout(() => child.kill(), 8_000);
     };
     signal?.addEventListener("abort", onAbort, { once: true });
@@ -535,8 +655,10 @@ export function runFfmpegWithProgress(
 }
 
 export function buildVideoCodecArgs(videoCodec: RenderVideoCodec): string[] {
-  if (videoCodec === "H265_QSV") return ["-c:v", "hevc_qsv", "-preset", "medium", "-global_quality", "27", "-tag:v", "hvc1"];
-  if (videoCodec === "H264_QSV") return ["-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "25", "-profile:v", "high"];
+  if (videoCodec === "H265_QSV")
+    return ["-c:v", "hevc_qsv", "-preset", "medium", "-global_quality", "27", "-tag:v", "hvc1"];
+  if (videoCodec === "H264_QSV")
+    return ["-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "25", "-profile:v", "high"];
   if (videoCodec === "H265") return ["-c:v", "libx265", "-preset", "veryfast", "-crf", "27", "-tag:v", "hvc1"];
   if (videoCodec === "H264") return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "25", "-profile:v", "high"];
   throw new Error("影片編碼格式無效。只支援 Intel QSV GPU／CPU H.265 或 H.264。");
@@ -561,11 +683,20 @@ export class ConcatRenderService {
   ): Promise<ConcatRenderResult> {
     if (!Array.isArray(request.orderedAssetIds)) throw new Error("影片片段順序格式無效。");
     const purpose = request.purpose ?? "CONCAT";
-    if (purpose !== "CONCAT" && purpose !== "INTRO" && purpose !== "CLIP" && purpose !== "SHORTS") throw new Error("預覽輸出用途無效。");
-    if (request.orderedAssetIds.length < 1) throw new Error(purpose === "INTRO" ? "至少需要一個片段才能產出 Intro 預覽。" : purpose === "CLIP" ? "至少需要一個固定時間段才能輸出。" : "正片沒有可供輸出的保留片段。");
+    if (purpose !== "CONCAT" && purpose !== "INTRO" && purpose !== "CLIP" && purpose !== "SHORTS")
+      throw new Error("預覽輸出用途無效。");
+    if (request.orderedAssetIds.length < 1)
+      throw new Error(
+        purpose === "INTRO"
+          ? "至少需要一個片段才能產出 Intro 預覽。"
+          : purpose === "CLIP"
+            ? "至少需要一個固定時間段才能輸出。"
+            : "正片沒有可供輸出的保留片段。",
+      );
     const project = this.store.getProject();
     const videoCodec = request.videoCodec ?? "H264";
-    if (videoCodec !== "H265_QSV" && videoCodec !== "H265" && videoCodec !== "H264_QSV" && videoCodec !== "H264") throw new Error("影片編碼格式無效。只支援 Intel QSV GPU／CPU H.265 或 H.264。");
+    if (videoCodec !== "H265_QSV" && videoCodec !== "H265" && videoCodec !== "H264_QSV" && videoCodec !== "H264")
+      throw new Error("影片編碼格式無效。只支援 Intel QSV GPU／CPU H.265 或 H.264。");
     const introTargetDurationMs = project.introTargetDurationMs ?? DEFAULT_INTRO_TARGET_DURATION_MS;
     const outputIntroSegments = introSegmentsForOutput(project.introSegments, project.introSegmentMaxDurationMs);
     if (purpose === "CONCAT") {
@@ -573,56 +704,113 @@ export class ConcatRenderService {
       if (request.prependIntro) {
         if (!introPrefix.length) throw new Error("已選擇自動串接片頭，但目前沒有已確認的 Intro 片段。");
         if (introPrefix.length > INTRO_MAX_SEGMENTS) throw new Error(`Intro 最多只能串接 ${INTRO_MAX_SEGMENTS} 段。`);
-        if (introPrefix.some((clip) => clip.outMs - clip.inMs < INTRO_MIN_SEGMENT_MS || clip.outMs - clip.inMs > project.introSegmentMaxDurationMs)) throw new Error("Intro 輸出片段不符合目前每段最高時間。");
-        if (introPrefix.reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0) > introTargetDurationMs) throw new Error(`Intro 總長超過目前設定的 ${Math.round(introTargetDurationMs / 1000)} 秒。`);
+        if (
+          introPrefix.some(
+            (clip) =>
+              clip.outMs - clip.inMs < INTRO_MIN_SEGMENT_MS ||
+              clip.outMs - clip.inMs > project.introSegmentMaxDurationMs,
+          )
+        )
+          throw new Error("Intro 輸出片段不符合目前每段最高時間。");
+        if (introPrefix.reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0) > introTargetDurationMs)
+          throw new Error(`Intro 總長超過目前設定的 ${Math.round(introTargetDurationMs / 1000)} 秒。`);
       }
       const expected = [...introPrefix, ...mainRenderSelections(project)];
       const requested = request.clipSelections;
-      if (!requested || expected.length !== requested.length || expected.some((clip, index) => clip.assetId !== requested[index]?.assetId || clip.inMs !== requested[index]?.inMs || clip.outMs !== requested[index]?.outMs || clip.mediaInsertionId !== requested[index]?.mediaInsertionId)) {
+      if (
+        !requested ||
+        expected.length !== requested.length ||
+        expected.some(
+          (clip, index) =>
+            clip.assetId !== requested[index]?.assetId ||
+            clip.inMs !== requested[index]?.inMs ||
+            clip.outMs !== requested[index]?.outMs ||
+            clip.mediaInsertionId !== requested[index]?.mediaInsertionId,
+        )
+      ) {
         throw new Error("串連要求與目前片頭／正片保留片段不一致；待決定或已排除範圍不可輸出。");
       }
-      if (request.orderedAssetIds.length !== expected.length || request.orderedAssetIds.some((id, index) => id !== expected[index].assetId)) {
+      if (
+        request.orderedAssetIds.length !== expected.length ||
+        request.orderedAssetIds.some((id, index) => id !== expected[index].assetId)
+      ) {
         throw new Error("串連來源順序與目前正片保留片段不一致。");
       }
     } else if (purpose === "INTRO") {
       const expected = outputIntroSegments;
       const requested = request.clipSelections;
-      if (!requested || expected.length !== requested.length || expected.some((clip, index) => clip.assetId !== requested[index]?.assetId || clip.inMs !== requested[index]?.inMs || clip.outMs !== requested[index]?.outMs)) {
+      if (
+        !requested ||
+        expected.length !== requested.length ||
+        expected.some(
+          (clip, index) =>
+            clip.assetId !== requested[index]?.assetId ||
+            clip.inMs !== requested[index]?.inMs ||
+            clip.outMs !== requested[index]?.outMs,
+        )
+      ) {
         throw new Error("Intro 輸出要求與目前已確認的片頭片段不一致。");
       }
       if (expected.length > INTRO_MAX_SEGMENTS) throw new Error(`Intro 最多只能輸出 ${INTRO_MAX_SEGMENTS} 段。`);
-      if (expected.some((clip) => clip.outMs - clip.inMs < INTRO_MIN_SEGMENT_MS || clip.outMs - clip.inMs > project.introSegmentMaxDurationMs)) throw new Error("Intro 輸出片段不符合目前每段最高時間。");
-      if (expected.reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0) > introTargetDurationMs) throw new Error(`Intro 總長超過目前設定的 ${Math.round(introTargetDurationMs / 1000)} 秒。`);
+      if (
+        expected.some(
+          (clip) =>
+            clip.outMs - clip.inMs < INTRO_MIN_SEGMENT_MS || clip.outMs - clip.inMs > project.introSegmentMaxDurationMs,
+        )
+      )
+        throw new Error("Intro 輸出片段不符合目前每段最高時間。");
+      if (expected.reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0) > introTargetDurationMs)
+        throw new Error(`Intro 總長超過目前設定的 ${Math.round(introTargetDurationMs / 1000)} 秒。`);
     } else if (purpose === "CLIP") {
       const requested = request.clipSelections;
       if (request.resolution !== "4K") throw new Error("最高解析度時間段固定輸出為 4K（3840×2160）。");
-      if (request.orderedAssetIds.length !== 1 || requested?.length !== 1 || requested[0].assetId !== request.orderedAssetIds[0]) throw new Error("固定時間段輸出只能包含一個專案影片片段。");
+      if (
+        request.orderedAssetIds.length !== 1 ||
+        requested?.length !== 1 ||
+        requested[0].assetId !== request.orderedAssetIds[0]
+      )
+        throw new Error("固定時間段輸出只能包含一個專案影片片段。");
       if (request.prependIntro || request.subtitleBurnIn?.enabled) throw new Error("固定時間段輸出不串接片頭或字幕。");
     } else {
-      if (!request.shortsPortrait) throw new Error("Shorts 必須使用 9:16 直式輸出。" );
-      if (request.shortsMaxDurationSec !== 60 && request.shortsMaxDurationSec !== 180) throw new Error("Shorts 長度上限只支援 60 或 180 秒。" );
+      if (!request.shortsPortrait) throw new Error("Shorts 必須使用 9:16 直式輸出。");
+      if (request.shortsMaxDurationSec !== 60 && request.shortsMaxDurationSec !== 180)
+        throw new Error("Shorts 長度上限只支援 60 或 180 秒。");
       const requested = request.clipSelections;
       const allowed = request.shortsSource === "INTRO" ? project.introSegments : mainRenderSelections(project);
-      if (!requested?.length) throw new Error("Shorts 至少需要一段已選片段。" );
-      if (requested.some((clip) => !allowed.some((candidate) => candidate.assetId === clip.assetId && candidate.inMs === clip.inMs && candidate.outMs === clip.outMs))) throw new Error("Shorts 包含不在目前片頭／正片清單內的片段。" );
-      if (request.prependIntro) throw new Error("Shorts 不會靜默串接 16:9 Intro；請在 Shorts 頁明確選擇片段。" );
+      if (!requested?.length) throw new Error("Shorts 至少需要一段已選片段。");
+      if (
+        requested.some(
+          (clip) =>
+            !allowed.some(
+              (candidate) =>
+                candidate.assetId === clip.assetId && candidate.inMs === clip.inMs && candidate.outMs === clip.outMs,
+            ),
+        )
+      )
+        throw new Error("Shorts 包含不在目前片頭／正片清單內的片段。");
+      if (request.prependIntro) throw new Error("Shorts 不會靜默串接 16:9 Intro；請在 Shorts 頁明確選擇片段。");
     }
     if (path.extname(outputPath).toLowerCase() !== ".mp4") throw new Error("串連預覽必須輸出為 MP4。");
-    const mainStartCard = purpose === "CONCAT" && request.prependIntro
-      ? validateMainStartCardOptions(request.mainStartCard ?? DEFAULT_MAIN_START_CARD_OPTIONS)
-      : undefined;
+    const mainStartCard =
+      purpose === "CONCAT" && request.prependIntro
+        ? validateMainStartCardOptions(request.mainStartCard ?? DEFAULT_MAIN_START_CARD_OPTIONS)
+        : undefined;
     const parsed = path.parse(outputPath);
     const renderId = randomUUID();
-    const mainStartTextPaths = mainStartCard ? {
-      line1: path.join(parsed.dir, `.${parsed.name}.${renderId}.main-start-line1.txt`),
-      line2: path.join(parsed.dir, `.${parsed.name}.${renderId}.main-start-line2.txt`),
-    } : undefined;
+    const mainStartTextPaths = mainStartCard
+      ? {
+          line1: path.join(parsed.dir, `.${parsed.name}.${renderId}.main-start-line1.txt`),
+          line2: path.join(parsed.dir, `.${parsed.name}.${renderId}.main-start-line2.txt`),
+        }
+      : undefined;
     const watermarkSettings = normalizeWatermarkSettings(project.watermarkSettings);
     const watermarkActive = request.includeWatermark !== false && watermarkAppliesToPurpose(watermarkSettings, purpose);
-    const watermarkTextPaths = watermarkActive ? {
-      chinese: path.join(parsed.dir, `.${parsed.name}.${renderId}.watermark-zh.txt`),
-      english: path.join(parsed.dir, `.${parsed.name}.${renderId}.watermark-en.txt`),
-    } : undefined;
+    const watermarkTextPaths = watermarkActive
+      ? {
+          chinese: path.join(parsed.dir, `.${parsed.name}.${renderId}.watermark-zh.txt`),
+          english: path.join(parsed.dir, `.${parsed.name}.${renderId}.watermark-en.txt`),
+        }
+      : undefined;
 
     onProgress({ phase: "PREPARING", percent: 0, outTimeMs: 0, expectedDurationMs: 0 });
     const assetsById = new Map<string, SourceAsset>();
@@ -633,7 +821,11 @@ export class ConcatRenderService {
       assetsById.set(assetId, await this.sources.ensureMetadata(assetId, signal));
     }
     const assets = request.orderedAssetIds.map((assetId) => assetsById.get(assetId)!);
-    if (assets.some((asset) => asset.metadataState !== "READY" || (asset.kind === "VIDEO" && !asset.mediaInfo?.durationMs))) {
+    if (
+      assets.some(
+        (asset) => asset.metadataState !== "READY" || (asset.kind === "VIDEO" && !asset.mediaInfo?.durationMs),
+      )
+    ) {
       throw new Error("至少一項素材無法取得有效媒體資訊，請先確認格式或 codec 是否受支援。");
     }
     if (assets.some((asset) => samePath(asset.sourcePath, outputPath))) {
@@ -644,10 +836,18 @@ export class ConcatRenderService {
       throw new Error("Intro 片段範圍與來源順序不一致。");
     }
     const inputs: ConcatInput[] = assets.map((asset, index) => {
-      const isIntroClip = purpose === "INTRO" || (purpose === "CONCAT" && Boolean(request.prependIntro) && index < project.introSegments.length);
+      const isIntroClip =
+        purpose === "INTRO" ||
+        (purpose === "CONCAT" && Boolean(request.prependIntro) && index < project.introSegments.length);
       const selectedColorPreset = colorPreset(project.colorSettings.introPresetId);
-      const applyColor = isIntroClip || ((purpose === "CONCAT" || purpose === "CLIP") && project.colorSettings.applyToMain);
-      const fullDurationMs = asset.kind === "IMAGE" ? (isIntroClip ? MAX_IMAGE_DURATION_MS : imageDurationMs(asset)) : asset.mediaInfo!.durationMs!;
+      const applyColor =
+        isIntroClip || ((purpose === "CONCAT" || purpose === "CLIP") && project.colorSettings.applyToMain);
+      const fullDurationMs =
+        asset.kind === "IMAGE"
+          ? isIntroClip
+            ? MAX_IMAGE_DURATION_MS
+            : imageDurationMs(asset)
+          : asset.mediaInfo!.durationMs!;
       const introRange = request.clipSelections?.[index];
       const requestedRange = request.clipSelections?.[index] ?? asset.previewRange;
       if (introRange?.assetId !== asset.id) {
@@ -655,9 +855,11 @@ export class ConcatRenderService {
       }
       const startMs = Math.round(requestedRange?.inMs ?? 0);
       const outMs = Math.round(requestedRange?.outMs ?? fullDurationMs);
-      const invalidImageRange = asset.kind === "IMAGE" && (isIntroClip
-        ? startMs !== 0 || outMs - startMs < MIN_IMAGE_DURATION_MS || outMs - startMs > MAX_IMAGE_DURATION_MS
-        : startMs !== 0 || outMs !== fullDurationMs);
+      const invalidImageRange =
+        asset.kind === "IMAGE" &&
+        (isIntroClip
+          ? startMs !== 0 || outMs - startMs < MIN_IMAGE_DURATION_MS || outMs - startMs > MAX_IMAGE_DURATION_MS
+          : startMs !== 0 || outMs !== fullDurationMs);
       if (startMs < 0 || outMs > fullDurationMs + 50 || outMs - startMs < 100 || invalidImageRange) {
         throw new Error(`「${asset.fileName}」的片段時間超出素材範圍。`);
       }
@@ -712,25 +914,27 @@ export class ConcatRenderService {
     }
     const currentProject = this.store.getProject();
     const requestedBgmScopes = validateBgmScopeSelection(request.bgmScopes);
-    const bgmScopesApplied: BgmScopeSelection = purpose === "CLIP" || request.includeBgm === false
-      ? { intro: false, main: false }
-      : purpose === "INTRO"
-        ? { intro: requestedBgmScopes.intro, main: false }
-        : purpose === "SHORTS"
-          ? request.shortsSource === "MAIN"
-            ? { intro: false, main: requestedBgmScopes.main }
-            : { intro: requestedBgmScopes.intro, main: false }
-          : request.prependIntro
-            ? requestedBgmScopes
-            : { intro: false, main: requestedBgmScopes.main };
+    const bgmScopesApplied: BgmScopeSelection =
+      purpose === "CLIP" || request.includeBgm === false
+        ? { intro: false, main: false }
+        : purpose === "INTRO"
+          ? { intro: requestedBgmScopes.intro, main: false }
+          : purpose === "SHORTS"
+            ? request.shortsSource === "MAIN"
+              ? { intro: false, main: requestedBgmScopes.main }
+              : { intro: requestedBgmScopes.intro, main: false }
+            : request.prependIntro
+              ? requestedBgmScopes
+              : { intro: false, main: requestedBgmScopes.main };
     const inputStartTimesMs = concatInputStartTimesMs(inputs, request.transitionSeconds);
     const mainStartCardIndex = mainStartCard ? outputIntroSegments.length : -1;
-    const bgmBoundaries = mainStartCardIndex >= 0
-      ? {
-          introEndMs: inputStartTimesMs[mainStartCardIndex],
-          mainStartMs: inputStartTimesMs[mainStartCardIndex + 1],
-        }
-      : undefined;
+    const bgmBoundaries =
+      mainStartCardIndex >= 0
+        ? {
+            introEndMs: inputStartTimesMs[mainStartCardIndex],
+            mainStartMs: inputStartTimesMs[mainStartCardIndex + 1],
+          }
+        : undefined;
     const bgmTracks = selectBgmTracksForScopes(currentProject.bgmTracks, bgmScopesApplied, bgmBoundaries);
     for (const track of bgmTracks) {
       if (track.resolutionStatus === "NEEDS_LOCAL_FILE" || !track.sourcePath) {
@@ -745,10 +949,29 @@ export class ConcatRenderService {
     }
     const sourceAudioVolumePercent = currentProject.sourceAudioVolumePercent ?? DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT;
     const audioProtection = validateAudioProtectionOptions(request.audioProtection);
-    const basePlan = buildConcatFilterGraph(inputs, request.transitionSeconds, request.resolution, [], sourceAudioVolumePercent, purpose === "SHORTS", audioProtection);
-    if (purpose === "SHORTS" && basePlan.expectedDurationMs > (request.shortsMaxDurationSec ?? 60) * 1000) throw new Error(`Shorts 總長 ${Math.ceil(basePlan.expectedDurationMs / 1000)} 秒超過目前 ${request.shortsMaxDurationSec ?? 60} 秒上限。`);
+    const basePlan = buildConcatFilterGraph(
+      inputs,
+      request.transitionSeconds,
+      request.resolution,
+      [],
+      sourceAudioVolumePercent,
+      purpose === "SHORTS",
+      audioProtection,
+    );
+    if (purpose === "SHORTS" && basePlan.expectedDurationMs > (request.shortsMaxDurationSec ?? 60) * 1000)
+      throw new Error(
+        `Shorts 總長 ${Math.ceil(basePlan.expectedDurationMs / 1000)} 秒超過目前 ${request.shortsMaxDurationSec ?? 60} 秒上限。`,
+      );
     const activeBgmTracks = bgmTracks.filter((track) => track.timelineInMs < basePlan.expectedDurationMs);
-    const plan = buildConcatFilterGraph(inputs, request.transitionSeconds, request.resolution, activeBgmTracks, sourceAudioVolumePercent, purpose === "SHORTS", audioProtection);
+    const plan = buildConcatFilterGraph(
+      inputs,
+      request.transitionSeconds,
+      request.resolution,
+      activeBgmTracks,
+      sourceAudioVolumePercent,
+      purpose === "SHORTS",
+      audioProtection,
+    );
     onProgress({
       phase: "PREPARING",
       percent: 0,
@@ -764,18 +987,52 @@ export class ConcatRenderService {
     let subtitleBurnedLanguages: SubtitleRenderLanguage[] | undefined;
     let subtitleTranslationProviders: SubtitleTranslationProvider[] | undefined;
     if (request.subtitleBurnIn?.enabled) {
-      if (purpose !== "CONCAT" && purpose !== "INTRO" && purpose !== "SHORTS") throw new Error("字幕嵌入只適用於正片、片頭或 Shorts 輸出。");
-      if (!this.subtitleTranslation || !this.subtitleCacheRoot) throw new Error("字幕翻譯與嵌入服務尚未初始化，已阻擋輸出。");
+      if (purpose !== "CONCAT" && purpose !== "INTRO" && purpose !== "SHORTS")
+        throw new Error("字幕嵌入只適用於正片、片頭或 Shorts 輸出。");
+      if (!this.subtitleTranslation || !this.subtitleCacheRoot)
+        throw new Error("字幕翻譯與嵌入服務尚未初始化，已阻擋輸出。");
       const subtitleOptions = validateSubtitleBurnInOptions(request.subtitleBurnIn);
-      const subtitleOutputScope = purpose === "INTRO" ? "INTRO" : purpose === "CONCAT" && request.prependIntro ? "MAIN_WITH_INTRO" : "MAIN";
-      const confirmedCues = project.subtitleCues.filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED"
-        && ((cue.timelineScope ?? "MAIN") === "INTRO" ? subtitleOutputScope !== "MAIN" : subtitleOutputScope !== "INTRO"));
-      if (!confirmedCues.length) throw new Error(`沒有已確認的${purpose === "INTRO" ? "片頭" : "正片"}字幕可嵌入影片。`);
-      onProgress({ phase: "TRANSLATING_SUBTITLES", percent: 0, outTimeMs: 0, expectedDurationMs: plan.expectedDurationMs });
-      const translated = await this.subtitleTranslation.translate(confirmedCues, subtitleOptions.tracks.map((track) => track.language), signal);
-      const introClipCount = purpose === "INTRO" ? request.clipSelections?.length ?? 0 : request.prependIntro ? outputIntroSegments.length : 0;
-      const ass = buildSubtitleAss(project, request.clipSelections ?? [], introClipCount, request.transitionSeconds, request.resolution, subtitleOptions, translated, mainStartCard, subtitleOutputScope);
-      if (!ass.eventCount) throw new Error(`已確認字幕未落在目前${purpose === "INTRO" ? "片頭" : "正片"}時間線內，無法嵌入影片。`);
+      const subtitleOutputScope =
+        purpose === "INTRO" ? "INTRO" : purpose === "CONCAT" && request.prependIntro ? "MAIN_WITH_INTRO" : "MAIN";
+      const confirmedCues = project.subtitleCues.filter(
+        (cue) =>
+          (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED" &&
+          ((cue.timelineScope ?? "MAIN") === "INTRO"
+            ? subtitleOutputScope !== "MAIN"
+            : subtitleOutputScope !== "INTRO"),
+      );
+      if (!confirmedCues.length)
+        throw new Error(`沒有已確認的${purpose === "INTRO" ? "片頭" : "正片"}字幕可嵌入影片。`);
+      onProgress({
+        phase: "TRANSLATING_SUBTITLES",
+        percent: 0,
+        outTimeMs: 0,
+        expectedDurationMs: plan.expectedDurationMs,
+      });
+      const translated = await this.subtitleTranslation.translate(
+        confirmedCues,
+        subtitleOptions.tracks.map((track) => track.language),
+        signal,
+      );
+      const introClipCount =
+        purpose === "INTRO"
+          ? (request.clipSelections?.length ?? 0)
+          : request.prependIntro
+            ? outputIntroSegments.length
+            : 0;
+      const ass = buildSubtitleAss(
+        project,
+        request.clipSelections ?? [],
+        introClipCount,
+        request.transitionSeconds,
+        request.resolution,
+        subtitleOptions,
+        translated,
+        mainStartCard,
+        subtitleOutputScope,
+      );
+      if (!ass.eventCount)
+        throw new Error(`已確認字幕未落在目前${purpose === "INTRO" ? "片頭" : "正片"}時間線內，無法嵌入影片。`);
       const temporaryAss = await writeSubtitleAss(this.subtitleCacheRoot, ass.content);
       subtitleCleanup = temporaryAss.cleanup;
       filterGraph = `${filterGraph};[${videoOutputLabel}]ass=filename='${escapeFfmpegFilterPath(temporaryAss.path)}'[vsub]`;
@@ -799,12 +1056,32 @@ export class ConcatRenderService {
       "-loglevel",
       "error",
       "-y",
-      ...inputs.flatMap((input) => input.isImage
-        ? ["-loop", "1", "-framerate", "30000/1001", "-t", ffmpegNumber(input.durationMs / 1000), "-i", input.sourcePath]
-        : ["-ss", ffmpegNumber((input.startMs ?? 0) / 1000), "-t", ffmpegNumber(Math.min(input.durationMs, input.mainStartCard?.sourceDurationMs ?? input.durationMs) / 1000), "-i", input.sourcePath]),
+      ...inputs.flatMap((input) =>
+        input.isImage
+          ? [
+              "-loop",
+              "1",
+              "-framerate",
+              "30000/1001",
+              "-t",
+              ffmpegNumber(input.durationMs / 1000),
+              "-i",
+              input.sourcePath,
+            ]
+          : [
+              "-ss",
+              ffmpegNumber((input.startMs ?? 0) / 1000),
+              "-t",
+              ffmpegNumber(
+                Math.min(input.durationMs, input.mainStartCard?.sourceDurationMs ?? input.durationMs) / 1000,
+              ),
+              "-i",
+              input.sourcePath,
+            ],
+      ),
       ...inputs.filter((input) => input.photoSoundEnabled).flatMap(() => ["-i", this.photoSoundPath!]),
       ...activeBgmTracks.flatMap((track) => ["-i", track.sourcePath]),
-      "-filter_complex_script",
+      "-/filter_complex",
       filterScriptPath,
       "-map",
       `[${videoOutputLabel}]`,
@@ -843,19 +1120,32 @@ export class ConcatRenderService {
       }
       if (watermarkTextPaths) {
         await Promise.all([
-          writeFile(watermarkTextPaths.chinese, watermarkRenderedText(watermarkSettings.chinese), { encoding: "utf8", flag: "wx" }),
-          writeFile(watermarkTextPaths.english, watermarkRenderedText(watermarkSettings.english), { encoding: "utf8", flag: "wx" }),
+          writeFile(watermarkTextPaths.chinese, watermarkRenderedText(watermarkSettings.chinese), {
+            encoding: "utf8",
+            flag: "wx",
+          }),
+          writeFile(watermarkTextPaths.english, watermarkRenderedText(watermarkSettings.english), {
+            encoding: "utf8",
+            flag: "wx",
+          }),
         ]);
       }
       await writeFile(filterScriptPath, filterGraph, { encoding: "utf8", flag: "wx" });
-      const runResult = await this.ffmpegRunner(this.ffmpegExecutable, args, plan.expectedDurationMs, signal, onProgress);
+      const runResult = await this.ffmpegRunner(
+        this.ffmpegExecutable,
+        args,
+        plan.expectedDurationMs,
+        signal,
+        onProgress,
+      );
       const cancelled = Boolean(runResult && runResult.cancelled);
       let completedDurationMs = plan.expectedDurationMs;
       if (cancelled) {
         try {
           const partialInfo = await new MediaProbe().probe(partialPath);
           completedDurationMs = partialInfo.durationMs ?? 0;
-          if (!partialInfo.videoCodec || completedDurationMs < 300) throw new Error("取消得太早，尚無足夠畫面可完成 MP4。");
+          if (!partialInfo.videoCodec || completedDurationMs < 300)
+            throw new Error("取消得太早，尚無足夠畫面可完成 MP4。");
         } catch {
           throw new DOMException("取消得太早，未產生可播放影片；不完整檔已清理。", "AbortError");
         }
@@ -908,8 +1198,16 @@ export class ConcatRenderService {
       throw error;
     } finally {
       await rm(filterScriptPath, { force: true });
-      if (mainStartTextPaths) await Promise.all([rm(mainStartTextPaths.line1, { force: true }), rm(mainStartTextPaths.line2, { force: true })]);
-      if (watermarkTextPaths) await Promise.all([rm(watermarkTextPaths.chinese, { force: true }), rm(watermarkTextPaths.english, { force: true })]);
+      if (mainStartTextPaths)
+        await Promise.all([
+          rm(mainStartTextPaths.line1, { force: true }),
+          rm(mainStartTextPaths.line2, { force: true }),
+        ]);
+      if (watermarkTextPaths)
+        await Promise.all([
+          rm(watermarkTextPaths.chinese, { force: true }),
+          rm(watermarkTextPaths.english, { force: true }),
+        ]);
       await subtitleCleanup?.();
     }
   }

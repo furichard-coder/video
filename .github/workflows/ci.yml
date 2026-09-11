@@ -8,16 +8,26 @@ on:
 jobs:
   verify:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        # Pinned job mirrors the local toolchain; latest job guards
+        # forward compatibility (e.g. FFmpeg 9 removed -filter_complex_script).
+        ffmpeg: ["8.1.2", "latest"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "24"
           cache: npm
 
-      - name: Install FFmpeg 8.1.2 (pinned to local toolchain; 9.x drops filter_complex_script)
+      - name: Install FFmpeg 8.1.2 (pinned to local toolchain)
+        if: matrix.ffmpeg != 'latest'
         run: choco install ffmpeg --version=8.1.2 -y
+
+      - name: Install latest FFmpeg (forward-compat guard)
+        if: matrix.ffmpeg == 'latest'
+        run: choco install ffmpeg -y
 
       - name: Show FFmpeg version
         run: |
@@ -26,6 +36,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Format check (prettier)
+        run: npm run format:check
 
       - name: Typecheck (main + renderer)
         run: npm run typecheck

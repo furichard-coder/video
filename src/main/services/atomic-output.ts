@@ -7,8 +7,12 @@ export async function finalizePartialOutput(partialPath: string, outputPath: str
   const backupPath = path.join(parsed.dir, `.${parsed.name}.${randomUUID()}.replaced${parsed.ext}`);
   let movedExisting = false;
   try {
-    try { await rename(outputPath, backupPath); movedExisting = true; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    try {
+      await rename(outputPath, backupPath);
+      movedExisting = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     await rename(partialPath, outputPath);
     if (movedExisting) await rm(backupPath, { force: true });
   } catch (error) {

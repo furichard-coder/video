@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PHOTO_SOUND_PREVIEW_URL, type PreviewResult, type RenderClipSelection, type SourceAsset } from "../../shared/domain";
+import {
+  PHOTO_SOUND_PREVIEW_URL,
+  type PreviewResult,
+  type RenderClipSelection,
+  type SourceAsset,
+} from "../../shared/domain";
 import { imageDurationMs } from "../../shared/editing-rules";
 import { formatDuration } from "../format";
 
@@ -17,7 +22,13 @@ export function PlaylistModal({ assets, clips, onClose, onAssetUpdated }: Playli
   const [playing, setPlaying] = useState(true);
   const photoSoundRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const items = useMemo(() => clips.map((clip, clipIndex) => ({ clip, clipIndex, asset: assets.find((asset) => asset.id === clip.assetId) })).filter((item): item is typeof item & { asset: SourceAsset } => Boolean(item.asset)), [assets, clips]);
+  const items = useMemo(
+    () =>
+      clips
+        .map((clip, clipIndex) => ({ clip, clipIndex, asset: assets.find((asset) => asset.id === clip.assetId) }))
+        .filter((item): item is typeof item & { asset: SourceAsset } => Boolean(item.asset)),
+    [assets, clips],
+  );
   const currentItem = items[index];
   const current = currentItem?.asset;
   const currentClip = currentItem?.clip;
@@ -88,7 +99,8 @@ export function PlaylistModal({ assets, clips, onClose, onAssetUpdated }: Playli
   useEffect(() => {
     const player = videoRef.current;
     if (!player || current?.kind !== "VIDEO") return;
-    if (playing) void player.play().catch(() => setPlaying(false)); else player.pause();
+    if (playing) void player.play().catch(() => setPlaying(false));
+    else player.pause();
   }, [playing, preview?.url, current?.id]);
 
   if (!current) return null;
@@ -101,32 +113,103 @@ export function PlaylistModal({ assets, clips, onClose, onAssetUpdated }: Playli
             <span className="eyebrow">總體預覽 · 依目前排序連續播放</span>
             <h2>{current.fileName}</h2>
           </div>
-          <div className="playlist-header-actions"><span>{progress}</span><button className="icon-button" type="button" onClick={onClose}>×</button></div>
+          <div className="playlist-header-actions">
+            <span>{progress}</span>
+            <button className="icon-button" type="button" onClick={onClose}>
+              ×
+            </button>
+          </div>
         </header>
 
         <div className="playlist-layout">
           <aside className="playlist-items" aria-label="播放順序">
             {items.map((item, assetIndex) => (
-              <button key={`${item.clip.assetId}:${item.clip.inMs}:${item.clip.outMs}:${item.clipIndex}`} className={assetIndex === index ? "is-current" : ""} type="button" onClick={() => setIndex(assetIndex)}>
+              <button
+                key={`${item.clip.assetId}:${item.clip.inMs}:${item.clip.outMs}:${item.clipIndex}`}
+                className={assetIndex === index ? "is-current" : ""}
+                type="button"
+                onClick={() => setIndex(assetIndex)}
+              >
                 <span>{String(assetIndex + 1).padStart(2, "0")}</span>
-                <span><strong>{item.asset.fileName}</strong><small>{item.asset.kind === "VIDEO" ? `${item.clip.mediaInsertionId ? "影片內安插影片 · " : ""}${formatDuration(item.clip.inMs)} → ${formatDuration(item.clip.outMs)}` : `${item.clip.mediaInsertionId ? "影片內安插照片" : "照片"} · ${imageDurationMs(item.asset) / 1000} 秒`}</small></span>
+                <span>
+                  <strong>{item.asset.fileName}</strong>
+                  <small>
+                    {item.asset.kind === "VIDEO"
+                      ? `${item.clip.mediaInsertionId ? "影片內安插影片 · " : ""}${formatDuration(item.clip.inMs)} → ${formatDuration(item.clip.outMs)}`
+                      : `${item.clip.mediaInsertionId ? "影片內安插照片" : "照片"} · ${imageDurationMs(item.asset) / 1000} 秒`}
+                  </small>
+                </span>
               </button>
             ))}
           </aside>
 
           <div className="playlist-player">
             <div className="preview-stage">
-              {!preview && !error && <div className="large-loading"><span className="spinner" /><p>準備第 {index + 1} 項預覽…</p></div>}
-              {error && <div className="preview-error"><strong>這一項無法預覽</strong><p>{error}</p><button type="button" onClick={goNext}>跳到下一項</button></div>}
-              {preview && current.kind === "IMAGE" && <><img src={preview.url} alt={current.fileName} />{current.photoSoundEnabled !== false && <audio ref={photoSoundRef} key={`${current.id}:${currentClip?.mediaInsertionId ?? "main"}`} src={PHOTO_SOUND_PREVIEW_URL} autoPlay={playing} />}</>}
+              {!preview && !error && (
+                <div className="large-loading">
+                  <span className="spinner" />
+                  <p>準備第 {index + 1} 項預覽…</p>
+                </div>
+              )}
+              {error && (
+                <div className="preview-error">
+                  <strong>這一項無法預覽</strong>
+                  <p>{error}</p>
+                  <button type="button" onClick={goNext}>
+                    跳到下一項
+                  </button>
+                </div>
+              )}
+              {preview && current.kind === "IMAGE" && (
+                <>
+                  <img src={preview.url} alt={current.fileName} />
+                  {current.photoSoundEnabled !== false && (
+                    <audio
+                      ref={photoSoundRef}
+                      key={`${current.id}:${currentClip?.mediaInsertionId ?? "main"}`}
+                      src={PHOTO_SOUND_PREVIEW_URL}
+                      autoPlay={playing}
+                    />
+                  )}
+                </>
+              )}
               {preview && current.kind === "VIDEO" && (
-                <video ref={videoRef} key={`${preview.url}:${currentClip?.inMs}:${currentClip?.outMs}`} src={preview.url} autoPlay={playing} aria-label={`等比例播放 ${current.fileName}`} onClick={() => setPlaying((value) => !value)} onLoadedMetadata={(event) => { event.currentTarget.currentTime = (currentClip?.inMs ?? 0) / 1000; }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onTimeUpdate={(event) => { if (currentClip && event.currentTarget.currentTime * 1000 >= currentClip.outMs) goNext(); }} onEnded={goNext} preload="auto" />
+                <video
+                  ref={videoRef}
+                  key={`${preview.url}:${currentClip?.inMs}:${currentClip?.outMs}`}
+                  src={preview.url}
+                  autoPlay={playing}
+                  aria-label={`等比例播放 ${current.fileName}`}
+                  onClick={() => setPlaying((value) => !value)}
+                  onLoadedMetadata={(event) => {
+                    event.currentTarget.currentTime = (currentClip?.inMs ?? 0) / 1000;
+                  }}
+                  onPlay={() => setPlaying(true)}
+                  onPause={() => setPlaying(false)}
+                  onTimeUpdate={(event) => {
+                    if (currentClip && event.currentTarget.currentTime * 1000 >= currentClip.outMs) goNext();
+                  }}
+                  onEnded={goNext}
+                  preload="auto"
+                />
               )}
             </div>
             <div className="playlist-controls">
-              <button type="button" onClick={goPrevious}>← 上一項</button>
-              <button type="button" onClick={() => setPlaying((value) => !value)}>{playing ? (current.kind === "IMAGE" ? "暫停輪播" : "❚❚ 暫停") : (current.kind === "IMAGE" ? "繼續輪播" : "▶ 播放")}</button>
-              <button type="button" onClick={goNext}>下一項 →</button>
+              <button type="button" onClick={goPrevious}>
+                ← 上一項
+              </button>
+              <button type="button" onClick={() => setPlaying((value) => !value)}>
+                {playing
+                  ? current.kind === "IMAGE"
+                    ? "暫停輪播"
+                    : "❚❚ 暫停"
+                  : current.kind === "IMAGE"
+                    ? "繼續輪播"
+                    : "▶ 播放"}
+              </button>
+              <button type="button" onClick={goNext}>
+                下一項 →
+              </button>
             </div>
             <p>此功能逐項播放 App cache 中的預覽，不會合併、剪輯或輸出來源。</p>
           </div>

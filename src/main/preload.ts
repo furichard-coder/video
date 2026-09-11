@@ -53,9 +53,13 @@ const api: AppApi = {
   clearAppCloseRequestedListeners: () => ipcRenderer.removeAllListeners("app:close-requested"),
   getUserPreferences: () => ipcRenderer.invoke("preferences:get"),
   getBackgroundJobs: () => ipcRenderer.invoke("background:get-jobs"),
-  onBackgroundJobs: (callback: (jobs: BackgroundJobSnapshot[]) => void) => { ipcRenderer.on("background:jobs", (_event, jobs: BackgroundJobSnapshot[]) => callback(jobs)); },
+  onBackgroundJobs: (callback: (jobs: BackgroundJobSnapshot[]) => void) => {
+    ipcRenderer.on("background:jobs", (_event, jobs: BackgroundJobSnapshot[]) => callback(jobs));
+  },
   clearBackgroundJobsListeners: () => ipcRenderer.removeAllListeners("background:jobs"),
-  onProjectChanged: (callback: (event: ProjectChangedEvent) => void) => { ipcRenderer.on("project:changed", (_event, change: ProjectChangedEvent) => callback(change)); },
+  onProjectChanged: (callback: (event: ProjectChangedEvent) => void) => {
+    ipcRenderer.on("project:changed", (_event, change: ProjectChangedEvent) => callback(change));
+  },
   clearProjectChangedListeners: () => ipcRenderer.removeAllListeners("project:changed"),
   updateUserPreferences: (update: UserPreferencesUpdate) => ipcRenderer.invoke("preferences:update", update),
   getProject: () => ipcRenderer.invoke("project:get"),
@@ -75,32 +79,40 @@ const api: AppApi = {
   setIntroSegments: (segments: IntroSuggestion[]) => ipcRenderer.invoke("intro:set-segments", segments),
   setIntroTargetDuration: (durationMs: number) => ipcRenderer.invoke("intro:set-target-duration", durationMs),
   setIntroSegmentMaxDuration: (durationMs: number) => ipcRenderer.invoke("intro:set-segment-max-duration", durationMs),
-  setProjectColorSettings: (settings: ProjectColorSettings) => ipcRenderer.invoke("project:set-color-settings", settings),
+  setProjectColorSettings: (settings: ProjectColorSettings) =>
+    ipcRenderer.invoke("project:set-color-settings", settings),
   setWatermarkSettings: (settings: WatermarkSettings) => ipcRenderer.invoke("project:set-watermark-settings", settings),
   removeIntroSegment: (segmentId: string) => ipcRenderer.invoke("intro:remove-segment", segmentId),
   restoreIntroSegment: (segmentId: string) => ipcRenderer.invoke("intro:restore-segment", segmentId),
   setPreviewRange: (assetId, range) => ipcRenderer.invoke("source:set-preview-range", assetId, range.inMs, range.outMs),
-  setImageDuration: (assetId: string, durationMs: number) => ipcRenderer.invoke("source:set-image-duration", assetId, durationMs),
-  setPhotoSoundEnabled: (assetId: string, enabled: boolean) => ipcRenderer.invoke("source:set-photo-sound", assetId, enabled),
-  addMediaInsertion: (anchorVideoAssetId, insertedAssetId, atMs, sourceRange) => ipcRenderer.invoke("main:add-media-insertion", anchorVideoAssetId, insertedAssetId, atMs, sourceRange),
-  updateMediaInsertion: (insertionId, atMs, sourceRange) => ipcRenderer.invoke("main:update-media-insertion", insertionId, atMs, sourceRange),
+  setImageDuration: (assetId: string, durationMs: number) =>
+    ipcRenderer.invoke("source:set-image-duration", assetId, durationMs),
+  setPhotoSoundEnabled: (assetId: string, enabled: boolean) =>
+    ipcRenderer.invoke("source:set-photo-sound", assetId, enabled),
+  addMediaInsertion: (anchorVideoAssetId, insertedAssetId, atMs, sourceRange) =>
+    ipcRenderer.invoke("main:add-media-insertion", anchorVideoAssetId, insertedAssetId, atMs, sourceRange),
+  updateMediaInsertion: (insertionId, atMs, sourceRange) =>
+    ipcRenderer.invoke("main:update-media-insertion", insertionId, atMs, sourceRange),
   removeMediaInsertion: (insertionId) => ipcRenderer.invoke("main:remove-media-insertion", insertionId),
   moveMediaInsertion: (insertionId, toIndex) => ipcRenderer.invoke("main:move-media-insertion", insertionId, toIndex),
-  setVolumeSegments: (assetId: string, segments: VolumeSegment[]) => ipcRenderer.invoke("source:set-volume-segments", assetId, segments),
-  setMainExclusionRanges: (assetId: string, ranges: MainExclusionRange[]) => ipcRenderer.invoke("main:set-exclusion-ranges", assetId, ranges),
-  setZoomSegments: (assetId: string, segments: ZoomSegment[]) => ipcRenderer.invoke("main:set-zoom-segments", assetId, segments),
-  placeAsset: (assetId: string, placement: PlacementRequest) => ipcRenderer.invoke("project:place-asset", assetId, placement),
+  setVolumeSegments: (assetId: string, segments: VolumeSegment[]) =>
+    ipcRenderer.invoke("source:set-volume-segments", assetId, segments),
+  setMainExclusionRanges: (assetId: string, ranges: MainExclusionRange[]) =>
+    ipcRenderer.invoke("main:set-exclusion-ranges", assetId, ranges),
+  setZoomSegments: (assetId: string, segments: ZoomSegment[]) =>
+    ipcRenderer.invoke("main:set-zoom-segments", assetId, segments),
+  placeAsset: (assetId: string, placement: PlacementRequest) =>
+    ipcRenderer.invoke("project:place-asset", assetId, placement),
   moveTimelineAsset: (assetId: string, toIndex: number) => ipcRenderer.invoke("project:move-asset", assetId, toIndex),
-  setTimelineTransitionSeconds: (seconds: TransitionDurationSec) => ipcRenderer.invoke("project:set-timeline-transition", seconds),
+  setTimelineTransitionSeconds: (seconds: TransitionDurationSec) =>
+    ipcRenderer.invoke("project:set-timeline-transition", seconds),
   forceSubtitleReReview: (scopes: SubtitleTimelineScope[]) => ipcRenderer.invoke("subtitle:force-re-review", scopes),
   setSortMode: (sortMode: SortMode) => ipcRenderer.invoke("project:set-sort", sortMode),
   ensureMetadata: (assetId: string) => ipcRenderer.invoke("source:metadata", assetId),
-  ensurePreview: (assetId: string, variant: PreviewVariant) =>
-    ipcRenderer.invoke("preview:ensure", assetId, variant),
+  ensurePreview: (assetId: string, variant: PreviewVariant) => ipcRenderer.invoke("preview:ensure", assetId, variant),
   ensureClipPreview: (assetId: string, inMs: number, outMs: number) =>
     ipcRenderer.invoke("preview:ensure-clip", assetId, inMs, outMs),
-  cancelPreview: (assetId: string, variant: PreviewVariant) =>
-    ipcRenderer.invoke("preview:cancel", assetId, variant),
+  cancelPreview: (assetId: string, variant: PreviewVariant) => ipcRenderer.invoke("preview:cancel", assetId, variant),
   cancelClipPreview: (assetId: string, inMs: number, outMs: number) =>
     ipcRenderer.invoke("preview:cancel-clip", assetId, inMs, outMs),
   chooseConcatOutput: (suggestedName: string) => ipcRenderer.invoke("concat:choose-output", suggestedName),
@@ -114,7 +126,8 @@ const api: AppApi = {
   getPreviewOutputHistory: () => ipcRenderer.invoke("output-history:get"),
   chooseExistingPreviewOutputs: () => ipcRenderer.invoke("output-history:choose-existing"),
   removePreviewOutputRecord: (jobId: string) => ipcRenderer.invoke("output-history:remove-record", jobId),
-  analyzeIntro: (assetIds: string[], maxDurationMs: number, maxSegmentDurationMs: number) => ipcRenderer.invoke("intro:analyze", assetIds, maxDurationMs, maxSegmentDurationMs),
+  analyzeIntro: (assetIds: string[], maxDurationMs: number, maxSegmentDurationMs: number) =>
+    ipcRenderer.invoke("intro:analyze", assetIds, maxDurationMs, maxSegmentDurationMs),
   cancelIntroAnalysis: () => ipcRenderer.invoke("intro:cancel-analysis"),
   getAiSettings: () => ipcRenderer.invoke("ai:get-settings"),
   saveAiAccount: (input: AiAccountSaveInput) => ipcRenderer.invoke("ai:save-account", input),
@@ -123,7 +136,8 @@ const api: AppApi = {
   removeAiAccount: (accountId: string) => ipcRenderer.invoke("ai:remove-account", accountId),
   testAiAccount: (accountId: string) => ipcRenderer.invoke("ai:test-account", accountId),
   getTranslationSettings: () => ipcRenderer.invoke("translation:get-settings"),
-  updateTranslationSettings: (update: TranslationSettingsUpdate) => ipcRenderer.invoke("translation:update-settings", update),
+  updateTranslationSettings: (update: TranslationSettingsUpdate) =>
+    ipcRenderer.invoke("translation:update-settings", update),
   testGoogleTranslation: () => ipcRenderer.invoke("translation:test-google"),
   transcribeVoiceInput: (request: VoiceInputRequest) => ipcRenderer.invoke("ai:transcribe-voice-input", request),
   setAiStoryContext: (context: AiStoryContext) => ipcRenderer.invoke("project:set-ai-story-context", context),
@@ -131,13 +145,17 @@ const api: AppApi = {
   setAiPublishAssets: (assets) => ipcRenderer.invoke("publish:set-assets", assets),
   generateAiPublishAssets: (options: AiPublishGenerationOptions) => ipcRenderer.invoke("publish:generate", options),
   cancelAiPublishAssets: () => ipcRenderer.invoke("publish:cancel"),
-  choosePublishThumbnailOutput: (format: "jpg" | "png") => ipcRenderer.invoke("publish:thumbnail:choose-output", format),
+  choosePublishThumbnailOutput: (format: "jpg" | "png") =>
+    ipcRenderer.invoke("publish:thumbnail:choose-output", format),
   choosePublishThumbnailImport: () => ipcRenderer.invoke("publish:thumbnail:choose-import"),
   renderPublishThumbnail: (request: ThumbnailRenderRequest) => ipcRenderer.invoke("publish:thumbnail:render", request),
-  onPublishProgress: (callback: (progress: PublishProgress) => void) => { ipcRenderer.on("publish:progress", (_event, progress: PublishProgress) => callback(progress)); },
+  onPublishProgress: (callback: (progress: PublishProgress) => void) => {
+    ipcRenderer.on("publish:progress", (_event, progress: PublishProgress) => callback(progress));
+  },
   clearPublishProgressListeners: () => ipcRenderer.removeAllListeners("publish:progress"),
   generateAiSubtitles: (options: AiSubtitleGenerationOptions) => ipcRenderer.invoke("subtitle:ai-generate", options),
-  analyzeMaterialForSubtitles: (request: MaterialSubtitleAnalysisRequest) => ipcRenderer.invoke("subtitle:material-analyze", request),
+  analyzeMaterialForSubtitles: (request: MaterialSubtitleAnalysisRequest) =>
+    ipcRenderer.invoke("subtitle:material-analyze", request),
   cancelMaterialSubtitleAnalysis: () => ipcRenderer.invoke("subtitle:material-cancel"),
   buildSubtitleIntroPreview: (includeBgm = false) => ipcRenderer.invoke("subtitle:build-intro-preview", includeBgm),
   cancelSubtitleIntroPreview: () => ipcRenderer.invoke("subtitle:cancel-intro-preview"),
@@ -151,7 +169,8 @@ const api: AppApi = {
     ipcRenderer.invoke("external-player:open", assetId, target),
   chooseBgmFiles: () => ipcRenderer.invoke("bgm:choose-files"),
   addBgmYoutubeReferences: (urls: string[]) => ipcRenderer.invoke("bgm:add-youtube-references", urls),
-  resolveBgmReference: (trackId: string, rightsConfirmed: boolean) => ipcRenderer.invoke("bgm:resolve-reference", trackId, rightsConfirmed),
+  resolveBgmReference: (trackId: string, rightsConfirmed: boolean) =>
+    ipcRenderer.invoke("bgm:resolve-reference", trackId, rightsConfirmed),
   sequenceBgmTracks: () => ipcRenderer.invoke("bgm:sequence"),
   setSourceAudioVolume: (volumePercent: number) => ipcRenderer.invoke("project:set-source-audio-volume", volumePercent),
   updateBgmTrack: (track: BgmTrack) => ipcRenderer.invoke("bgm:update", track),
@@ -167,7 +186,8 @@ const api: AppApi = {
   setSubtitleCues: (cues: SubtitleCue[]) => ipcRenderer.invoke("subtitle:set-cues", cues),
   chooseSubtitleInput: () => ipcRenderer.invoke("subtitle:choose-input"),
   chooseSubtitleOutput: (suggestedName: string) => ipcRenderer.invoke("subtitle:choose-output", suggestedName),
-  exportSubtitles: (outputToken: string, scopes?: SubtitleTimelineScope[]) => ipcRenderer.invoke("subtitle:export", outputToken, scopes),
+  exportSubtitles: (outputToken: string, scopes?: SubtitleTimelineScope[]) =>
+    ipcRenderer.invoke("subtitle:export", outputToken, scopes),
   cancelSubtitleExport: () => ipcRenderer.invoke("subtitle:cancel-export"),
   getYoutubeSettings: () => ipcRenderer.invoke("youtube:get-settings"),
   updateYoutubeSettings: (update: YoutubeSettingsUpdate) => ipcRenderer.invoke("youtube:update-settings", update),
@@ -176,11 +196,13 @@ const api: AppApi = {
   cancelYoutubeConnect: () => ipcRenderer.invoke("youtube:cancel-connect"),
   disconnectYoutube: () => ipcRenderer.invoke("youtube:disconnect"),
   uploadYoutubeVideo: (request: YoutubeUploadRequest) => ipcRenderer.invoke("youtube:upload", request),
-  retryYoutubeThumbnail: (videoId: string, thumbnailPath: string) => ipcRenderer.invoke("youtube:retry-thumbnail", videoId, thumbnailPath),
+  retryYoutubeThumbnail: (videoId: string, thumbnailPath: string) =>
+    ipcRenderer.invoke("youtube:retry-thumbnail", videoId, thumbnailPath),
   cancelYoutubeUpload: () => ipcRenderer.invoke("youtube:cancel-upload"),
   openYoutubeVideo: (videoId: string) => ipcRenderer.invoke("youtube:open-video", videoId),
   prepareYoutubeChromeHandoff: (jobId: string) => ipcRenderer.invoke("youtube:prepare-chrome-handoff", jobId),
-  openPlatformUpload: (jobId: string, platform: BrowserUploadPlatform) => ipcRenderer.invoke("platform-upload:open", jobId, platform),
+  openPlatformUpload: (jobId: string, platform: BrowserUploadPlatform) =>
+    ipcRenderer.invoke("platform-upload:open", jobId, platform),
   openPlatformPortal: (platform: BrowserUploadPlatform) => ipcRenderer.invoke("platform-upload:open-portal", platform),
   onImportProgress: (callback: (progress: ImportProgress) => void) => {
     ipcRenderer.on("import:progress", (_event, progress: ImportProgress) => callback(progress));
