@@ -26,8 +26,12 @@ jobs:
           node-version: "24"
           cache: npm
 
-      - name: Install FFmpeg
-        run: choco install ffmpeg -y
+      - name: Install FFmpeg 8.1.2 (pinned to local toolchain; 9.x drops filter_complex_script)
+        run: |
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-8.1.2-essentials_build.zip" -OutFile "$env:RUNNER_TEMP\ffmpeg.zip"
+          Expand-Archive -Path "$env:RUNNER_TEMP\ffmpeg.zip" -DestinationPath "$env:RUNNER_TEMP\ffmpeg"
+          $ffbin = (Get-ChildItem -Path "$env:RUNNER_TEMP\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).Directory.FullName
+          Add-Content -Path $env:GITHUB_PATH -Value $ffbin
 
       - name: Install dependencies
         run: npm ci
