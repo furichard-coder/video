@@ -14,11 +14,7 @@ import { mainRenderSelections } from "../../shared/editing-rules";
 import { buildTimelinePlan } from "../../shared/timeline-plan";
 import type { SubtitleTranslationResult } from "./subtitle-translation";
 import { sanitizeSubtitleBurnInOptions } from "./user-preferences";
-import {
-  SUBTITLE_WRAP_REFERENCE_WIDTH,
-  resolveSubtitleWrapLimit,
-  wrapSubtitleText,
-} from "../../shared/subtitle-text";
+import { SUBTITLE_WRAP_REFERENCE_WIDTH, resolveSubtitleWrapLimit, wrapSubtitleText } from "../../shared/subtitle-text";
 
 export { wrapSubtitleText };
 
