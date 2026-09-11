@@ -10,3 +10,4 @@ artifacts/
 .vite/
 .DS_Store
 Thumbs.db
+.serena/
