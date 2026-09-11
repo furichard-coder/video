@@ -1,5 +1,107 @@
 # 第一階段驗證紀錄
 
+## v0.56.0 字幕逐筆即時保存與列內操作（2026-09-11）
+
+| 項目 | 結果 |
+|---|---|
+| 單筆確認即時保存 | PASS；格內文字修改後直接按該列「確認」，`setSubtitleCues` 立即收到最新文字、時間與 `CONFIRMED`，不需再按底部保存。成功訊息只在 Main 寫入回傳後顯示。 |
+| 文字游標 | PASS；每列維持原生 textarea，測試可取得焦點、將 selectionStart 放在字串中間並繼續修改；編號選取與 Delete 快捷鍵不攔截文字輸入。 |
+| 每列四項操作 | PASS；每一筆都有確認、刪除、上移、下移。首筆上移與末筆下移停用；合法移動會交換相鄰輸出時間及來源錨點、兩筆改為 `DRAFT` 並立即保存。 |
+| 批量與強制校對 | PASS；全部確認／取消確認、Shift 複選確認／取消確認均即時保存；逐筆強制校對只有在目前 cue 寫入成功後才前進。 |
+| 刪除與來源安全 | PASS；單筆、Shift 批量與 Delete 鍵刪除仍先要求確認，只改專案字幕清單；影片、照片、MP3、Proxy、SRT 與 MP4 不受影響。 |
+| UI 畫面檢查 | PASS；隔離 userData 截圖顯示版本 v0.56.0、八個工作區與主要控制無裁切。Windows 畫面控制未取得原生 App surface，因此沒有操作使用者桌面上的視窗或 Chrome／YouTube。 |
+| 完整回歸 | PASS；TypeScript、49 個 Vitest 測試檔／296 個測試、production build、Electron smoke、Windows packaged smoke 與 `npm audit --audit-level=high` 全數通過。Vite 仍只有既有的單一 bundle 超過 500 kB 提示，不影響 build。 |
+
+v0.56.0 可攜版位於 `release\v0.56.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.56.0.exe`，EXE 大小 `244441088` bytes，資料夾大小 `392653860` bytes，SHA-256 `9F749DF3A780E83741AD587C69E235FE0945A6288A18087B686906A3D46658EF`。封裝 smoke 與截圖程序均已結束，未留下 v0.56.0 程序；未修改來源媒體、未上傳影片，也未安排關機或睡眠。
+
+## v0.55.0 版本化交付、安全游標與快速逐筆字幕校對（2026-09-11）
+
+| 項目 | 結果 |
+|---|---|
+| 版本化 EXE | PASS；封裝實際產生 `SceneryWalkerSourceOrganizer-v0.55.0.exe`，packaged smoke 由 `package.json` 解析相同檔名並成功啟動。 |
+| 安全預設游標 | PASS；共用安全按鍵同時取得 focus 與送出實際矩形；Main 拒絕 NaN、零尺寸、負座標及超出 renderer 的矩形，轉成實體螢幕點後才呼叫固定 Windows helper。關閉確認預設為「繼續剪輯」。 |
+| 字幕短區段 Proxy | PASS；Renderer 對字幕來源 0.5–1.5 秒呼叫精確 `ensureClipPreview`，不再要求整支 `VIDEO_PROXY`；圖片走 `IMAGE_PREVIEW`。真實 FFmpeg 產生／命中、H.264 probe、損壞重建及來源 SHA-256 不變皆通過。 |
+| 快取重看 | PASS；新建與舊 marker 首次驗證後保存輸出 size／mtime；未變更重看不必再啟動 ffprobe。手動破壞 clip 後 fingerprint 不符，實際重新驗證並重建。 |
+| 強制逐筆校對 | PASS；Main 先以現行時間軸自我映射並刷新 `sourceOutMs`，再設為 `DRAFT`；UI 顯示第 N／總數、畫面一致、內容不一致進入文字／時間編輯、略過與結束。流程明示由人判斷，不宣稱 AI 自動確認畫面語意。 |
+| 片頭加入時間保護 | PASS；手動影片／照片與局部放大加入不再呼叫平均分配或增加目標時間；UI 回歸確認原 6–9 秒片段不變、3:00 目標不變，容量不足會阻擋。明確按「套用上限並均衡」的既有功能仍保留。 |
+| UI 畫面檢查 | PASS；隔離 userData 截圖顯示版本 v0.55.0、八個工作區與主要控制無裁切；Windows 畫面控制未取得原生 App surface，因此沒有操作使用者桌面上的既有視窗。 |
+| 完整回歸 | PASS；TypeScript、49 個 Vitest 測試檔／295 個測試、production build、Electron smoke、Windows packaged smoke 與 `npm audit --audit-level=high` 全數通過。Vite 仍只有既有的單一 bundle 超過 500 kB 提示，不影響 build。 |
+
+v0.55.0 可攜版位於 `release\v0.55.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.55.0.exe`，EXE 大小 `244441088` bytes，資料夾大小 `392648922` bytes，SHA-256 `8092E84F6F1B75D3F6EB021F8747679FB9BE2C330B6F989F6DFE5C73B16CFCAA`。封裝 smoke 與截圖程序均已結束，未留下 v0.55.0 程序；未修改來源媒體、未上傳影片，也未安排關機或睡眠。
+
+## v0.54.0 本機人聲保護與片頭／正片配樂範圍（2026-09-11）
+
+| 項目 | 結果 |
+|---|---|
+| 預設與輸入驗證 | PASS；舊偏好自動補入全部預設勾選、6 dB 最大壓低、1.5 dB EQ 與 -1 dB ceiling；Main 僅接受 3–6 dB、0.5–4 dB 及 -1／-2 dB。 |
+| 平滑人聲包絡線 | PASS；真實 FFmpeg 測試影片完成 `asplit`、1–4 kHz detector、`sidechaincompress`、dry-floor/wet blend；6 dB floor 為 `0.501187`，攻擊／恢復預設 45／500 ms。 |
+| EQ／Compressor／Limiter | PASS；預設 filter graph 含 2.5 kHz -1.5 dB EQ、program compressor 與 -1 dB `0.891251` limiter；停用主開關則回到舊 0.95 limiter 且不套 sidechain／EQ／compressor。 |
+| 環境聲保留與誠實邊界 | PASS；UI 預設勾選遠處人群／市集及場景自然聲保留，並明示純聲學偵測不理解談話內容、無法百分之百分類聲音，需人工聽檢；本功能不送出音訊。 |
+| 配樂片頭／正片複選 | PASS；Renderer 顯示兩個子選項並傳入明確 scope。只選片頭的服務整合測試把 3.2 秒片頭於 2.9 秒提示頁邊界截止，1.4–2.9 秒淡出；只選正片時在 5.6 秒正片起點啟動。 |
+| 秒數／順序字幕映射 | PASS；正片前段照片 5→7 秒使後續字幕 5.2→7.2 秒；片頭前段 5→3 秒使後續字幕 5.1→3.1 秒。另有正片／片頭拖曳換序、插入素材、IN／OUT 與 0.3→0.7 秒疊化回歸。 |
+| 強制重新校對 | PASS；Main 僅把所選範圍非排除字幕設為 `DRAFT` 並使該 scope review revision 過期，文字／頭尾不變、`REJECTED` 與另一範圍不變；Renderer 有二次確認、逐筆播放提示及 0 筆確認時禁止匯出。 |
+| 真實媒體與唯讀 | PASS；多組真實 H.264／AAC／MP3 輸出套用新濾鏡後可 probe，既有來源與 MP3 SHA-256 前後一致；partial、取消、離線配樂 gate 仍通過。 |
+| 完整回歸 | PASS；TypeScript、48 個 Vitest 測試檔／293 個測試、production build、Electron smoke、Windows packaged smoke 與 `npm audit --audit-level=high` 全數通過。 |
+
+v0.54.0 可攜版位於 `release\v0.54.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer.exe`，EXE 大小 `244441088` bytes，資料夾大小 `392635293` bytes，SHA-256 `13EF59AD462EA0E38A587D1BF69215B383EF9A179132C5D991AEADB603E3FE00`。封裝 smoke 已結束且未留下 v0.54.0 程序；沒有強制關閉使用者程式、沒有上傳影片，也沒有安排關機或睡眠。
+
+## v0.53.0 片頭獨立轉出／YouTube 測試與字幕視覺一致（2026-09-11）
+
+| 項目 | 結果 |
+|---|---|
+| 正片／僅片頭選擇 | PASS；共用轉出頁可在 `CONCAT` 與 `INTRO` 間切換，Intro request 只含目前片頭片段，不含正片，輸出紀錄維持 `purpose=INTRO`。 |
+| 自動片頭嵌入字幕 | PASS；片頭頁與共用轉出頁都有本次字幕勾選；只允許已確認且 revision 最新的 Intro cue，Main cue 不會混入。 |
+| Intro 實際字幕輸出 | PASS；真實 FFmpeg 由唯讀測試來源產出 640×360 H.264 片頭字幕 MP4，媒體可 probe、ASS 暫存已清除、來源 SHA-256 前後相同。 |
+| YouTube 片頭測試 | PASS；Renderer 完成 Intro 後提供 Chrome＋檔案總管拖放及官方 API；Main IPC 接受 `INTRO` output history，仍阻擋單一 `CLIP`。片頭上傳 UI 顯示片頭檔名／說明且不自動讀入正片 AI 標題、縮圖或章節。自動測試未對真實頻道發布。 |
+| 字幕字級一致 | PASS；字幕頁與第一輸出語言共用 480p profile，480p 36px→ASS 36，4K 36px→ASS 162；第二翻譯語言的 1080p 字級與位置保持獨立。字幕預覽畫布以 854×480 比例及 container-height 單位呈現。 |
+| 疊化字幕定位 | PASS；Main／Intro 邏輯片段起點會扣除 0.3／0.5／0.7 秒重疊，再映射到輸出片段；Intro＋Main 與正片開始提示頁的時間位移單元測試通過。 |
+| 完整回歸 | PASS；TypeScript、48 個 Vitest 測試檔／284 個測試、production build、Electron smoke、Windows packaged smoke 與 `npm audit --audit-level=high` 全數通過。 |
+
+v0.53.0 可攜版位於 `release\v0.53.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer.exe`，EXE 大小 `244441088` bytes，資料夾大小 `392608647` bytes，SHA-256 `514119FDD60474F9C9A454F356618EE2F4939202AB0FEFD8D0DA521C59697E93`。本輪沒有上傳任何影片、沒有修改來源媒體，也沒有排程關機或睡眠。
+
+## v0.52.0 字幕時間線同步、Gemini 圖片辨識、格內編輯與轉檔防睡眠（2026-09-11）
+
+| 項目 | 結果 |
+|---|---|
+| 正片／片頭字幕同步 | PASS；正片換序、插入照片、片頭換序與疊化 0.3→0.7 秒都有 deterministic 測試；可對應字幕隨素材與來源內時間搬移，不可對應文字保留為待確認。 |
+| 時間基準單一化 | PASS；manifest schema 17 保存 0.3／0.5／0.7 秒，Main／Intro plan、字幕預覽、AI 素材字幕、發布章節與轉檔設定共用同一值。 |
+| 字幕格內直接編輯 | PASS；每格具原生 textarea，焦點、游標定位與輸入不被卡片選取／Delete 快捷鍵攔截；編號按鈕保留單選及 Shift 連續複選。 |
+| 介面放大文字 | PASS；16／18／20／22 px 之外新增 24 px「超大」與 26 px「特大」，Renderer 持久化測試通過。 |
+| Gemini 圖片／物種分析 | PASS；Gemini strict JSON 傳輸與正規化以模擬 HTTPS transport 驗證，包含常用中文物種名、物品／場景、簡化字幕、信心與不確定警告。為保護 API 額度與照片隱私，本輪自動測試未呼叫真實 Gemini 帳號。 |
+| Google Lens 移除 | PASS；domain、preload、IPC 與素材分析 UI 均不再提供 Lens 人工貼回；照片預設 Gemini，ChatGPT／Codex 保留為替代路徑。 |
+| 轉檔防睡眠／防關閉 | PASS；reference-counted power guard 只啟用一次並在最後工作結束後解除；Windows 未成功啟用 blocker 時阻擋轉檔。Renderer 顯示防護狀態並停用關閉，Main 另行阻擋確認關閉與 session-end。 |
+| 完整回歸 | PASS；TypeScript、48 個 Vitest 測試檔／280 個測試、production build、Electron smoke、Windows packaged smoke 與 `npm audit --audit-level=high` 全數通過。 |
+
+v0.52.0 可攜版位於 `release\v0.52.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer.exe`，EXE 大小 `244441088` bytes，資料夾大小 `392599946` bytes，SHA-256 `156B096C3A0DF04EC88AB0082209CDA3E6CF466F2E50B4FAABDAD743DEE0E765`。強制關機、斷電、硬體重置或作業系統當機不屬於 App 可保證阻止的範圍。
+
+## v0.51.0 重疊字幕、AI 數量與轉檔預檢（2026-09-10）
+
+| 項目 | 結果 |
+|---|---|
+| 照片分析重疊回歸 | PASS；AI 簡化字幕不再被重疊 gate 丟棄，結果含完整新建議及既有字幕文字／時間。 |
+| 重疊字幕進入審核 | PASS；新 cue 以 `DRAFT` 保存、舊 cue 保留；Main／Intro 同範圍新舊兩側同步紅框，時間移開後紅框即消失。兩筆 `CONFIRMED` 仍被 domain gate 阻擋。 |
+| AI 目標字幕數 | PASS；Renderer 可輸入 1–300，Service 驗證範圍並對較長片段做多點分散取樣；3 秒測試素材要求 3 筆，實際產出 3 筆。 |
+| 轉檔容量／時間預估 | PASS；Main／Intro／Clip／Shorts 顯示估計檔案大小、時間、目前空間與完成後餘量；本機 Windows `statfs` 實際讀到 C 槽 `20277022720` bytes 可用。 |
+| 1 GB 空間 gate | PASS；純函式測試確認預估輸出後不足 1 GiB 時 `canRender=false`；Main process 在 FFmpeg 啟動前重新讀取目的磁碟並阻擋。 |
+| Shorts GPU 預設 | PASS；Shorts 明確傳送 `H265_QSV` 與預估片長，不再使用 legacy 未指定 codec fallback。 |
+| 來源與舊成品 | PASS；本輪測試、分析與預估未改寫來源媒體、既有 MP4／SRT 或剪輯規則內容；僅依要求追加產品變更紀錄。 |
+
+完整驗證：TypeScript PASS；Vitest 45 個測試檔／271 個測試 PASS；production build PASS；Electron smoke PASS；Windows packaged smoke PASS；`npm audit --audit-level=high` 0 vulnerabilities。v0.51.0 可攜版位於 `release\\v0.51.0\\SceneryWalkerSourceOrganizer-win32-x64\\SceneryWalkerSourceOrganizer.exe`，EXE 大小 `244441088` bytes，資料夾大小 `392570581` bytes，SHA-256 `20B5089CFB0EAFC42DD80F3FA80B53D9C166DEF071B87443AF409CD6D9A30BC5`。
+
+## v0.50.0 GPU 與素材影像字幕分析（2026-09-10）
+
+| 項目 | 結果 |
+|---|---|
+| QSV 編碼器探測 | PASS；本機 FFmpeg 暴露 `hevc_qsv`／`h264_qsv`，一秒測試輸出均成功；NVIDIA NVENC 不作為預設，因本機驅動 API 不相容。 |
+| GPU 選項與預設 | PASS；新偏好預設 `H265_QSV`，UI 顯示 QSV H.265／H.264 與 CPU 備援，舊 `H265`／`H264` 偏好仍可讀取。 |
+| 照片分析入口 | PASS；照片卡預設勾選，結果先回傳可編輯 `DRAFT`，確認後才寫入字幕。 |
+| 影片多影格分析 | PASS；輸入一個或多個來源時間點，分析遵守目前 IN／OUT，cue 保存來源 asset 與 source time。 |
+| 物種／地點證據 | PASS；沿用既有 StoryFrameAnalysis schema，包含 `animalSpecies`、`speciesExplanation`、地點、警告與信心。 |
+| Google Lens 邊界 | PASS；只開啟外部人工入口並支援貼回文字，不自動上傳本機檔案。 |
+| 完整驗證 | PASS；TypeScript、完整 Vitest、production build、Electron smoke、Windows packaged smoke 與 `npm audit --audit-level=high` 均通過。 |
+
+完整驗證：TypeScript PASS；Vitest 43 個測試檔／265 個測試 PASS；production build PASS；Electron smoke PASS；Windows packaged smoke PASS；`npm audit --audit-level=high` 0 vulnerabilities。v0.50.0 可攜版位於 `release\\v0.50.0\\SceneryWalkerSourceOrganizer-win32-x64\\SceneryWalkerSourceOrganizer.exe`，EXE 大小 `244441088` bytes，資料夾大小 `392549806` bytes，SHA-256 `445B7A7AB112DF111DBE1F488B2DBAB7B217CFA79D52734E165919635493662F`。
+
 ## v0.49.0 增量驗證（2026-09-10）
 
 | 項目 | 結果 |

@@ -105,14 +105,14 @@ describe("AI story and subtitle pipeline", () => {
     await fallback.initialize();
     const openAiAnalysisCalls = analyzeStoryFrames.mock.calls.length;
     const before = await sha256(sourcePath);
-    const result = await fallback.generateSubtitles({ includeSpeechTranscription: false, scopes: ["INTRO"] });
+    const result = await fallback.generateSubtitles({ includeSpeechTranscription: false, scopes: ["INTRO"], targetCueCount: 1 });
     expect(result).toMatchObject({ generatedCount: 1, providerLabel: "CODEX_CHATGPT", accountName: expect.stringContaining("Codex／ChatGPT") });
     expect(result.project.subtitleCues[0]).toMatchObject({ text: "森林植被有助保水與穩定土壤", reviewStatus: "CONFIRMED", aiAnalysisVersion: AI_STORY_ANALYZER_VERSION });
     expect(codex.testConnection).toHaveBeenCalledTimes(1);
     expect(codex.analyzeStoryFramesBatch).toHaveBeenCalledTimes(1);
     expect(analyzeStoryFrames).toHaveBeenCalledTimes(openAiAnalysisCalls);
     expect(await sha256(sourcePath)).toBe(before);
-    const cached = await fallback.generateSubtitles({ includeSpeechTranscription: false, scopes: ["INTRO"] });
+    const cached = await fallback.generateSubtitles({ includeSpeechTranscription: false, scopes: ["INTRO"], targetCueCount: 1 });
     expect(cached.generatedCount).toBe(0);
     expect(codex.testConnection).toHaveBeenCalledTimes(1);
     expect(codex.analyzeStoryFramesBatch).toHaveBeenCalledTimes(1);
@@ -147,5 +147,34 @@ describe("AI story and subtitle pipeline", () => {
     expect(result).toEqual({ text: "河內城市散步", language: "zh-TW", segmentCount: 1 });
     expect(provider.transcribeBytes).toHaveBeenCalledWith(expect.any(Uint8Array), "voice-input.webm", "audio/webm", expect.objectContaining({ apiKey: expect.stringMatching(/^sk-/) }), "zh", undefined);
     await expect(service.transcribeVoiceInput({ audioBytes: new Uint8Array([1]), mimeType: "video/mp4", language: "zh-TW" })).rejects.toThrow(/格式不支援/);
+  });
+
+  it("returns editable, source-traceable drafts for manually selected video frames", async () => {
+    const asset = store.getProject().sources[0];
+    await store.setSubtitleCues([]);
+    const before = await sha256(sourcePath);
+    const result = await service.analyzeMaterialForSubtitles({ assetId: asset.id, timelineScope: "MAIN", provider: "CHATGPT", frameTimesMs: [1_000] });
+    expect(result).toMatchObject({ providerLabel: "OPENAI_API", analyzedFrameTimesMs: [1_000], analysisVersion: "material-subtitle-v3-gemini-timeline-sync", overlaps: [] });
+    expect(result.drafts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ reviewStatus: "DRAFT", origin: "AI_VISUAL", sourceAssetId: asset.id, sourceInMs: 1_000, aiAnalysisVersion: "material-subtitle-v3-gemini-timeline-sync" }),
+    ]));
+    expect(await sha256(sourcePath)).toBe(before);
+  });
+
+  it("keeps the analyzed subtitle and reports the existing text when its time overlaps", async () => {
+    const asset = store.getProject().sources[0];
+    await store.setSubtitleCues([{ id: "existing-overlap", startMs: 900, endMs: 1_600, text: "既有森林字幕", timelineScope: "MAIN", reviewStatus: "CONFIRMED" }]);
+    const result = await service.analyzeMaterialForSubtitles({ assetId: asset.id, timelineScope: "MAIN", provider: "CHATGPT", frameTimesMs: [1_000] });
+    expect(result.drafts).toHaveLength(1);
+    expect(result.drafts[0].text).toBeTruthy();
+    expect(result.overlaps).toEqual([{ draftId: result.drafts[0].id, existingCues: [expect.objectContaining({ id: "existing-overlap", text: "既有森林字幕" })] }]);
+    expect(result.warnings.join(" ")).toContain("既有森林字幕");
+  });
+
+  it("uses the requested cue target to sample a longer clip more than once", async () => {
+    await store.setSubtitleCues([]);
+    const result = await service.generateSubtitles({ includeSpeechTranscription: false, scopes: ["MAIN"], targetCueCount: 3, mode: "REPLACE_AI_SCOPE" });
+    expect(result.generatedCount).toBe(3);
+    expect(result.project.subtitleCues.filter((cue) => cue.timelineScope === "MAIN")).toHaveLength(3);
   });
 });

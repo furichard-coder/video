@@ -31,7 +31,7 @@ export interface PublishVisualSelection {
 }
 
 export function selectPublishVisualCandidates(project: ReturnType<ProjectStore["getProject"]>): PublishVisualSelection[] {
-  const plan = buildTimelinePlan(project, { transitionSeconds: 0.3 });
+  const plan = buildTimelinePlan(project);
   const assetById = new Map(project.sources.map((asset) => [asset.id, asset]));
   const selected: Array<Omit<PublishVisualSelection, "candidateId">> = [];
   const add = (assetId: string, sourceTimeMs: number, origin: "INTRO" | "MAIN") => {
@@ -135,7 +135,7 @@ export class AiPublishAssetsService {
       const valid = validateYoutubeTitle(safe);
       return { id: `title-${index + 1}`, text: valid.value, charCount: valid.charCount, reason: index === 0 ? "主題與地點優先" : "依觀眾承諾與故事摘要產生的候選" };
     });
-    const plan = buildTimelinePlan(project, { transitionSeconds: 0.3 });
+    const plan = buildTimelinePlan(project);
     const assetById = new Map(project.sources.map((asset) => [asset.id, asset]));
     const visualSelections = selectPublishVisualCandidates(project);
     if (!visualSelections.length) throw new Error("目前沒有可追溯的片頭或正片畫面，無法產生標題與縮圖建議。");
@@ -164,7 +164,7 @@ export class AiPublishAssetsService {
       }
       catch (error) { warnings.push(`AI 候選影格無法建立：${asset.fileName}；${error instanceof Error ? error.message : String(error)}`); }
     }
-    const timelineDurationMs = plan.clips.reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0);
+    const timelineDurationMs = plan.durationMs;
     const generationInput: PublishGenerationInput = { topic: { topic: topic.topic.trim(), locations: topic.locations, storySummary: topic.storySummary.trim(), audiencePromise: topic.audiencePromise.trim() }, durationMs: timelineDurationMs, introSummary: project.introSegments.map((segment, order) => ({ assetId: segment.assetId, fileName: assetById.get(segment.assetId)?.fileName ?? segment.fileName, sourceInMs: segment.inMs, sourceOutMs: segment.outMs, order: order + 1 })), timelineSummary: plan.clips.map((clip) => ({ assetId: clip.assetId, fileName: assetById.get(clip.assetId)?.fileName ?? clip.assetId, startMs: clip.outputStartMs, endMs: clip.outputStartMs + clip.outMs - clip.inMs })), candidates };
     try {
       const model = snapshot.accounts.find((item) => item.id === snapshot.activeAccountId)?.visionModel ?? "gpt-5.6-terra"; onProgress(55, "正在由 Codex／ChatGPT 分析片頭畫面並主生成標題、縮圖與說明…");

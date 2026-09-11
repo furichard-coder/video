@@ -4,6 +4,7 @@ import { retainedDurationMs } from "../../shared/editing-rules";
 import { formatBytes, formatDate, formatDuration, formatResolution } from "../format";
 import { ConcatRenderModal } from "./ConcatRenderModal";
 import { TimeRangeFields } from "./MinuteSecondFields";
+import { SafeDefaultButton } from "./SafeDefaultButton";
 
 function formatPlayerTime(milliseconds: number): string {
   const value = Math.max(0, Math.round(milliseconds));
@@ -170,6 +171,8 @@ export function PreviewModal({ asset, project, onClose, onAssetUpdated, onProjec
     const segmentMaximum = Math.min(INTRO_MAX_SEGMENT_MS, latestProject.introSegmentMaxDurationMs);
     if (lengthMs < INTRO_MIN_SEGMENT_MS || lengthMs > segmentMaximum) throw new Error(`加入片頭的放大時段必須介於 3 秒與目前每段上限 ${segmentMaximum / 1000} 秒。`);
     if (latestProject.introSegments.length >= INTRO_MAX_SEGMENTS) throw new Error(`片頭已達 ${INTRO_MAX_SEGMENTS} 段上限。`);
+    const usedMs = latestProject.introSegments.reduce((sum, segment) => sum + segment.outMs - segment.inMs, 0);
+    if (usedMs + lengthMs > latestProject.introTargetDurationMs) throw new Error("加入後會超過目前片頭目標時間；為避免改動既有片段與總時間，請先到片頭頁縮短、移除片段或手動增加目標時間。");
   };
 
   const saveZoomsWithActions = async () => {
@@ -185,9 +188,6 @@ export function PreviewModal({ asset, project, onClose, onAssetUpdated, onProjec
       if (target && addSavedZoomToIntro) {
         const targetRange = { inMs: target.startMs, outMs: target.endMs };
         validateIntroRange(targetRange, latestProject);
-        const addedDurationMs = targetRange.outMs - targetRange.inMs;
-        const expandedTargetDurationMs = latestProject.introTargetDurationMs + addedDurationMs;
-        if (expandedTargetDurationMs !== latestProject.introTargetDurationMs) latestProject = await window.sourceApp.setIntroTargetDuration(expandedTargetDurationMs);
         const next = [...latestProject.introSegments];
         const insertAt = Math.max(0, Math.min(next.length, introInsertRank - 1));
         next.splice(insertAt, 0, makeManualIntroSegment(targetRange));
@@ -197,7 +197,7 @@ export function PreviewModal({ asset, project, onClose, onAssetUpdated, onProjec
         setIntroAddedTargetDurationMs(latestProject.introTargetDurationMs);
       }
       if (target && renderSavedZoomToMp4) setClipRenderSelection(makeManualIntroSegment({ inMs: target.startMs, outMs: target.endMs }));
-      if (target && addSavedZoomToIntro) setNotice(`已保存並把此時段加入片頭第 ${Math.min(introInsertRank, latestProject.introSegments.length)} 順位；片頭時間上限已同步增加，來源影片未修改。`);
+      if (target && addSavedZoomToIntro) setNotice(`已保存並把此時段加入片頭第 ${Math.min(introInsertRank, latestProject.introSegments.length)} 順位；既有片段 IN／OUT 與片頭目標時間保持不變，來源影片未修改。`);
     } catch (reason) { setEditorError(reason instanceof Error ? reason.message : String(reason)); }
   };
 
@@ -279,6 +279,6 @@ export function PreviewModal({ asset, project, onClose, onAssetUpdated, onProjec
       </section>
     </div>
     {clipRenderSelection && <ConcatRenderModal purpose="CLIP" assets={project.sources} mainClips={[clipRenderSelection]} initialResolution="4K" onClose={() => setClipRenderSelection(undefined)} />}
-    {introAddedRank !== undefined && <div className="modal-backdrop intro-added-backdrop" role="presentation"><section className="intro-added-confirmation" role="dialog" aria-modal="true" aria-label="片頭片段加入成功"><span className="eyebrow">INTRO SAVED</span><h2>已加入片頭第 {introAddedRank} 順位</h2><p>片段已自動寫入目前專案的片頭清單，片頭時間上限同步調整為 {formatDuration(introAddedTargetDurationMs)}。要現在前往片頭頁確認播放、順序與內容嗎？</p><div><button className="secondary-button" type="button" autoFocus onClick={() => { setIntroAddedRank(undefined); setIntroAddedTargetDurationMs(undefined); }}>留在片段設定</button><button className="primary-button" type="button" onClick={() => { setIntroAddedRank(undefined); setIntroAddedTargetDurationMs(undefined); onOpenIntro(); }}>前往片頭確認</button></div></section></div>}
+    {introAddedRank !== undefined && <div className="modal-backdrop intro-added-backdrop" role="presentation"><section className="intro-added-confirmation" role="dialog" aria-modal="true" aria-label="片頭片段加入成功"><span className="eyebrow">INTRO SAVED</span><h2>已加入片頭第 {introAddedRank} 順位</h2><p>片段已寫入目前專案；既有片段的 IN／OUT 與片頭目標時間 {formatDuration(introAddedTargetDurationMs)} 都保持不變。要現在前往片頭頁確認播放、順序與內容嗎？</p><div><SafeDefaultButton className="secondary-button" type="button" onClick={() => { setIntroAddedRank(undefined); setIntroAddedTargetDurationMs(undefined); }}>留在片段設定</SafeDefaultButton><button className="primary-button" type="button" onClick={() => { setIntroAddedRank(undefined); setIntroAddedTargetDurationMs(undefined); onOpenIntro(); }}>前往片頭確認</button></div></section></div>}
   </>);
 }

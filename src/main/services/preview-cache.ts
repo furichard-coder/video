@@ -24,6 +24,9 @@ interface CacheMarker {
   sourceModifiedAt: string;
   variant: PreviewVariant;
   generatedAt: string;
+  /** Verified output fingerprint; lets small per-cue proxies reopen without a new ffprobe process. */
+  outputSizeBytes?: number;
+  outputModifiedAt?: string;
 }
 
 const OUTPUT_NAMES: Record<PreviewVariant, string> = {
@@ -179,10 +182,18 @@ export class PreviewCache {
       const markerPath = assertWithinRoot(directory, path.join(directory, `clip-${clipKey}.json`));
       await mkdir(directory, { recursive: true });
       let hit = false;
-      if (await this.isValidProxy(outputPath) && await exists(markerPath)) {
+      if (await exists(markerPath) && await isUsableCachedOutput(outputPath, "VIDEO_CLIP_PROXY")) {
         try {
           const marker = JSON.parse(await readFile(markerPath, "utf8")) as CacheMarker & { sourceStartMs?: number; sourceEndMs?: number };
-          hit = marker.cacheKey === asset.previewCacheKey && marker.previewerVersion === CLIP_PREVIEWER_VERSION && marker.sourcePath === asset.sourcePath && marker.sourceSize === asset.sizeBytes && marker.sourceModifiedAt === asset.fileModifiedAt && marker.variant === "VIDEO_CLIP_PROXY" && marker.sourceStartMs === startMs && marker.sourceEndMs === endMs;
+          const markerMatches = marker.cacheKey === asset.previewCacheKey && marker.previewerVersion === CLIP_PREVIEWER_VERSION && marker.sourcePath === asset.sourcePath && marker.sourceSize === asset.sizeBytes && marker.sourceModifiedAt === asset.fileModifiedAt && marker.variant === "VIDEO_CLIP_PROXY" && marker.sourceStartMs === startMs && marker.sourceEndMs === endMs;
+          if (markerMatches) {
+            const output = await stat(outputPath);
+            const fingerprintMatches = marker.outputSizeBytes === output.size && marker.outputModifiedAt === output.mtime.toISOString();
+            hit = fingerprintMatches || await this.isValidProxy(outputPath);
+            if (hit && !fingerprintMatches) {
+              await writeFile(markerPath, `${JSON.stringify({ ...marker, outputSizeBytes: output.size, outputModifiedAt: output.mtime.toISOString() }, null, 2)}\n`, "utf8");
+            }
+          }
         } catch { hit = false; }
       }
       if (!hit) {
@@ -192,7 +203,8 @@ export class PreviewCache {
           await this.generateVideoProxy(asset, partialPath, signal, { startMs, durationMs: endMs - startMs });
           await this.assertGeneratedOutput(partialPath, "VIDEO_CLIP_PROXY", signal);
           await rename(partialPath, outputPath);
-          await writeFile(markerPath, `${JSON.stringify({ cacheKey: asset.previewCacheKey, previewerVersion: CLIP_PREVIEWER_VERSION, sourcePath: asset.sourcePath, sourceSize: asset.sizeBytes, sourceModifiedAt: asset.fileModifiedAt, variant: "VIDEO_CLIP_PROXY", sourceStartMs: startMs, sourceEndMs: endMs, generatedAt: new Date().toISOString() }, null, 2)}\n`, "utf8");
+          const output = await stat(outputPath);
+          await writeFile(markerPath, `${JSON.stringify({ cacheKey: asset.previewCacheKey, previewerVersion: CLIP_PREVIEWER_VERSION, sourcePath: asset.sourcePath, sourceSize: asset.sizeBytes, sourceModifiedAt: asset.fileModifiedAt, variant: "VIDEO_CLIP_PROXY", sourceStartMs: startMs, sourceEndMs: endMs, generatedAt: new Date().toISOString(), outputSizeBytes: output.size, outputModifiedAt: output.mtime.toISOString() }, null, 2)}\n`, "utf8");
         } catch (error) {
           await rm(partialPath, { force: true });
           if (isAbort(error)) throw error;

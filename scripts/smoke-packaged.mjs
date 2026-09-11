@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const appRoot = fileURLToPath(new URL("..", import.meta.url));
 const packageMeta = JSON.parse(await readFile(path.join(appRoot, "package.json"), "utf8"));
 const packageRoot = path.join(appRoot, "release", `v${packageMeta.version}`, "SceneryWalkerSourceOrganizer-win32-x64");
-const executable = path.join(packageRoot, "SceneryWalkerSourceOrganizer.exe");
+const executable = path.join(packageRoot, `SceneryWalkerSourceOrganizer-v${packageMeta.version}.exe`);
 const smokeRoot = path.join(appRoot, "release", `v${packageMeta.version}`, ".smoke");
 const markerPath = path.join(smokeRoot, "ready.txt");
 const userDataPath = path.join(smokeRoot, "user-data");

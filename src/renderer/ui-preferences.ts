@@ -1,4 +1,4 @@
-export type UiTextSize = 16 | 18 | 20 | 22;
+export type UiTextSize = 16 | 18 | 20 | 22 | 24 | 26;
 export type UiZoomPercent = 75 | 85 | 100 | 110 | 125 | 150;
 
 export const DEFAULT_UI_TEXT_SIZE: UiTextSize = 18;
@@ -11,6 +11,8 @@ export const UI_TEXT_SIZE_OPTIONS: Array<{ value: UiTextSize; label: string; det
   { value: 18, label: "舒適", detail: "約 113%（預設）" },
   { value: 20, label: "清楚", detail: "125%" },
   { value: 22, label: "最大", detail: "約 138%" },
+  { value: 24, label: "超大", detail: "150%" },
+  { value: 26, label: "特大", detail: "約 163%" },
 ];
 
 export function readUiTextSize(storage: Pick<Storage, "getItem"> = window.localStorage): UiTextSize {

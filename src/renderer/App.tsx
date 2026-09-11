@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AppInfo, BackgroundJobSnapshot, ImportProgress, ProjectHistoryState, ProjectManifest, SortMode, SourceAsset, ViewMode } from "../shared/domain";
+import type { AppInfo, BackgroundJobSnapshot, ImportProgress, ProjectHistoryState, ProjectManifest, SortMode, SourceAsset, SubtitleTimelineScope, ViewMode } from "../shared/domain";
 import { mainRenderSelections } from "../shared/editing-rules";
+import { buildTimelinePlan } from "../shared/timeline-plan";
 import { AssetCard } from "./components/AssetCard";
 import { ConcatRenderModal } from "./components/ConcatRenderModal";
 import { IntroStudio } from "./components/IntroStudio";
@@ -21,6 +22,8 @@ import { OutputHistoryModal } from "./components/OutputHistoryModal";
 import { AiPublishStudio } from "./components/AiPublishStudio";
 import { MaterialEditorModal, type MaterialEditorSection } from "./components/MaterialEditorModal";
 import { WatermarkSettingsModal } from "./components/WatermarkSettingsModal";
+import { MaterialSubtitleAnalysisModal } from "./components/MaterialSubtitleAnalysisModal";
+import { SafeDefaultButton } from "./components/SafeDefaultButton";
 import { formatBytes } from "./format";
 import { applyUiTextSize, applyUiZoom, readUiTextSize, readUiZoom, stepUiZoom, type UiTextSize, type UiZoomPercent } from "./ui-preferences";
 
@@ -76,6 +79,7 @@ export function App() {
   const [selectedAsset, setSelectedAsset] = useState<SourceAsset>();
   const [showPlaylist, setShowPlaylist] = useState(false);
   const [showConcatRender, setShowConcatRender] = useState(false);
+  const [concatRenderPurpose, setConcatRenderPurpose] = useState<"CONCAT" | "INTRO">("CONCAT");
   const [showIntroStudio, setShowIntroStudio] = useState(false);
   const [showPlayerSettings, setShowPlayerSettings] = useState(false);
   const [showAiSettings, setShowAiSettings] = useState(false);
@@ -92,6 +96,8 @@ export function App() {
   const [placementQueue, setPlacementQueue] = useState<string[]>([]);
   const [showBgm, setShowBgm] = useState(false);
   const [showSubtitles, setShowSubtitles] = useState(false);
+  const [materialAnalysisAsset, setMaterialAnalysisAsset] = useState<SourceAsset>();
+  const [materialAnalysisScope, setMaterialAnalysisScope] = useState<SubtitleTimelineScope>("MAIN");
   const [confirmRemoveAsset, setConfirmRemoveAsset] = useState<SourceAsset>();
   const [removeBusy, setRemoveBusy] = useState(false);
   const [lastRemovedMainId, setLastRemovedMainId] = useState<string>();
@@ -138,7 +144,7 @@ export function App() {
     window.sourceApp.onProjectChanged((change) => {
       setProject((current) => {
         if (!current || current.id !== change.projectId) {
-          setSelectedAsset(undefined); setShowPlaylist(false); setShowConcatRender(false); setShowIntroStudio(false); setShowBgm(false); setShowSubtitles(false); setShowWatermarkSettings(false);
+          setSelectedAsset(undefined); setShowPlaylist(false); setShowConcatRender(false); setShowIntroStudio(false); setShowBgm(false); setShowSubtitles(false); setShowWatermarkSettings(false); setMaterialAnalysisAsset(undefined);
         }
         return structuredClone(change.project);
       });
@@ -225,12 +231,13 @@ export function App() {
     [sortedAssets],
   );
   const mainClips = useMemo(() => project ? mainRenderSelections(project) : [], [project]);
-  const timelineDurationMs = useMemo(() => mainClips.reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0), [mainClips]);
+  const timelineDurationMs = useMemo(() => project ? buildTimelinePlan(project).durationMs : 0, [project]);
 
   const closeProjectViews = () => {
     setSelectedAsset(undefined); setShowPlaylist(false); setShowConcatRender(false); setShowIntroStudio(false);
     setExternalAsset(undefined); setVolumeAssetState(undefined); setShowBgm(false); setShowSubtitles(false);
     setConfirmRemoveAsset(undefined); setPlacementQueue([]); setLastRemovedMainId(undefined);
+    setMaterialAnalysisAsset(undefined);
     setMediaInsertionVideoState(undefined); setShowAiSettings(false); setShowYoutubeSettings(false);
     setShowOutputHistory(false);
     setShowAiPublish(false);
@@ -324,7 +331,7 @@ export function App() {
   };
 
   const moveAsset = async (assetId: string, toIndex: number) => {
-    try { setProject(await window.sourceApp.moveTimelineAsset(assetId, toIndex)); }
+    try { setProject(await window.sourceApp.moveTimelineAsset(assetId, toIndex)); setNotice("素材順序已保存；對應字幕已依目前疊化秒數同步移動。"); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
 
@@ -368,7 +375,7 @@ export function App() {
     try {
       const updated = await window.sourceApp.moveTimelineAsset(sourceAssetId, finalIndex);
       setProject(updated);
-      setNotice(`已將素材移到第 ${finalIndex + 1} 項；順序已保存到專案。`);
+      setNotice(`已將素材移到第 ${finalIndex + 1} 項；對應字幕已依目前疊化秒數同步移動。`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       try { setProject(await window.sourceApp.getProject()); } catch { /* Keep the last visible state if reload also fails. */ }
@@ -379,6 +386,7 @@ export function App() {
     const updated = await window.sourceApp.placeAsset(assetId, placement);
     setProject(updated);
     setPlacementQueue((current) => current.filter((id) => id !== assetId));
+    if (placement.action !== "PENDING") setNotice("素材已插入指定位置；後方字幕順序與時間已依疊化設定同步重算。");
   };
 
   const changeSort = async (sortMode: SortMode) => {
@@ -435,6 +443,8 @@ export function App() {
     return <main className="app-shell loading-shell"><span className="spinner" /><p>正在恢復來源專案…</p></main>;
   }
 
+  const renderInProgress = backgroundJobs.some((job) => job.kind === "CONCAT_RENDER" && job.status === "RUNNING");
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -480,7 +490,7 @@ export function App() {
           <span>{progress?.processed ?? 0} / {progress?.discovered ?? 0}</span>
         </section>
       )}
-      {backgroundJobs.length > 0 && <section className="background-jobs-banner" aria-live="polite" aria-label="背景工作進度"><div><strong>背景工作</strong><span>關閉功能視窗不會中斷；完成後結果會保存到專案或預覽檔案庫。</span></div><div className="background-jobs-list">{backgroundJobs.slice(0, 4).map((job) => <span className={`background-job is-${job.status.toLowerCase()}`} key={job.id}><b>{job.status === "RUNNING" ? "●" : job.status === "COMPLETED" ? "✓" : job.status === "CANCELLED" ? "Ⅱ" : "!"}</b>{job.label}{job.status === "RUNNING" && job.percent !== undefined ? ` ${job.percent}%` : job.status === "COMPLETED" ? " 完成" : job.status === "FAILED" ? " 失敗" : " 已取消"}</span>)}</div></section>}
+      {backgroundJobs.length > 0 && <section className="background-jobs-banner" aria-live="polite" aria-label="背景工作進度"><div><strong>背景工作</strong><span>{renderInProgress ? "轉檔尚未完成：Windows 防睡眠保護已開啟，App 也暫時不可關閉。" : "關閉功能視窗不會中斷；完成後結果會保存到專案或預覽檔案庫。"}</span></div><div className="background-jobs-list">{backgroundJobs.slice(0, 4).map((job) => <span className={`background-job is-${job.status.toLowerCase()}`} key={job.id}><b>{job.status === "RUNNING" ? "●" : job.status === "COMPLETED" ? "✓" : job.status === "CANCELLED" ? "Ⅱ" : "!"}</b>{job.label}{job.status === "RUNNING" && job.percent !== undefined ? ` ${job.percent}%` : job.status === "COMPLETED" ? " 完成" : job.status === "FAILED" ? " 失敗" : " 已取消"}</span>)}</div></section>}
       {notice && <div className="notice success notice-with-action" role="status"><span>{notice}</span>{lastRemovedMainId && project.excludedMainAssetIds.includes(lastRemovedMainId) && <button type="button" onClick={() => void restoreMainAsset(lastRemovedMainId)}>撤銷，恢復正片</button>}</div>}
       {error && <div className="notice error" role="alert">{error}</div>}
 
@@ -492,7 +502,7 @@ export function App() {
             <label className="sort-control"><span>排序</span><select value={project.sortMode} onChange={(event) => void changeSort(event.target.value as SortMode)}>{Object.entries(SORT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <div className="segmented-control" aria-label="檢視方式"><button type="button" className={viewMode === "GRID" ? "active" : ""} onClick={() => void changeViewMode("GRID")}>網格</button><button type="button" className={viewMode === "LIST" ? "active" : ""} onClick={() => void changeViewMode("LIST")}>清單</button></div>
             <button className="secondary-button" type="button" disabled={!sortedAssets.length} onClick={() => { setMaterialEditorAsset(sortedAssets[0]); setMaterialEditorSection("CLIP"); }}>素材工作區</button><button className="play-all-button" type="button" disabled={!mainClips.length} onClick={() => setShowPlaylist(true)}>▶ 總體預覽</button>
-            <button className="concat-button" type="button" disabled={!mainClips.length} title={!mainClips.length ? "正片沒有可供輸出的保留影片片段" : undefined} onClick={() => setShowConcatRender(true)}>⇄ 產出串連預覽</button>
+            <button className="concat-button" type="button" disabled={!mainClips.length} title={!mainClips.length ? "正片沒有可供輸出的保留影片片段" : undefined} onClick={() => { setConcatRenderPurpose("CONCAT"); setShowConcatRender(true); }}>⇄ 產出串連預覽</button>
             <button className="ai-intro-button" type="button" onClick={() => setShowIntroStudio(true)}>✦ AI 精彩片頭</button>
             <button className="music-button" type="button" onClick={() => setShowBgm(true)}>♫ 配樂 {project.bgmTracks.length ? `(${project.bgmTracks.length})` : ""}</button>
             <button className="subtitle-button" type="button" onClick={() => setShowSubtitles(true)}>CC 字幕 {project.subtitleCues.length ? `(${project.subtitleCues.length})` : ""}</button>
@@ -504,7 +514,7 @@ export function App() {
           <div className="empty-state"><div className="empty-frames"><span /><span /><span /></div><h2>{project.sources.length ? "正片清單目前為空" : "尚未加入素材"}</h2><p>{project.sources.length ? "所有素材都已從正片移除或仍待決定。來源檔仍在原位置，可從最近移除區恢復。" : "選擇數個影片／照片，或直接選擇一個來源資料夾。App 只讀取檔案並建立自己的預覽快取。"}</p>{!project.sources.length && <button className="primary-button" type="button" onClick={() => void runImport("FILES")}>開始選擇素材</button>}</div>
         ) : (
           <div className={`asset-collection ${viewMode === "LIST" ? "list-view" : "grid-view"}`}>
-            {sortedAssets.map((asset, index) => <AssetCard key={asset.id} asset={asset} index={index} previousFileName={sortedAssets[index - 1]?.fileName} nextFileName={sortedAssets[index + 1]?.fileName} viewMode={viewMode} onOpen={setSelectedAsset} onOpenExternalDirect={(item) => void openExternalDirect(item)} onOpenExternalOptions={setExternalAsset} externalOpening={externalOpeningId === asset.id} onOpenVolume={setVolumeAsset} onOpenMediaInsertion={setMediaInsertionVideo} mediaInsertions={project.mediaInsertions.filter((item) => item.anchorVideoAssetId === asset.id).map((item) => { const inserted = project.sources.find((candidate) => candidate.id === item.insertedAssetId); return { ...item, insertedFileName: inserted?.fileName ?? "找不到素材", insertedKind: inserted?.kind ?? "IMAGE" }; })} availableMediaCount={Math.max(0, project.timelineOrder.length + project.pendingAssetIds.length - 1)} onRemove={setConfirmRemoveAsset} onAssetUpdated={updateAsset} onProjectUpdated={replaceProject} canMoveUp={index > 0} canMoveDown={index < sortedAssets.length - 1} onMove={(delta) => void moveAsset(asset.id, index + delta)} dragging={draggingAssetId === asset.id} dragTarget={Boolean(draggingAssetId && dragTargetAssetId === asset.id && draggingAssetId !== asset.id)} onGridDragStart={beginGridDrag} onGridDragEnter={moveGridDragOver} onGridDragEnd={() => void finishGridDrag()} />)}
+            {sortedAssets.map((asset, index) => <AssetCard key={asset.id} asset={asset} index={index} previousFileName={sortedAssets[index - 1]?.fileName} nextFileName={sortedAssets[index + 1]?.fileName} viewMode={viewMode} onOpen={setSelectedAsset} onOpenExternalDirect={(item) => void openExternalDirect(item)} onOpenExternalOptions={setExternalAsset} externalOpening={externalOpeningId === asset.id} onOpenVolume={setVolumeAsset} onOpenMaterialAnalysis={(item) => { setMaterialAnalysisScope("MAIN"); setMaterialAnalysisAsset(item); }} onOpenMediaInsertion={setMediaInsertionVideo} mediaInsertions={project.mediaInsertions.filter((item) => item.anchorVideoAssetId === asset.id).map((item) => { const inserted = project.sources.find((candidate) => candidate.id === item.insertedAssetId); return { ...item, insertedFileName: inserted?.fileName ?? "找不到素材", insertedKind: inserted?.kind ?? "IMAGE" }; })} availableMediaCount={Math.max(0, project.timelineOrder.length + project.pendingAssetIds.length - 1)} onRemove={setConfirmRemoveAsset} onAssetUpdated={updateAsset} onProjectUpdated={replaceProject} canMoveUp={index > 0} canMoveDown={index < sortedAssets.length - 1} onMove={(delta) => void moveAsset(asset.id, index + delta)} dragging={draggingAssetId === asset.id} dragTarget={Boolean(draggingAssetId && dragTargetAssetId === asset.id && draggingAssetId !== asset.id)} onGridDragStart={beginGridDrag} onGridDragEnter={moveGridDragOver} onGridDragEnd={() => void finishGridDrag()} />)}
           </div>
         )}
         {pendingAssets.length > 0 && <section className="pending-section"><div><span className="eyebrow">PENDING PLACEMENT</span><h3>待決定區 · {pendingAssets.length} 項</h3><p>此區素材尚未進入最終順序，也不會加入串連輸出。</p></div><div className="pending-list">{pendingAssets.map((asset) => <div key={asset.id}><strong>{asset.fileName}</strong><span>{asset.kind === "VIDEO" ? "影片" : "照片"}</span><button onClick={() => setPlacementQueue((current) => [asset.id, ...current.filter((id) => id !== asset.id)])}>決定安插位置</button><button aria-label={`從正片移除 ${asset.fileName}`} onClick={() => setConfirmRemoveAsset(asset)}>從正片移除</button></div>)}</div></section>}
@@ -517,8 +527,8 @@ export function App() {
       {selectedAsset && <PreviewModal asset={project.sources.find((asset) => asset.id === selectedAsset.id) ?? selectedAsset} project={project} onClose={() => setSelectedAsset(undefined)} onAssetUpdated={updateAsset} onProjectUpdated={setProject} onOpenExternal={setExternalAsset} onOpenIntro={() => { setSelectedAsset(undefined); setShowIntroStudio(true); }} />}
       {materialEditorAsset && <MaterialEditorModal asset={project.sources.find((asset) => asset.id === materialEditorAsset.id) ?? materialEditorAsset} initialSection={materialEditorSection} onClose={() => setMaterialEditorAsset(undefined)} onOpenSection={(section) => { setMaterialEditorSection(section); if (section === "VOLUME") { setMaterialEditorAsset(undefined); setVolumeAsset(materialEditorAsset); } else if (section === "INSERT") { setMaterialEditorAsset(undefined); setMediaInsertionVideo(materialEditorAsset); } else if (section === "CLIP" || section === "PREVIEW") { setMaterialEditorAsset(undefined); setSelectedAsset(materialEditorAsset); } }} />}
       {showPlaylist && mainClips.length > 0 && <PlaylistModal assets={project.sources} clips={mainClips} onClose={() => setShowPlaylist(false)} onAssetUpdated={updateAsset} />}
-      {showConcatRender && mainClips.length > 0 && <ConcatRenderModal assets={project.sources} mainClips={mainClips} introClips={project.introSegments} introSegmentMaxDurationMs={project.introSegmentMaxDurationMs} confirmedSubtitleCount={project.subtitleCues.filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED" && (cue.timelineScope ?? "MAIN") === "MAIN").length} subtitlesNeedReview={project.subtitleCues.some((cue) => (cue.timelineScope ?? "MAIN") === "MAIN") && projectScopeNeedsReview(project, "MAIN")} projectName={project.name} onClose={() => setShowConcatRender(false)} />}
-      {showIntroStudio && <IntroStudio project={project} videos={sortedVideos} onClose={() => setShowIntroStudio(false)} onProjectUpdated={setProject} />}
+      {showConcatRender && mainClips.length > 0 && <ConcatRenderModal key={concatRenderPurpose} purpose={concatRenderPurpose} assets={project.sources} mainClips={mainClips} introClips={project.introSegments} introSegmentMaxDurationMs={project.introSegmentMaxDurationMs} confirmedSubtitleCount={project.subtitleCues.filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED" && (cue.timelineScope ?? "MAIN") === (concatRenderPurpose === "INTRO" ? "INTRO" : "MAIN")).length} subtitlesNeedReview={project.subtitleCues.some((cue) => (cue.timelineScope ?? "MAIN") === (concatRenderPurpose === "INTRO" ? "INTRO" : "MAIN")) && projectScopeNeedsReview(project, concatRenderPurpose === "INTRO" ? "INTRO" : "MAIN")} projectName={project.name} onPurposeChange={setConcatRenderPurpose} onClose={() => setShowConcatRender(false)} />}
+      {showIntroStudio && <IntroStudio project={project} videos={sortedVideos} onClose={() => setShowIntroStudio(false)} onProjectUpdated={setProject} onOpenMaterialAnalysis={(asset) => { setMaterialAnalysisScope("INTRO"); setMaterialAnalysisAsset(asset); }} />}
       {showPlayerSettings && <PlayerSettingsModal onClose={() => setShowPlayerSettings(false)} />}
       {showDisplaySettings && <DisplaySettingsModal textSize={uiTextSize} zoomPercent={uiZoom} onTextSizeChange={setUiTextSize} onZoomChange={setUiZoom} onClose={() => setShowDisplaySettings(false)} />}
       {showYoutubeSettings && <YoutubeSettingsModal onClose={() => setShowYoutubeSettings(false)} />}
@@ -528,12 +538,13 @@ export function App() {
       {showAiSettings && <AiSettingsModal project={project} onProjectUpdated={setProject} onClose={() => setShowAiSettings(false)} />}
       {externalAsset && <ExternalOpenModal asset={externalAsset} onClose={() => setExternalAsset(undefined)} />}
       {volumeAsset && <VolumeSegmentsModal asset={project.sources.find((asset) => asset.id === volumeAsset.id) ?? volumeAsset} defaultVolumePercent={project.sourceAudioVolumePercent ?? 100} onClose={() => setVolumeAsset(undefined)} onAssetUpdated={updateAsset} />}
+      {materialAnalysisAsset && <MaterialSubtitleAnalysisModal asset={project.sources.find((asset) => asset.id === materialAnalysisAsset.id) ?? materialAnalysisAsset} project={project} initialScope={materialAnalysisScope} onProjectUpdated={setProject} onNotice={setNotice} onOpenSubtitleReview={(updated) => { setProject(updated); setMaterialAnalysisAsset(undefined); openWorkspace("SUBTITLES"); }} onClose={() => setMaterialAnalysisAsset(undefined)} />}
       {placementQueue[0] && (() => { const asset = project.sources.find((item) => item.id === placementQueue[0]); return asset ? <PlacementModal asset={asset} anchors={sortedAssets} onClose={() => setPlacementQueue((current) => current.slice(1))} onDecide={(placement) => decidePlacement(asset.id, placement)} /> : null; })()}
       {showBgm && <BgmStudio project={project} timelineDurationMs={timelineDurationMs} onProjectUpdated={setProject} onClose={() => setShowBgm(false)} />}
       {showSubtitles && <SubtitleStudio project={project} timelineDurationMs={timelineDurationMs} onProjectUpdated={setProject} onOpenAiSettings={() => { setShowSubtitles(false); setShowAiSettings(true); }} onClose={() => setShowSubtitles(false)} />}
       {confirmRemoveAsset && <ConfirmMainRemovalModal asset={confirmRemoveAsset} project={project} busy={removeBusy} onCancel={() => setConfirmRemoveAsset(undefined)} onConfirm={() => void removeAsset(confirmRemoveAsset)} />}
       {mediaInsertionVideo && <MediaInsertionModal project={project} video={project.sources.find((asset) => asset.id === mediaInsertionVideo.id) ?? mediaInsertionVideo} onProjectUpdated={replaceProject} onClose={() => setMediaInsertionVideo(undefined)} />}
-      {showCloseConfirmation && <div className="modal-backdrop close-confirm-backdrop" role="presentation"><section className="close-confirm-modal" role="dialog" aria-modal="true" aria-label="再次確認關閉軟體"><div className="close-confirm-mascot" aria-hidden="true">🎬<span>✨</span></div><span className="eyebrow">ONE MORE CHECK</span><h2>今天的剪輯先保存到這裡嗎？</h2><p>專案會保留目前設定，來源影片與照片不會被修改。真的要關閉 SceneryWalker 嗎？</p><div><button className="primary-button" type="button" autoFocus onClick={() => setShowCloseConfirmation(false)}>繼續剪輯</button><button className="secondary-button" type="button" onClick={() => window.sourceApp.confirmAppClose()}>確定關閉</button></div></section></div>}
+      {showCloseConfirmation && <div className="modal-backdrop close-confirm-backdrop" role="presentation"><section className="close-confirm-modal" role="dialog" aria-modal="true" aria-label="再次確認關閉軟體"><div className="close-confirm-mascot" aria-hidden="true">🎬<span>✨</span></div><span className="eyebrow">ONE MORE CHECK</span><h2>{renderInProgress ? "轉檔完成前不能關閉" : "今天的剪輯先保存到這裡嗎？"}</h2><p>{renderInProgress ? "目前仍在產出影片，Windows 防睡眠保護已開啟。請等待完成，或先回到轉檔頁取消並等候不完整檔清理完畢。" : "專案會保留目前設定，來源影片與照片不會被修改。真的要關閉 SceneryWalker 嗎？"}</p><div><SafeDefaultButton className="primary-button" type="button" onClick={() => setShowCloseConfirmation(false)}>繼續剪輯</SafeDefaultButton><button className="secondary-button" type="button" disabled={renderInProgress} onClick={() => window.sourceApp.confirmAppClose()}>確定關閉</button></div></section></div>}
     </main>
   );
 }

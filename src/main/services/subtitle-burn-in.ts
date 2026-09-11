@@ -71,6 +71,13 @@ export interface SubtitleAssBuildResult {
   languages: SubtitleRenderLanguage[];
 }
 
+export type SubtitleOutputScope = "MAIN" | "INTRO" | "MAIN_WITH_INTRO";
+
+/** Subtitle-page preview pixels are defined against its 480p review canvas. */
+export function subtitleFrameFontSize(fontSizePx: number, frameHeight: number): number {
+  return Math.max(12, Math.round(fontSizePx * frameHeight / 480));
+}
+
 export function validateSubtitleBurnInOptions(rawOptions: SubtitleBurnInOptions): SubtitleBurnInOptions {
   if (!rawOptions || rawOptions.enabled !== true || !Array.isArray(rawOptions.tracks) || rawOptions.tracks.length < 1 || rawOptions.tracks.length > 2) {
     throw new Error("字幕嵌入需選擇一至兩種語言。");
@@ -92,19 +99,25 @@ export function buildSubtitleAss(
   rawOptions: SubtitleBurnInOptions,
   translations: SubtitleTranslationResult,
   mainStartCard?: MainStartCardOptions,
+  outputScope: SubtitleOutputScope = introClipCount > 0 ? "MAIN_WITH_INTRO" : "MAIN",
 ): SubtitleAssBuildResult {
   const options = validateSubtitleBurnInOptions(rawOptions);
-  const confirmed = project.subtitleCues.filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED");
+  const includesMain = outputScope !== "INTRO";
+  const includesIntro = outputScope !== "MAIN";
+  const confirmed = project.subtitleCues.filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED"
+    && ((cue.timelineScope ?? "MAIN") === "INTRO" ? includesIntro : includesMain));
   if (!confirmed.length) throw new Error("沒有已確認的字幕可嵌入影片。");
-  if ((project.mainSubtitleReviewRevision ?? project.subtitleTimelineRevision) !== (project.mainTimelineRevision ?? project.timelineRevision)
-    || ((project.subtitleCues.some((cue) => (cue.timelineScope ?? "MAIN") === "INTRO"))
-      && (project.introSubtitleReviewRevision ?? project.subtitleTimelineRevision) !== (project.introTimelineRevision ?? project.timelineRevision))) {
+  if ((includesMain && (project.mainSubtitleReviewRevision ?? project.subtitleTimelineRevision) !== (project.mainTimelineRevision ?? project.timelineRevision))
+    || (includesIntro && (project.introSubtitleReviewRevision ?? project.subtitleTimelineRevision) !== (project.introTimelineRevision ?? project.timelineRevision))) {
     throw new Error("正片或片頭順序／IN／OUT 已變更，請先逐項複核並保存字幕，再嵌入影片。");
   }
-  const mainClips = mainRenderSelections(project);
-  const canonicalMainPlan = buildTimelinePlan(project, { includeIntro: false, transitionSeconds });
-  if (canonicalMainPlan.clips.length !== mainClips.length) throw new Error("字幕時間線與目前正片計畫不一致。");
-  if (outputClips.length !== introClipCount + mainClips.length) throw new Error("字幕時間線與目前輸出片段不一致。");
+  const mainClips = includesMain ? mainRenderSelections(project) : [];
+  const canonicalMainPlan = includesMain ? buildTimelinePlan(project, { includeIntro: false, transitionSeconds }) : undefined;
+  if (canonicalMainPlan && canonicalMainPlan.clips.length !== mainClips.length) throw new Error("字幕時間線與目前正片計畫不一致。");
+  const expectedIntroCount = includesIntro ? introClipCount : 0;
+  if ((outputScope === "INTRO" && introClipCount !== outputClips.length)
+    || (outputScope === "MAIN" && introClipCount !== 0)
+    || outputClips.length !== expectedIntroCount + mainClips.length) throw new Error("字幕時間線與目前輸出片段不一致。");
   const { width, height } = RESOLUTIONS[resolution];
   const transitionMs = Math.round(transitionSeconds * 1000);
   const outputStarts: number[] = [];
@@ -122,16 +135,30 @@ export function buildSubtitleAss(
   }
   const mainLogicalStarts: number[] = [];
   let mainCursor = 0;
-  for (const clip of mainClips) { mainLogicalStarts.push(mainCursor); mainCursor += clip.outMs - clip.inMs; }
+  for (let index = 0; index < mainClips.length; index += 1) {
+    const clip = mainClips[index]; mainLogicalStarts.push(mainCursor);
+    mainCursor += clip.outMs - clip.inMs - (index < mainClips.length - 1 ? transitionMs : 0);
+  }
   const introClips = outputClips.slice(0, introClipCount);
   const introLogicalStarts: number[] = [];
   let introCursor = 0;
-  for (const clip of introClips) { introLogicalStarts.push(introCursor); introCursor += clip.outMs - clip.inMs; }
+  for (let index = 0; index < introClips.length; index += 1) {
+    const clip = introClips[index]; introLogicalStarts.push(introCursor);
+    introCursor += clip.outMs - clip.inMs - (index < introClips.length - 1 ? transitionMs : 0);
+  }
 
   const sharedStyle = options.styleProfile;
+  // The first track is the subtitle-page preview track, so its rendered size
+  // and vertical position must use the same 480p reference profile. Optional
+  // translated tracks retain their own 1080p size and position controls.
+  const resolvedFontSizes = options.tracks.map((track, index) => sharedStyle && index === 0
+    ? subtitleFrameFontSize(sharedStyle.fontSizePx, height)
+    : Math.max(12, Math.round(track.fontSize1080p * height / 1080)));
   const styles = options.tracks.map((track, index) => {
-    const fontSize = Math.max(12, Math.round((sharedStyle?.fontSizePx ?? track.fontSize1080p) * height / 1080));
-    const outline = Math.max(0, Math.round((sharedStyle?.outlineWidthPx ?? 2) * height / 1080));
+    const fontSize = resolvedFontSizes[index];
+    const outline = sharedStyle
+      ? Math.max(0, Math.round(sharedStyle.outlineWidthPx * height / 480))
+      : Math.max(0, Math.round(2 * height / 1080));
     const shadow = sharedStyle?.shadowEnabled === false ? 0 : Math.max(1, Math.round(fontSize * 0.035));
     return `Style: Lang${index + 1},${FONT_NAMES[track.language]},${fontSize},${assColor(sharedStyle?.textColor ?? "#FFFFFF")},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${outline},${shadow},2,20,20,20,1`;
   });
@@ -141,7 +168,7 @@ export function buildSubtitleAss(
     if (!trackTexts || trackTexts.length !== confirmed.length) throw new Error(`找不到 ${track.language} 的完整字幕文字。`);
     const laneCount = options.tracks.filter((candidate) => candidate.position === track.position).length;
     const lane = options.tracks.slice(0, trackIndex).filter((candidate) => candidate.position === track.position).length;
-    const fontSize = Math.max(12, Math.round(track.fontSize1080p * height / 1080));
+    const fontSize = resolvedFontSizes[trackIndex];
     const cjk = track.language !== "en";
     const maxCharacters = Math.max(8, Math.floor(width * 0.82 / (fontSize * (cjk ? 1 : 0.58))));
     confirmed.forEach((cue, cueIndex) => {
@@ -158,7 +185,7 @@ export function buildSubtitleAss(
         const actualStart = outputStarts[outputOffset + clipIndex] + overlapStart - logicalStart;
         const actualEnd = outputStarts[outputOffset + clipIndex] + overlapEnd - logicalStart;
         const text = wrapSubtitleText(trackTexts[cueIndex], maxCharacters).map(escapeAssLine).join("\\N");
-        const position = sharedStyle
+        const position = sharedStyle && trackIndex === 0
           ? (sharedStyle.verticalPositionPercent < 38 ? "TOP" : sharedStyle.verticalPositionPercent > 64 ? "BOTTOM" : "MIDDLE") as SubtitleRenderPosition
           : track.position;
         const override = positionOverride(position, lane, laneCount, width, height, fontSize);

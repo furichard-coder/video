@@ -1,12 +1,68 @@
-# Current Product Spec — v0.49.0
+# Current Product Spec — v0.56.0
 
 ## Scope
 
 Windows-first read-only source organizer. The first visible workflow remains source selection, thumbnail/proxy preview, ordering, IN/OUT, Intro and preview MP4 output. Sources, SOP files and previous releases are never overwritten.
 
+## v0.56.0 immediate per-cue subtitle persistence
+
+- Every visible subtitle row owns a native textarea and adjacent per-row actions: confirm, delete, move up and move down. Focusing or clicking the textarea must preserve normal native caret placement, selection, arrow navigation and text entry; row selection remains isolated on the numbered selector.
+- Individual confirmation persists the current complete cue snapshot immediately through the canonical Main-process `setSubtitleCues` validation path. The UI reports success only after the manifest write returns successfully; a write failure leaves the edit dirty and visible with an error.
+- Forced review does not advance to the next cue until the current confirmation write succeeds. Global confirmation toggles and Shift-selected confirm/unconfirm actions use the same immediate persistence contract. Deletion retains its explicit safety prompt and source-media isolation.
+- Up/down is defined as moving subtitle content to the adjacent chronological slot within the same Intro/Main scope. The two cues exchange output time and source anchor fields, are both marked `DRAFT`, and are immediately persisted. This preserves deterministic timeline order while requiring a fresh picture/text review after the content position changes.
+- The footer save action is retained only for unconfirmed free-form text/time edits. It is disabled when there is no dirty local edit and is not a prerequisite for any confirmation action.
+
+## v0.55.0 versioned delivery, safe confirmations and subtitle review
+
+- Every newly packaged Windows executable includes the semantic version in its filename: `SceneryWalkerSourceOrganizer-v<version>.exe`. The release folder remains versioned separately, so a user can identify the binary even after copying it elsewhere.
+- Compact App confirmation overlays identify a non-destructive safe default. When they open, that button receives keyboard focus and the Windows pointer is moved to its center on a best-effort basis. Renderer coordinates are bounded to the owning window before Main converts them to a physical screen point; the helper runs without shell interpolation. Close confirmation defaults to `繼續剪輯`, never `確定關閉`.
+- Per-cue Subtitle review requests only the selected source range as a low-resolution H.264 clip proxy instead of transcoding the complete 4K／HEVC source. Cache keys remain bound to source fingerprint and exact IN／OUT. A verified output fingerprint avoids repeated ffprobe startup on later cache hits; mismatch still triggers codec validation and rebuild.
+- `強制重新校對` first re-derives selected cues against the canonical current Intro/Main plan, including order, IN／OUT and the selected 0.3／0.5／0.7-second transition. It then opens a per-cue human review queue with `一致，確認並下一筆`, `不一致，修改文字／時間`, skip and finish actions. This is an explicit visual check and does not falsely claim AI verified picture semantics.
+- Timeline remapping refreshes `sourceOutMs` together with output time and `sourceInMs`, so the short review proxy always reflects the remapped cue duration. Images use their cached still preview.
+- Manually adding an Intro video/photo or a saved zoom range preserves every existing segment IN／OUT and the configured Intro target duration. It no longer invokes equalized redistribution and no longer auto-increases the target. If the new range does not fit the remaining target capacity, the App stops and asks the user to explicitly shorten/remove a segment or change the target.
+
+## v0.54.0 local audio protection and scoped BGM
+
+- `AudioProtectionOptions` is a per-render, persisted preference contract. Current defaults enable the master switch, smooth voice/sudden-event ducking, distant-crowd preservation, scene-sound preservation, a gentle speech-band EQ, 6 dB maximum ducking, 1.5 dB EQ attenuation and a -1 dB peak ceiling. Accepted ranges are 3–6 dB ducking, 0.5–4 dB EQ and -1／-2 dB ceiling.
+- The detector is strictly local and acoustic. Each source-audio stream is split into dry, wet and detector paths; the detector is high-pass/low-pass constrained to 1–4 kHz and drives `sidechaincompress`. A dry-floor plus compressed-wet blend bounds the deepest automatic reduction to the chosen 3–6 dB. Preserve-ambience mode raises the threshold; preserve-scene-sound mode uses 45 ms attack and 500 ms release for smooth recovery.
+- Optional 2.5 kHz equalization gently reduces speech intelligibility across the requested 1–4 kHz region. Final program audio passes through a compressor and `alimiter` at the selected -1 or -2 dB ceiling, covering broad-band sudden shouts, impacts and clipping risk as well as speech-band events.
+- The App must not label acoustic inference as semantic privacy classification. It cannot understand speech content or reliably distinguish all screams, child cries, laughter, market calls, footsteps and other overlapping spectra. The UI exposes this limitation and requires a post-render listening pass. No audio is uploaded for this feature and no editable detector keyframe list is fabricated.
+- `BgmScopeSelection` independently enables Intro and Main music for `CONCAT`. Both selected preserves the continuous existing mix. Intro-only truncates the MP3 plan at the actual start-card boundary and enforces up to a 1.5-second fade ending before the card. Main-only shifts the saved BGM timeline to the actual first-Main start after the card. Boundaries consume the selected 0.3／0.5／0.7-second transition style, including hard-cut behavior.
+- All validation runs in Main. Renderer submits numeric settings and scopes only; FFmpeg values are bounded before filter construction. Sources and MP3 files remain read-only, output keeps the existing unique-partial／atomic-finalize contract, and render sleep protection remains active until cleanup completes.
+- Main and Intro timing mutations continue through `syncSubtitlesToTimeline`: each cue anchors to a stable Intro segment, media insertion or source asset plus source-relative time, then remaps against the new clip duration, order and selected transition overlap. Unmappable cues retain text/time as `DRAFT`; no cue is silently deleted or reassigned to unrelated footage.
+- Subtitle review exposes a confirmed `forceSubtitleReReview(scopes)` Main-process operation. It preserves cue text/times, leaves `REJECTED` cues untouched, marks selected non-rejected cues `DRAFT`, invalidates only the selected scope review revision and records a human-QC warning. Reconfirmation remains per cue or explicit batch, followed by normal save.
+
+## v0.53.0 scoped preview output and subtitle visual parity
+
+- The shared concat-output page has an explicit `CONCAT`／`INTRO` selector. `INTRO` emits only the selected Intro ranges, reuses the same codec, resolution, watermark, BGM, preflight, partial-file and cancellation safety contracts, and never silently includes Main clips.
+- A completed Intro preview is an eligible YouTube test artifact. Chrome＋Explorer drag/drop remains the default handoff and the official YouTube API remains the secondary route. Both retain human confirmation and unlisted/private defaults. Intro is still blocked from BiliBili/TikTok Main-post handoff.
+- Intro YouTube QA uploads start with an Intro-specific local title/description and do not silently attach the saved Main video's AI title, thumbnail or chapters. This prevents a short test clip from inheriting invalid Main chapter times or misleading publish copy.
+- Standalone Intro output and the shared Intro selector expose the same opt-in subtitle burn control. Enabling requires confirmed, current `INTRO` cues; Main cues are excluded. Output history records remain `purpose=INTRO`.
+- `SubtitlePreviewStyle.fontSizePx` is defined against the 854×480 subtitle-review canvas. The primary burn-in track consumes this exact profile and scales by output height (`fontSizePx × height ÷ 480`); the UI writes the same preference from either Subtitle review or the render page. Optional translated tracks keep their independent 1080p sizing and position.
+- ASS cue placement uses transition-aware logical clip starts for Main and Intro, matching the canonical render plan. Subtitle-page text, render-page settings and output filters therefore no longer use conflicting size or overlap time bases.
+
+## v0.52.0 transition-aware subtitle anchoring, large text and Gemini material vision
+
+- Manifest schema 17 persists one canonical `timelineTransitionSeconds` value limited to 0.3, 0.5 or 0.7 seconds. Renderer preferences synchronize this value before output. Main/Intro timeline plans, AI subtitle placement, visual-material placement, subtitle duration gates, Intro subtitle proxy and publishing chapter duration consume the canonical transition-aware plan.
+- Every Main/Intro timeline mutation captures the prior plan, anchors each cue to a stable Intro segment ID, media-insertion ID or source asset plus source-relative time, then maps it into the new plan. Moving or inserting a photo/video therefore moves its cue and shifts following cues. Changing the transition duration itself also remaps cues.
+- Confirmed cue collisions introduced by a crossfade shorten the earlier cue when at least 100 ms remains. A cue that cannot be mapped or safely separated is retained as `DRAFT` with a review warning; text is never silently deleted and unrelated footage is never guessed as its source. Successfully mapped scopes advance their subtitle-review revision with the timeline revision.
+- Every subtitle-list row exposes a native inline textarea. Focusing it selects that cue without taking over the caret; pointer caret placement, arrows, text selection and typing remain native, while the separate numbered button owns single selection and Shift contiguous multi-selection. Delete shortcuts ignore focused text inputs.
+- UI text-size choices are 16, 18, 20, 22, 24 and 26 px. The last two are explicitly labeled 超大 and 特大 and persist through the existing local display preference.
+- `GEMINI` replaces `GOOGLE_LENS_ASSISTED` in the material-analysis contract. Photos default to Gemini, while video accepts explicitly selected frames. The service sends only the derived JPEG frame to the configured Gemini model using the encrypted Gemini API key, requests strict JSON, and normalizes a short Traditional-Chinese subtitle, visual/object/location evidence, animal species/common name, species explanation, confidence and warnings.
+- Gemini identification must remain evidence-bound: uncertain species use a broader group or `疑似`; no location or species may be inferred from a filename/topic alone. Missing credentials or provider errors are surfaced before any subtitle is inserted. ChatGPT/Codex visual analysis remains selectable as the alternate route.
+- Every media render acquires a reference-counted Windows `prevent-app-suspension` blocker before creating output. Failure to activate the blocker prevents render start. The blocker is released only from the render `finally` path after success, failure or cancellation cleanup. While active, normal App close is disabled and the Windows session-end request is prevented; forced shutdown or power loss cannot be guaranteed by an application.
+
+## v0.51.0 overlap review, render preflight and configurable AI density
+
+- A material visual analysis result is never discarded solely because its proposed cue overlaps an existing cue. The result contract includes the editable draft plus the exact overlapping cue IDs, text and time ranges. Non-overlapping drafts may be confirmed immediately; overlapping drafts enter the manifest as `DRAFT` only after the user chooses to open Subtitle review.
+- Subtitle review computes overlap pairs live within each Main/Intro scope. Both sides of every active overlap receive a red outline until their ranges no longer intersect. A still-overlapping cue cannot be confirmed individually or by batch; draft overlap is allowed as a temporary editing state, while two confirmed cues remain invalid.
+- AI subtitle generation accepts a user-selected target of 1–300 cues, default 100. Sampling density is distributed within retained clips with a minimum readable slot; confirmed existing cues, short clips and unavailable timeline space may reduce the result. Higher values explicitly cost more analysis time and AI usage.
+- Every user-facing Main, Intro, Clip and Shorts render requests a preflight estimate for output bytes, render time, current free bytes and estimated free bytes after completion. Main process repeats the disk-space check immediately before launching FFmpeg. A render is denied when its estimated output would leave less than the mandatory 1 GiB reserve.
+- Shorts explicitly requests `H265_QSV` and uses the same preflight contract. Estimate numbers are guidance rather than promises because scene complexity, filters, subtitles, BGM, watermarking and system load affect actual output.
+
 ## Canonical project state
 
-- `ProjectManifest` is the persisted source of truth; schema 16 migrates older manifests without dropping fields.
+- `ProjectManifest` is the persisted source of truth; schema 17 migrates older manifests without dropping fields.
 - Main and Intro timeline revisions and subtitle review revisions are tracked independently.
 - `ProjectStore` emits `project:changed` after every persisted mutation. Renderer state replaces only the canonical snapshot; changing project while a background job is running is blocked with an owning-project message.
 - Background jobs carry `projectId`, project name and timeline revision for auditability.
@@ -15,7 +71,7 @@ Windows-first read-only source organizer. The first visible workflow remains sou
 
 - AI knowledge subtitles use Codex/ChatGPT login fallback when OpenAI API billing is unavailable; speech transcription remains opt-in.
 - AI regeneration modes: fill blanks, preserve human edits, or replace AI cues in the selected scope. Manual/imported/user-edited cues are protected.
-- Subtitle burn-in is per-output and opt-in. The checkbox can always be cancelled before render; enabling still requires confirmed, current Main cues.
+- Subtitle burn-in is per-output and opt-in. The checkbox can always be cancelled before render; enabling requires confirmed, current cues for the selected Main or Intro scope.
 - Burned-in subtitles are video pixels and are never edited in place. Subtitle-only corrections create a new output from a clean no-subtitle video or the read-only sources; old MP4 outputs are not overwritten. SRT or a future soft-subtitle track may be replaced without video re-encoding.
 - AI-generated subtitle cues are persisted as `CONFIRMED` immediately. The subtitle review page offers a visible all-scope confirm/unconfirm toggle, selected-cue confirm/unconfirm/delete actions, and a per-cue delete button. Shift selects a contiguous range for batch actions; deleting a cue only removes it from the manifest.
 
@@ -67,3 +123,13 @@ AI publishing visual candidates now prioritize the exact midpoint of selected In
 ## Verification baseline
 
 Run `npm run typecheck`, `npm test`, `npm run build`, `npm audit --audit-level=high`, `npm run package:win`, and `npm run smoke:packaged`. See `docs/VERIFICATION.md` for the release record.
+
+## v0.50.0 GPU render and material visual-subtitle workflow
+
+- New renders default to Intel Quick Sync Video (QSV) H.265/HEVC (`hevc_qsv`, MP4-friendly `hvc1`). GPU H.264 (`h264_qsv`) is also available; CPU H.265/H.264 remain explicit fallbacks. The selected encoder is persisted and recorded in output history. Existing legacy preferences are preserved until the user changes them.
+- The render UI labels GPU versus CPU choices clearly. The current Windows machine was verified with one-second synthetic H.265 QSV and H.264 QSV encodes; actual project renders still require normal media, filter, transition, subtitle, BGM and watermark QC.
+- Each photo card has a checked-by-default visual-analysis option. The user opens the material analysis panel, chooses Main or Intro, and receives an editable subtitle draft containing visual summary, location, visible objects, animal species when supportable, species explanation and source time evidence.
+- Each video card can open the same panel and accept one or more source-relative frame times (`mm:ss`, `hh:mm:ss` or decimal seconds). Exact selected frames are extracted into a derived storyboard and analyzed without modifying the source. The current IN/OUT/Intro range is enforced before analysis.
+- ChatGPT/OpenAI is the default analysis route with Codex/ChatGPT login fallback. Google Lens is an explicit manual-assisted route: the App opens Lens, the user performs the external selection and pastes the observation back, and ChatGPT/Codex simplifies it. The App never silently uploads local files to Lens.
+- Analysis results remain `DRAFT` until the user edits text/time and presses “確認並加入字幕頁”. Only then are cues saved as `CONFIRMED`; all existing subtitles remain untouched. Overlap, out-of-range times and provider failures are surfaced instead of silently inserting content.
+- Visual-analysis cache, frame evidence and provider warnings are stored under App Data. Source media, SOP files and existing MP4/SRT outputs remain read-only and are never overwritten.

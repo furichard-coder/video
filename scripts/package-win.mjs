@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const appRoot = fileURLToPath(new URL("..", import.meta.url));
 const packageMeta = JSON.parse(await readFile(path.join(appRoot, "package.json"), "utf8"));
 const outputRoot = path.join(appRoot, "release", `v${packageMeta.version}`);
+const executableName = `SceneryWalkerSourceOrganizer-v${packageMeta.version}`;
 const dunesShutterSource = "C:\\草漯沙丘地質公園 YT長片\\camera shutter sound\\freesound_community-camera-shutter-click-14671.mp3";
 const dunesShutterHash = "0AC71ECABF302784F5FFB9483C2939C46B1784AA0D016A322CB6D1A0ECA07B93";
 
@@ -18,7 +19,7 @@ if (createHash("sha256").update(shutterBytes).digest("hex").toUpperCase() !== du
 const appPaths = await packager({
   dir: appRoot,
   name: "SceneryWalkerSourceOrganizer",
-  executableName: "SceneryWalkerSourceOrganizer",
+  executableName,
   platform: "win32",
   arch: "x64",
   out: outputRoot,
@@ -58,7 +59,7 @@ await writeFile(
   [
     `SceneryWalker 素材整理 v${packageMeta.version}`,
     "",
-    "啟動：雙擊 SceneryWalkerSourceOrganizer.exe",
+    `啟動：雙擊 ${executableName}.exe`,
     "",
     "來源安全：",
     "- App 只讀取選取的影片與照片。",
@@ -79,6 +80,7 @@ await writeFile(
     "- 網格／清單、輸出解析度、疊化、片頭串接、上傳準備、YouTube 可見度及各類選檔資料夾會沿用上次設定。",
     "- 網格卡片可用滑鼠左鍵長按後拖曳；移動中順序數字即時更新，放開後保存。上移／下移按鈕仍可使用。",
     "- 程式上方會顯示版本，並提供復原／重做按鈕；也可使用 Ctrl+Z、Ctrl+Y。",
+    "- 可攜版 EXE 檔名會包含版本；App 小型確認視窗會把鍵盤焦點與滑鼠游標放在安全預設按鍵，關閉確認固定停在『繼續剪輯』。",
     "- 放大預覽提供精確播放頭；可設定多個正片排除區段，重疊／相鄰區段保存時自動合併。",
     "- 網格卡片的片段／音量／安插按鈕採精簡單列，上移／下移使用圖示；完整說明仍可由提示與鍵盤讀取。",
     "- 片段、音量或安插已有保存設定時，按鈕會分別以琥珀、青色、綠色及『已設』文字明顯標示。",
@@ -93,6 +95,9 @@ await writeFile(
     "- 正片排除時間不會輸出黑畫面或靜音占位，也不影響獨立的 Intro 片段。",
     "- 串連與 Intro 預覽可選 360p／480p／720p／4K。",
     "- 正片、片頭與 Shorts 轉檔預設 H.265／HEVC；若舊裝置無法播放，可改選 H.264／AVC。",
+    "- 所有 MP4 轉檔預設啟用本機人聲／突發聲音保護：可調 3–6 dB 平滑壓低、1–4 kHz EQ 與 -1／-2 dB Peak Ceiling；只改新輸出，不改來源音軌。",
+    "- 這是聲學能量判斷，不會把音訊上傳，也不能理解談話內容是否真的私密；請在輸出後人工聽檢。",
+    "- 串連預覽頁可切換『正片預覽』或『僅片頭預覽』；片頭也可選擇嵌入已確認字幕，完成後以 Chrome 拖放或 YouTube 官方 API 作不公開測試上傳。",
     "- 每次轉檔的浮水印預設勾選；取消只影響該次新 MP4，不清除專案浮水印設定。",
     "- 獨立浮水印頁預設沿用草漯沙丘版式：中文『漫步／風光』左下、英文『SceneryWalker』右下；顯示間隔、停留秒數、淡入淡出、透明度、邊距、位置與套用範圍皆可調整。",
     "- 浮水印只在建立新 MP4 時套用，不會改寫來源或舊成品；正片完成輸出與獨立片頭預設啟用，Shorts 需自行勾選。",
@@ -117,16 +122,19 @@ await writeFile(
     "- 補充素材須逐筆決定安插位置；待決定素材不會進入串連輸出。",
     "- 直式手機素材會保持中央原比例，左右以同來源放大模糊填滿。",
     "- 可依順序加入多首唯讀 MP3，或保存多個 YouTube 來源參考；YouTube 參考必須再指定自有、已授權或由 Audio Library 正式下載的 MP3，App 不會任意下載影片。",
-    "- 配樂依清單可連續排列，會套用於正片及片頭；混音輸出使用 peak limiter。",
+    "- 配樂依清單可連續排列；串連輸出可獨立勾選片頭／正片。只選片頭時會在『正片即將開始』提示頁前平滑淡出，只選正片時會在提示頁結束後開始。",
     "- 可用 AI 建立語音／畫面字幕草稿，逐項同步預覽、修改、確認或排除；只有已確認字幕可匯出 UTF-8 SRT。",
     "- 字幕工作台可複選片頭／正片範圍；兩者使用各自的時間基準，舊專案字幕預設歸入正片。",
+    "- 片頭／正片片段秒數、IN／OUT、順序、插入與疊化更動時，字幕會依素材來源時間逐筆同步；字幕頁也可強制把所選範圍改回待確認，再逐筆核對畫面與頭尾。",
+    "- 字幕逐筆檢查只建立該 cue 對應的短區段 H.264 proxy；強制校對會依現行主軸重新對位，再逐筆詢問畫面一致或進入文字／時間修改。",
     "- 選擇片頭字幕後，AI 完成會自動建立可取消、有進度顯示的 480P 審核代理；有效 cache 會直接重用，不會拿代理當正式輸出來源。",
-    "- 片頭字幕會隨代理播放時間動態顯示；可即時修改文字、垂直位置、字級、顏色、陰影與外框，格式會保留為下次預設。",
+    "- 片頭字幕會隨代理播放時間動態顯示；可即時修改文字、垂直位置、字級、顏色、陰影與外框，格式會保留為下次預設。字幕頁以 480P 為字級基準，實際 360P／720P／4K 輸出會等比例換算。",
     "- 串連輸出可將已確認繁中字幕嵌入 MP4，或翻譯為英文／簡中／日文／韓文；最多選兩種，並分別設定位置、字級及自動換行。",
     "- 已嵌入 MP4 畫面的字幕不能直接替換舊字；修改字幕時須從無字幕乾淨影片或唯讀來源產生新版本，舊 MP4 不覆寫。SRT 則可直接修改後重新匯出。",
     "- 翻譯先使用 OpenAI API 的全新無狀態請求；失敗才用另行設定並以 Windows 安全儲存加密的 Google Cloud Translation API Key。ChatGPT／Codex 登入與 API 額度分開。",
     "- 每支影片卡有『刪除／排除部分片段』入口；只改專案時間線，不刪除來源、proxy 或 metadata。",
     "- Intro 沒有 3 分鐘硬上限；超過 3 分鐘只顯示紅色警示。最多 50 段、每段 3–22 秒。",
+    "- 手動加入 Intro 影片、照片或局部放大時，不會重算既有片段 IN／OUT，也不會自動增加片頭目標時間；容量不足會要求明確調整。",
     "- 按下「OK，開始產出」後才會寫入選定的新 MP4；取消時會先要求 FFmpeg 安全寫完 MPEG-4 結尾，已有足夠畫面便保留較短可播放檔，太早取消才清除 partial。",
     "- 完成或取消後保留的 MP4 可直接用 .mp4 播放器設定開啟。",
     "- 正片預覽完成後可經官方 YouTube OAuth 上傳到核對過的目標頻道，預設不公開；Google Chrome 優先、Microsoft Edge 第二。",
@@ -143,7 +151,7 @@ await writeFile(
     "- 關閉 App 時會先顯示第二確認與短提示音；預設焦點在繼續剪輯，確認後才關閉。",
     "",
     "目前需求：本機 FFmpeg 與 ffprobe 必須可從 PATH 執行。",
-    "本版不包含完整 Timeline、正式 Master 渲染或 HDR。YouTube 只上傳預覽成品庫中存在且經使用者確認的正片／既有 MP4；需自行設定 Google Desktop OAuth client。BiliBili／TikTok 採官方頁面交接，不宣稱自動 API 發布。",
+    "本版不包含完整 Timeline、正式 Master 渲染或 HDR。YouTube 只上傳預覽成品庫中存在且經使用者確認的正片／片頭／Shorts／既有 MP4；需自行設定 Google Desktop OAuth client。BiliBili／TikTok 採官方頁面交接，不宣稱自動 API 發布。",
     "",
   ].join("\r\n"),
   "utf8",

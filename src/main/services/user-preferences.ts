@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
+  AudioProtectionOptions,
+  BgmScopeSelection,
   MainStartCardOptions,
   MainStartCardTransition,
   PreferenceDirectoryKey,
@@ -18,7 +20,7 @@ import type {
   VoiceInputLanguage,
   YoutubePrivacyStatus,
 } from "../../shared/domain";
-import { DEFAULT_MAIN_START_CARD_OPTIONS } from "../../shared/domain";
+import { DEFAULT_AUDIO_PROTECTION_OPTIONS, DEFAULT_MAIN_START_CARD_OPTIONS } from "../../shared/domain";
 import { finalizePartialOutput } from "./atomic-output";
 
 const DIRECTORY_KEYS = new Set<PreferenceDirectoryKey>([
@@ -34,6 +36,36 @@ const SUBTITLE_LANGUAGES = new Set<SubtitleRenderLanguage>(["zh-TW", "en", "zh-C
 const SUBTITLE_POSITIONS = new Set<SubtitleRenderPosition>(["TOP", "MIDDLE", "BOTTOM"]);
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const MAIN_START_TRANSITIONS = new Set<MainStartCardTransition>(["DISSOLVE", "FADE_BLACK", "HARD_CUT"]);
+
+export function sanitizeAudioProtectionOptions(value: unknown): AudioProtectionOptions {
+  const fallback = DEFAULT_AUDIO_PROTECTION_OPTIONS;
+  if (!value || typeof value !== "object") return { ...fallback };
+  const candidate = value as Partial<AudioProtectionOptions>;
+  const halfStep = (input: unknown, minimum: number, maximum: number, defaultValue: number) => {
+    const parsed = Number(input);
+    return Number.isFinite(parsed)
+      ? Math.max(minimum, Math.min(maximum, Math.round(parsed * 2) / 2))
+      : defaultValue;
+  };
+  return {
+    enabled: candidate.enabled !== false,
+    autoDuckVoiceAndSuddenSounds: candidate.autoDuckVoiceAndSuddenSounds !== false,
+    preserveDistantCrowdAmbience: candidate.preserveDistantCrowdAmbience !== false,
+    preserveSceneMatchedSounds: candidate.preserveSceneMatchedSounds !== false,
+    eqEnabled: candidate.eqEnabled !== false,
+    maxDuckingDb: halfStep(candidate.maxDuckingDb, 3, 6, fallback.maxDuckingDb),
+    eqReductionDb: halfStep(candidate.eqReductionDb, 0.5, 4, fallback.eqReductionDb),
+    peakCeilingDb: candidate.peakCeilingDb === -2 ? -2 : -1,
+  };
+}
+
+export function sanitizeBgmScopeSelection(value: unknown): BgmScopeSelection {
+  const candidate = value && typeof value === "object" ? value as Partial<BgmScopeSelection> : {};
+  return {
+    intro: typeof candidate.intro === "boolean" ? candidate.intro : true,
+    main: typeof candidate.main === "boolean" ? candidate.main : true,
+  };
+}
 
 export function sanitizeMainStartCardOptions(value: unknown): MainStartCardOptions {
   const fallback = DEFAULT_MAIN_START_CARD_OPTIONS;
@@ -120,7 +152,7 @@ function defaults(): UserPreferences {
   return {
     schemaVersion: 1,
     viewMode: "GRID",
-    renderDefaults: { transitionSeconds: 0.3, resolution: "480P", videoCodec: "H265", includeWatermark: true, youtubeHandoffMode: "CHROME_DRAG_DROP", prependIntro: true, autoUpload: true, introPreviewIncludeBgm: false, mainPreviewIncludeBgm: true, mainStartCard: sanitizeMainStartCardOptions(undefined) },
+    renderDefaults: { transitionSeconds: 0.3, resolution: "480P", videoCodec: "H265_QSV", includeWatermark: true, audioProtection: sanitizeAudioProtectionOptions(undefined), mainBgmScopes: sanitizeBgmScopeSelection(undefined), youtubeHandoffMode: "CHROME_DRAG_DROP", prependIntro: true, autoUpload: true, introPreviewIncludeBgm: false, mainPreviewIncludeBgm: true, mainStartCard: sanitizeMainStartCardOptions(undefined) },
     youtubeUploadDefaults: { privacyStatus: "unlisted" },
     voiceInputLanguage: "zh-TW",
     subtitleBurnInDefaults: sanitizeSubtitleBurnInOptions(undefined),
@@ -153,8 +185,10 @@ function sanitize(value: unknown): UserPreferences {
     renderDefaults: {
       transitionSeconds: TRANSITIONS.has(render?.transitionSeconds as TransitionDurationSec) ? render?.transitionSeconds as TransitionDurationSec : fallback.renderDefaults.transitionSeconds,
       resolution: RESOLUTIONS.has(render?.resolution as PreviewResolution) ? render?.resolution as PreviewResolution : fallback.renderDefaults.resolution,
-      videoCodec: render?.videoCodec === "H264" || render?.videoCodec === "H265" ? render.videoCodec : fallback.renderDefaults.videoCodec,
+      videoCodec: render?.videoCodec === "H264" || render?.videoCodec === "H265" || render?.videoCodec === "H264_QSV" || render?.videoCodec === "H265_QSV" ? render.videoCodec : fallback.renderDefaults.videoCodec,
       includeWatermark: typeof render?.includeWatermark === "boolean" ? render.includeWatermark : fallback.renderDefaults.includeWatermark,
+      audioProtection: sanitizeAudioProtectionOptions(render?.audioProtection),
+      mainBgmScopes: sanitizeBgmScopeSelection(render?.mainBgmScopes),
       youtubeHandoffMode: render?.youtubeHandoffMode === "OFFICIAL_API" || render?.youtubeHandoffMode === "CHROME_DRAG_DROP" ? render.youtubeHandoffMode : fallback.renderDefaults.youtubeHandoffMode,
       prependIntro: typeof render?.prependIntro === "boolean" ? render.prependIntro : fallback.renderDefaults.prependIntro,
       autoUpload: typeof render?.autoUpload === "boolean" ? render.autoUpload : fallback.renderDefaults.autoUpload,
@@ -229,10 +263,12 @@ export class UserPreferencesStore {
           next.renderDefaults.resolution = render.resolution;
         }
         if (render.videoCodec !== undefined) {
-          if (render.videoCodec !== "H265" && render.videoCodec !== "H264") throw new Error("影片格式無效。");
+          if (render.videoCodec !== "H265" && render.videoCodec !== "H264" && render.videoCodec !== "H265_QSV" && render.videoCodec !== "H264_QSV") throw new Error("影片格式無效。");
           next.renderDefaults.videoCodec = render.videoCodec;
         }
         if (render.includeWatermark !== undefined) next.renderDefaults.includeWatermark = Boolean(render.includeWatermark);
+        if (render.audioProtection !== undefined) next.renderDefaults.audioProtection = sanitizeAudioProtectionOptions(render.audioProtection);
+        if (render.mainBgmScopes !== undefined) next.renderDefaults.mainBgmScopes = sanitizeBgmScopeSelection(render.mainBgmScopes);
         if (render.youtubeHandoffMode !== undefined) {
           if (render.youtubeHandoffMode !== "CHROME_DRAG_DROP" && render.youtubeHandoffMode !== "OFFICIAL_API") throw new Error("YouTube 上傳交接方式無效。");
           next.renderDefaults.youtubeHandoffMode = render.youtubeHandoffMode;

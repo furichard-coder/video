@@ -1,4 +1,4 @@
-export const MANIFEST_SCHEMA_VERSION = 16 as const;
+export const MANIFEST_SCHEMA_VERSION = 17 as const;
 export const PREVIEWER_VERSION = "preview-v3" as const;
 export const CLIP_PREVIEWER_VERSION = "clip-preview-v1" as const;
 export const DEFAULT_IMAGE_DURATION_MS = 5_000 as const;
@@ -35,7 +35,12 @@ export type CacheStatus = "HIT" | "CREATED" | "INVALIDATED";
 export type TransitionDurationSec = 0.3 | 0.5 | 0.7;
 export type MainStartCardTransition = "DISSOLVE" | "FADE_BLACK" | "HARD_CUT";
 export type PreviewResolution = "360P" | "480P" | "720P" | "4K";
-export type RenderVideoCodec = "H265" | "H264";
+/**
+ * Render encoder selection.  The QSV variants use Intel Quick Sync when the
+ * local FFmpeg build/driver exposes it; the non-QSV variants remain explicit
+ * CPU fallbacks for machines that cannot use hardware encoding.
+ */
+export type RenderVideoCodec = "H265_QSV" | "H265" | "H264_QSV" | "H264";
 export type ConcatRenderPhase = "PREPARING" | "TRANSLATING_SUBTITLES" | "RENDERING" | "FINALIZING";
 export type PreviewRenderPurpose = "CONCAT" | "INTRO" | "CLIP" | "SHORTS";
 export type IntroAnalysisPhase = "PREPARING" | "ANALYZING" | "RANKING";
@@ -49,6 +54,7 @@ export type SubtitleCueOrigin = "MANUAL" | "IMPORTED_SRT" | "AI_SPEECH" | "AI_VI
 export type SubtitleCueReviewStatus = "DRAFT" | "CONFIRMED" | "REJECTED";
 export type SubtitleTimelineScope = "INTRO" | "MAIN";
 export type AiAnalysisPhase = "PREPARING" | "EXTRACTING_AUDIO" | "TRANSCRIBING" | "SAMPLING_FRAMES" | "MATCHING_STORY" | "SAVING_DRAFTS";
+export type MaterialAnalysisProvider = "CHATGPT" | "GEMINI";
 export type YoutubeBrowser = "CHROME" | "EDGE";
 export type YoutubePrivacyStatus = "unlisted" | "private";
 export type YoutubeHandoffMode = "CHROME_DRAG_DROP" | "OFFICIAL_API";
@@ -78,6 +84,40 @@ export type PreferenceDirectoryKey =
   | "BGM"
   | "CUSTOM_PLAYER"
   | "OAUTH_CLIENT";
+
+export interface AudioProtectionOptions {
+  /** Master per-render switch; enabled by default in current UI and sanitized legacy preferences. */
+  enabled: boolean;
+  /** Local 1–4 kHz detector drives a smooth, bounded ducking envelope. */
+  autoDuckVoiceAndSuddenSounds: boolean;
+  /** Raises detector threshold and keeps distant crowd/market texture. */
+  preserveDistantCrowdAmbience: boolean;
+  /** Uses a slower attack so weak scene-matched transients remain audible. */
+  preserveSceneMatchedSounds: boolean;
+  /** Gentle full-program speech-band attenuation after automatic ducking. */
+  eqEnabled: boolean;
+  maxDuckingDb: number;
+  eqReductionDb: number;
+  peakCeilingDb: -1 | -2;
+}
+
+export interface BgmScopeSelection {
+  /** Play BGM over the confirmed Intro section. */
+  intro: boolean;
+  /** Play BGM over the Main section. */
+  main: boolean;
+}
+
+export const DEFAULT_AUDIO_PROTECTION_OPTIONS: AudioProtectionOptions = {
+  enabled: true,
+  autoDuckVoiceAndSuddenSounds: true,
+  preserveDistantCrowdAmbience: true,
+  preserveSceneMatchedSounds: true,
+  eqEnabled: true,
+  maxDuckingDb: 6,
+  eqReductionDb: 1.5,
+  peakCeilingDb: -1,
+};
 
 export interface MainStartCardOptions {
   durationSeconds: number;
@@ -112,6 +152,10 @@ export interface UserPreferences {
     /** Optional only for preferences written by versions before v0.49; the store fills defaults. */
     videoCodec?: RenderVideoCodec;
     includeWatermark?: boolean;
+    /** Optional only for preferences written before v0.54; the store fills defaults. */
+    audioProtection?: AudioProtectionOptions;
+    /** Optional only for preferences written before v0.54; the store fills defaults. */
+    mainBgmScopes?: BgmScopeSelection;
     youtubeHandoffMode?: YoutubeHandoffMode;
     prependIntro: boolean;
     autoUpload: boolean;
@@ -549,8 +593,37 @@ export interface WatermarkSettings {
 export interface AiSubtitleGenerationOptions {
   includeSpeechTranscription: boolean;
   scopes?: SubtitleTimelineScope[];
+  /** Requested total number of visual/speech cues. The service clamps this to its safe 1–300 range. */
+  targetCueCount?: number;
   /** How a subsequent AI pass treats existing AI cues in the selected scope. */
   mode?: "FILL_BLANKS" | "REPLACE_AI_SCOPE" | "PRESERVE_USER_EDITED";
+}
+
+/** A focused visual analysis request for one photo or selected video frames. */
+export interface MaterialSubtitleAnalysisRequest {
+  assetId: string;
+  timelineScope: SubtitleTimelineScope;
+  provider: MaterialAnalysisProvider;
+  /** Source-relative milliseconds. Photos ignore this and use one still frame. */
+  frameTimesMs?: number[];
+}
+
+export interface MaterialSubtitleAnalysisResult {
+  drafts: SubtitleCue[];
+  overlaps: Array<{
+    draftId: string;
+    existingCues: Array<{
+      id: string;
+      startMs: number;
+      endMs: number;
+      text: string;
+      reviewStatus?: SubtitleCueReviewStatus;
+    }>;
+  }>;
+  providerLabel: "OPENAI_API" | "CODEX_CHATGPT" | "GEMINI";
+  analyzedFrameTimesMs: number[];
+  warnings: string[];
+  analysisVersion: string;
 }
 
 export interface SubtitlePreviewResult {
@@ -575,6 +648,8 @@ export interface ProjectManifest {
   updatedAt: string;
   sources: SourceAsset[];
   timelineOrder: string[];
+  /** Canonical 0.3/0.5/0.7 second overlap used by timeline and subtitle positioning. */
+  timelineTransitionSeconds: TransitionDurationSec;
   pendingAssetIds: string[];
   excludedMainAssetIds: string[];
   recentMainRemovals: RemovedMainAsset[];
@@ -699,16 +774,41 @@ export interface ConcatRenderRequest {
   videoCodec?: RenderVideoCodec;
   /** Per-render switch. Project watermark settings still control text, schedule and destinations. */
   includeWatermark?: boolean;
+  /** Local privacy/loudness protection; omitted legacy callers receive safe defaults. */
+  audioProtection?: AudioProtectionOptions;
   purpose?: PreviewRenderPurpose;
   prependIntro?: boolean;
   subtitleBurnIn?: SubtitleBurnInOptions;
   /** Internal review proxies can opt out so offline BGM never blocks picture/subtitle checking. */
   includeBgm?: boolean;
+  /** For CONCAT output, independently enables Intro and Main BGM ranges. */
+  bgmScopes?: BgmScopeSelection;
   /** Required by the UI whenever a confirmed Intro is prepended to Main. */
   mainStartCard?: MainStartCardOptions;
   shortsPortrait?: boolean;
   shortsMaxDurationSec?: 60 | 180;
   shortsSource?: "INTRO" | "MAIN";
+  /** Renderer estimate used only for the preflight disk-reserve check. */
+  estimatedDurationMs?: number;
+}
+
+export interface ConcatRenderEstimateRequest {
+  outputToken: string;
+  expectedDurationMs: number;
+  resolution: PreviewResolution;
+  videoCodec: RenderVideoCodec;
+}
+
+export interface ConcatRenderEstimate {
+  outputPath: string;
+  driveRoot: string;
+  currentFreeBytes: number;
+  estimatedOutputBytes: number;
+  estimatedRenderTimeMs: number;
+  estimatedFreeAfterBytes: number;
+  minimumReserveBytes: number;
+  canRender: boolean;
+  warning?: string;
 }
 
 export interface RenderClipSelection extends PreviewRange {
@@ -733,8 +833,11 @@ export interface ConcatRenderResult {
   videoCodec?: RenderVideoCodec;
   purpose: PreviewRenderPurpose;
   bgmAppliedCount?: number;
+  bgmScopesApplied?: BgmScopeSelection;
   photoShutterAppliedCount?: number;
-  mixPolicy?: "ORIGINAL_PLUS_BGM_LIMITED_0_95";
+  mixPolicy?: "ORIGINAL_PLUS_BGM_LIMITED_0_95" | "VOICE_DUCK_EQ_COMPRESS_LIMIT";
+  audioProtectionApplied?: boolean;
+  audioPeakCeilingDb?: -1 | -2;
   cancelled?: boolean;
   plannedDurationMs?: number;
   includedIntroSegmentCount?: number;
@@ -828,7 +931,7 @@ export interface IntroAnalysisResult {
   cloudFallbackReason?: string;
 }
 
-export type BackgroundJobKind = "MUSIC_SUGGESTIONS" | "INTRO_ANALYSIS" | "AI_SUBTITLES" | "SUBTITLE_PREVIEW" | "CONCAT_RENDER" | "AI_PUBLISH_ASSETS";
+export type BackgroundJobKind = "MUSIC_SUGGESTIONS" | "INTRO_ANALYSIS" | "AI_SUBTITLES" | "AI_MATERIAL_ANALYSIS" | "SUBTITLE_PREVIEW" | "CONCAT_RENDER" | "AI_PUBLISH_ASSETS";
 export type BackgroundJobStatus = "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
 
 export interface BackgroundJobSnapshot {
@@ -1033,6 +1136,7 @@ export interface ExternalOpenResult {
 export interface AppApi {
   getAppInfo(): Promise<AppInfo>;
   confirmAppClose(): void;
+  moveCursorToSafeAction?(rect: { x: number; y: number; width: number; height: number }): void;
   onAppCloseRequested(callback: () => void): void;
   clearAppCloseRequestedListeners(): void;
   getUserPreferences(): Promise<UserPreferences>;
@@ -1073,6 +1177,8 @@ export interface AppApi {
   setZoomSegments(assetId: string, segments: ZoomSegment[]): Promise<ZoomSegmentUpdateResult>;
   placeAsset(assetId: string, placement: PlacementRequest): Promise<ProjectManifest>;
   moveTimelineAsset(assetId: string, toIndex: number): Promise<ProjectManifest>;
+  setTimelineTransitionSeconds?(seconds: TransitionDurationSec): Promise<ProjectManifest>;
+  forceSubtitleReReview(scopes: SubtitleTimelineScope[]): Promise<ProjectManifest>;
   setSortMode(mode: SortMode): Promise<ProjectManifest>;
   ensureMetadata(assetId: string): Promise<SourceAsset>;
   ensurePreview(assetId: string, variant: PreviewVariant): Promise<PreviewResult>;
@@ -1081,6 +1187,7 @@ export interface AppApi {
   cancelClipPreview(assetId: string, inMs: number, outMs: number): Promise<void>;
   chooseConcatOutput(suggestedName: string): Promise<OutputSelection | null>;
   prepareConcatOutput(suggestedName: string): Promise<OutputSelection>;
+  estimateConcatRender?(request: ConcatRenderEstimateRequest): Promise<ConcatRenderEstimate>;
   startConcatRender(request: ConcatRenderRequest): Promise<ConcatRenderResult>;
   cancelConcatRender(): Promise<void>;
   revealConcatOutput(jobId: string): Promise<void>;
@@ -1103,6 +1210,8 @@ export interface AppApi {
   testGoogleTranslation(): Promise<TranslationConnectionTestResult>;
   setAiStoryContext(context: AiStoryContext): Promise<ProjectManifest>;
   generateAiSubtitles(options: AiSubtitleGenerationOptions): Promise<AiSubtitleGenerationResult>;
+  analyzeMaterialForSubtitles?(request: MaterialSubtitleAnalysisRequest): Promise<MaterialSubtitleAnalysisResult>;
+  cancelMaterialSubtitleAnalysis?(): Promise<void>;
   /** Optional until the AI publishing workspace is loaded; keeps older renderer test harnesses compatible. */
   getAiPublishAssets?(): Promise<AiPublishAssets | null>;
   setAiPublishAssets?(assets: AiPublishAssets): Promise<ProjectManifest>;

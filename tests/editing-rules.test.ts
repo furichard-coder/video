@@ -18,6 +18,7 @@ describe("editing validation rules", () => {
     const cues = validateSubtitleCues([{ id: "b", startMs: 2000, endMs: 3000, text: "二" }, { id: "a", startMs: 0, endMs: 1000, text: "一" }]);
     expect(cues.map((cue) => cue.id)).toEqual(["a", "b"]);
     expect(() => validateSubtitleCues([{ id: "a", startMs: 0, endMs: 1000, text: "一" }, { id: "b", startMs: 900, endMs: 2000, text: "二" }])).toThrow(/不可重疊/);
+    expect(validateSubtitleCues([{ id: "a", startMs: 0, endMs: 1000, text: "既有", reviewStatus: "CONFIRMED" }, { id: "b", startMs: 900, endMs: 2000, text: "待調整", reviewStatus: "DRAFT" }])).toHaveLength(2);
     expect(() => validateSubtitleCues([{ id: "a", startMs: 0, endMs: 1000, text: " " }])).toThrow(/不可空白/);
   });
   it("sorts and merges overlapping or adjacent Main exclusion ranges and subtracts them without placeholders", () => {

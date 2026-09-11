@@ -13,6 +13,7 @@ import {
   youtubeTextLength,
 } from "../../shared/publish-rules";
 import { formatDuration } from "../format";
+import { SafeDefaultButton } from "./SafeDefaultButton";
 
 interface Props {
   project: ProjectManifest;
@@ -751,12 +752,12 @@ export function AiPublishStudio({ project, onProjectUpdated, onClose }: Props) {
             >
               放棄並離開
             </button>
-            <button
+            <SafeDefaultButton
               className="secondary-button"
               onClick={() => setClosePrompt(false)}
             >
               返回編輯
-            </button>
+            </SafeDefaultButton>
           </div>
         )}
       </section>

@@ -29,7 +29,7 @@ function validResolution(value: unknown): value is PreviewResolution {
 }
 
 function validVideoCodec(value: unknown): value is RenderVideoCodec {
-  return value === "H265" || value === "H264";
+  return value === "H265_QSV" || value === "H265" || value === "H264_QSV" || value === "H264";
 }
 
 function sanitizeRecord(value: unknown): StoredOutput | undefined {

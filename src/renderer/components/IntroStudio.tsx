@@ -23,6 +23,7 @@ import {
 import { formatDuration, formatMinuteSecondInput, parseMinuteSecondInput } from "../format";
 import { ClipRangeControl } from "./ClipRangeControl";
 import { ConcatRenderModal } from "./ConcatRenderModal";
+import { SafeDefaultButton } from "./SafeDefaultButton";
 import { COLOR_PRESETS, colorPreset } from "../../shared/color-presets";
 import { introSegmentsForOutput } from "../../shared/intro-duration";
 import { SharedIntroPreviewHistory } from "./SharedIntroPreviewHistory";
@@ -33,6 +34,7 @@ interface IntroStudioProps {
   videos: SourceAsset[];
   onClose: () => void;
   onProjectUpdated: (project: ProjectManifest) => void;
+  onOpenMaterialAnalysis?: (asset: SourceAsset) => void;
 }
 
 interface IntroPreviewMedia {
@@ -58,7 +60,7 @@ function manualSuggestion(asset: SourceAsset, maxSegmentDurationMs: number): Int
   return { id: crypto.randomUUID(), assetId: asset.id, fileName: asset.fileName, inMs: sourceRange.inMs, outMs: sourceRange.inMs + durationMs, score: 0, reasons: ["手動加入影片"], origin: "MANUAL", analysisMode: "LOCAL_SIGNAL_ONLY" };
 }
 
-export function IntroStudio({ project, videos, onClose, onProjectUpdated }: IntroStudioProps) {
+export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpenMaterialAnalysis }: IntroStudioProps) {
   const [assets, setAssets] = useState(project.sources);
   const [analysis, setAnalysis] = useState<IntroAnalysisResult | undefined>(() => project.introAnalysisResult ? structuredClone(project.introAnalysisResult) : undefined);
   const [analysisAppliedAt, setAnalysisAppliedAt] = useState<string>();
@@ -123,6 +125,9 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated }: Intr
   const cloudAnalyzedCount = analysis?.cloudAnalyzedCount ?? suggestions.filter((item) => item.analysisMode === "OPENAI_STORY_MATCH").length;
   const analysisMode = cloudAnalyzedCount > 0 ? "OPENAI_STORY_MATCH" : "LOCAL_SIGNAL_ONLY";
   const activeColorPreset = colorPreset(project.colorSettings.introPresetId);
+  const confirmedIntroSubtitleCount = project.subtitleCues.filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED" && (cue.timelineScope ?? "MAIN") === "INTRO").length;
+  const introSubtitlesNeedReview = project.subtitleCues.some((cue) => (cue.timelineScope ?? "MAIN") === "INTRO")
+    && (project.introSubtitleReviewRevision ?? project.subtitleTimelineRevision) !== (project.introTimelineRevision ?? project.timelineRevision);
 
   useEffect(() => {
     window.sourceApp.onIntroAnalysisProgress(setProgress);
@@ -256,8 +261,7 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated }: Intr
       if (next.length >= INTRO_MAX_SEGMENTS || usedMs + durationMs > targetDurationMs || next.some((segment) => segment.id === candidate.id)) continue;
       next.push(candidate); usedMs += durationMs;
     }
-    await window.sourceApp.setIntroSegments(next);
-    const updated = await window.sourceApp.setIntroSegmentMaxDuration(project.introSegmentMaxDurationMs ?? DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS);
+    const updated = await window.sourceApp.setIntroSegments(next);
     applyProject(updated); setAnalysis(result); setAnalysisAppliedAt(result.generatedAt);
     setNotice(result.analysisMode === "OPENAI_STORY_MATCH" ? `已套用最近 ${result.cloudAnalyzedCount ?? 0} 段 OpenAI 人物／事件／故事比對。` : "已套用最近一次片頭分析候選；請逐段確認。" );
     return updated;
@@ -315,9 +319,8 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated }: Intr
       const segment = manualSuggestion(ready, maxSegmentDurationMs);
       if (suggestions.length >= INTRO_MAX_SEGMENTS) throw new Error(`片頭最多只能保留 ${INTRO_MAX_SEGMENTS} 段。` );
       if (totalDurationMs + segment.outMs - segment.inMs > targetDurationMs) throw new Error("加入後會超過目前片頭最長時間；請先增加上限或縮短其他片段。" );
-      await window.sourceApp.setIntroSegments([...suggestions, segment]);
-      const balanced = await window.sourceApp.setIntroSegmentMaxDuration(maxSegmentDurationMs);
-      applyProject(balanced);
+      const updated = await window.sourceApp.setIntroSegments([...suggestions, segment]);
+      applyProject(updated);
       setSelectedId(segment.id);
       setNotice(`已把「${ready.fileName}」加入片頭；來源檔保持唯讀。`);
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
@@ -349,11 +352,10 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated }: Intr
         next.push(segment); usedMs += durationMs; lastAddedId = segment.id;
       }
       if (!lastAddedId) throw new Error("新素材加入後會超過目前片頭最長時間，請先增加上限。" );
-      await window.sourceApp.setIntroSegments(next);
-      const balanced = await window.sourceApp.setIntroSegmentMaxDuration(maxSegmentDurationMs);
-      applyProject(balanced);
+      const updated = await window.sourceApp.setIntroSegments(next);
+      applyProject(updated);
       if (lastAddedId) setSelectedId(lastAddedId);
-      setNotice(`已加入 ${next.length - result.project.introSegments.length} 個手動片頭片段；新來源也保留在專案待決定區，磁碟檔未修改。`);
+      setNotice(`已加入 ${next.length - result.project.introSegments.length} 個手動片頭片段；既有片段範圍與片頭目標時間都沒有重算，新來源也保留在專案待決定區。`);
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setImporting(false); }
   };
@@ -423,7 +425,7 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated }: Intr
     if (target < 0 || target >= suggestions.length) return;
     const next = [...suggestions]; [next[index], next[target]] = [next[target], next[index]];
     setError(undefined);
-    try { await persistSuggestions(next, next[target].id); }
+    try { await persistSuggestions(next, next[target].id); setNotice("片頭順序已保存；對應字幕已依疊化秒數同步移動。"); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
 
@@ -466,7 +468,7 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated }: Intr
     setError(undefined);
     try {
       await persistSuggestions(next, draggedId);
-      setNotice(`已用滑鼠調整片頭順序；目前為第 ${next.findIndex((item) => item.id === draggedId) + 1} 段，順序已保存。`);
+      setNotice(`已用滑鼠調整片頭順序；目前為第 ${next.findIndex((item) => item.id === draggedId) + 1} 段，對應字幕已依疊化秒數同步移動。`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       applyProject(await window.sourceApp.getProject());
@@ -561,7 +563,7 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated }: Intr
               {asset?.kind === "VIDEO" && <ClipRangeControl compact showTimeFields durationMs={durationMs} range={{ inMs: item.inMs, outMs: item.outMs }} onChange={(range, changed) => updateSuggestion(item.id, range.inMs, range.outMs, changed)} onCommit={(range) => void persistSuggestionRange(item.id, range.inMs, range.outMs)} />}
               <label className="intro-segment-seconds"><span>{asset?.kind === "IMAGE" ? "照片顯示秒數" : "檢看片段秒數"}</span><input aria-label={`${item.fileName}片段秒數`} type="number" min="3" max={asset?.kind === "IMAGE" ? 7 : Math.max(3, (asset?.mediaInfo?.durationMs ?? item.outMs) / 1000)} step="0.1" value={((item.outMs - item.inMs) / 1000).toFixed(1)} onChange={(event) => changeSegmentSeconds(item, Number(event.target.value))} onBlur={() => void persistSuggestionRange(item.id, item.inMs, item.outMs)} /><small>{asset?.kind === "IMAGE" ? "照片可選 3–7 秒" : "拉桿可選來源內任意範圍"}；輸出每段最多 {formatDuration(outputSegmentMaxMs)}</small></label>
               {exceedsOutputMaximum && <p className="intro-segment-over-limit" role="status">目前檢看片段為 {formatDuration(item.outMs - item.inMs)}，超過輸出上限；仍可完整預覽，轉出時將由 IN 起取 {formatDuration(outputSegmentMaxMs)}。</p>}
-              <div className="suggestion-actions"><button type="button" disabled={index === 0} onClick={() => void moveSuggestion(index, -1)}>↑ 往前</button><button type="button" disabled={index === suggestions.length - 1} onClick={() => void moveSuggestion(index, 1)}>↓ 往後</button><button className="intro-remove-button" type="button" aria-label={`從片頭移除 ${item.fileName} ${formatDuration(item.inMs)} 到 ${formatDuration(item.outMs)}`} onClick={() => void removeSuggestion(item.id)}>從片頭移除</button></div>
+              <div className="suggestion-actions"><button type="button" disabled={index === 0} onClick={() => void moveSuggestion(index, -1)}>↑ 往前</button><button type="button" disabled={index === suggestions.length - 1} onClick={() => void moveSuggestion(index, 1)}>↓ 往後</button>{onOpenMaterialAnalysis && asset && <button type="button" onClick={() => onOpenMaterialAnalysis(asset)}>✦ 影像分析字幕</button>}<button className="intro-remove-button" type="button" aria-label={`從片頭移除 ${item.fileName} ${formatDuration(item.inMs)} 到 ${formatDuration(item.outMs)}`} onClick={() => void removeSuggestion(item.id)}>從片頭移除</button></div>
             </li>;
           })}</ol>
           {project.recentIntroRemovals.length > 0 && <section className="intro-recent-removals" aria-label="最近從片頭移除"><h3>最近從片頭移除</h3><p>重新分析不會自動復活；只有按下恢復才重新加入。</p>{[...project.recentIntroRemovals].reverse().map((record) => <div key={record.segment.id}><span><strong>{record.segment.fileName}</strong><small>{formatDuration(record.segment.inMs)} → {formatDuration(record.segment.outMs)}</small></span><button type="button" onClick={() => void restoreSuggestion(record.segment.id)}>恢復片頭區段</button></div>)}</section>}
@@ -590,8 +592,8 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated }: Intr
         </main>
       </div>}
     </section>
-    {showOverLimitConfirm && <div className="modal-backdrop" role="presentation"><section className="confirm-remove-modal intro-over-limit-confirm" role="alertdialog" aria-modal="true" aria-labelledby="intro-over-limit-title"><span className="eyebrow">INTRO OUTPUT LIMIT</span><h2 id="intro-over-limit-title">有片段超過每段輸出上限</h2><p>目前有 <strong>{overLimitSuggestions.length}</strong> 段的檢看範圍超過 {formatDuration(outputSegmentMaxMs)}。您仍可保留完整範圍繼續預覽；若現在產出，每段會保留所選 <strong>IN 起點</strong>，並最多轉出 {formatDuration(outputSegmentMaxMs)}，超出的尾端不會進入成品。</p><footer><button className="secondary-button" type="button" autoFocus onClick={() => setShowOverLimitConfirm(false)}>返回調整</button><button className="primary-button" type="button" onClick={() => { setShowOverLimitConfirm(false); setShowOutput(true); }}>是，以 {formatDuration(outputSegmentMaxMs)} 上限產出</button></footer></section></div>}
-    {showOutput && <ConcatRenderModal purpose="INTRO" assets={assets} introClips={suggestions} introSegmentMaxDurationMs={outputSegmentMaxMs} onClose={() => setShowOutput(false)} />}
+    {showOverLimitConfirm && <div className="modal-backdrop" role="presentation"><section className="confirm-remove-modal intro-over-limit-confirm" role="alertdialog" aria-modal="true" aria-labelledby="intro-over-limit-title"><span className="eyebrow">INTRO OUTPUT LIMIT</span><h2 id="intro-over-limit-title">有片段超過每段輸出上限</h2><p>目前有 <strong>{overLimitSuggestions.length}</strong> 段的檢看範圍超過 {formatDuration(outputSegmentMaxMs)}。您仍可保留完整範圍繼續預覽；若現在產出，每段會保留所選 <strong>IN 起點</strong>，並最多轉出 {formatDuration(outputSegmentMaxMs)}，超出的尾端不會進入成品。</p><footer><SafeDefaultButton className="secondary-button" type="button" onClick={() => setShowOverLimitConfirm(false)}>返回調整</SafeDefaultButton><button className="primary-button" type="button" onClick={() => { setShowOverLimitConfirm(false); setShowOutput(true); }}>是，以 {formatDuration(outputSegmentMaxMs)} 上限產出</button></footer></section></div>}
+    {showOutput && <ConcatRenderModal purpose="INTRO" assets={assets} introClips={suggestions} introSegmentMaxDurationMs={outputSegmentMaxMs} confirmedSubtitleCount={confirmedIntroSubtitleCount} subtitlesNeedReview={introSubtitlesNeedReview} projectName={project.name} onClose={() => setShowOutput(false)} />}
     {showShorts && <ShortsStudio project={{ ...project, introSegments: suggestions } as ProjectManifest} onProjectUpdated={() => undefined} onClose={() => setShowShorts(false)} />}
   </div>;
 }

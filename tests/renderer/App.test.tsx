@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PHOTO_SOUND_PREVIEW_URL, type AiPublishAssets, type AppApi, type ExternalPlayerSettingsSnapshot, type ProjectManifest, type SourceAsset } from "../../src/shared/domain";
+import { DEFAULT_AUDIO_PROTECTION_OPTIONS, PHOTO_SOUND_PREVIEW_URL, type AiPublishAssets, type AppApi, type ExternalPlayerSettingsSnapshot, type ProjectManifest, type SourceAsset } from "../../src/shared/domain";
 import { App } from "../../src/renderer/App";
 import { UI_TEXT_SIZE_STORAGE_KEY, UI_ZOOM_STORAGE_KEY } from "../../src/renderer/ui-preferences";
 
@@ -37,6 +37,7 @@ const project: ProjectManifest = {
   updatedAt: "2026-08-01T00:00:00.000Z",
   sources: [video],
   timelineOrder: [video.id],
+  timelineTransitionSeconds: 0.3,
   pendingAssetIds: [],
   excludedMainAssetIds: [],
   recentMainRemovals: [],
@@ -164,6 +165,7 @@ function mockApi(initialProject: ProjectManifest = project): AppApi {
     cancelClipPreview: vi.fn(async () => undefined),
     chooseConcatOutput: vi.fn(async () => ({ token: "output-token", displayPath: "C:\\Output\\preview.mp4" })),
     prepareConcatOutput: vi.fn(async () => ({ token: "automatic-output-token", displayPath: "C:\\Output\\auto-preview.mp4", automatic: true })),
+    estimateConcatRender: vi.fn(async (request) => ({ outputPath: "C:\\Output\\preview.mp4", driveRoot: "C:\\", currentFreeBytes: 20 * 1024 ** 3, estimatedOutputBytes: 120 * 1024 ** 2, estimatedRenderTimeMs: 45_000, estimatedFreeAfterBytes: 20 * 1024 ** 3 - 120 * 1024 ** 2, minimumReserveBytes: 1024 ** 3, canRender: true })),
     startConcatRender: vi.fn(async (request) => ({
       jobId: "render-job",
       outputPath: "C:\\Output\\preview.mp4",
@@ -217,6 +219,7 @@ function mockApi(initialProject: ProjectManifest = project): AppApi {
     cancelMusicSuggestions: vi.fn(async () => undefined),
     openMusicSuggestion: vi.fn(async () => undefined),
     setSubtitleCues: vi.fn(async (cues) => ({ ...structuredClone(initialProject), subtitleCues: cues })),
+    forceSubtitleReReview: vi.fn(async (scopes) => ({ ...structuredClone(initialProject), subtitleCues: initialProject.subtitleCues.map((cue) => scopes.includes(cue.timelineScope ?? "MAIN") && cue.reviewStatus !== "REJECTED" ? { ...cue, reviewStatus: "DRAFT" as const } : cue) })),
     chooseSubtitleInput: vi.fn(async () => null),
     chooseSubtitleOutput: vi.fn(async () => ({ token: "srt-token", displayPath: "C:\\Output\\captions.srt" })),
     exportSubtitles: vi.fn(async () => ({ outputPath: "C:\\Output\\captions.srt", cueCount: 1 })),
@@ -293,6 +296,10 @@ describe("App source workflow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Aa 設定" }));
     const dialog = await screen.findByRole("dialog", { name: "介面顯示設定" });
+    expect(within(dialog).getByRole("radio", { name: /超大/ })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("radio", { name: /特大/ }));
+    expect(document.documentElement).toHaveStyle({ fontSize: "26px" });
+    expect(window.localStorage.getItem(UI_TEXT_SIZE_STORAGE_KEY)).toBe("26");
     fireEvent.click(within(dialog).getByRole("radio", { name: /清楚/ }));
     expect(document.documentElement).toHaveStyle({ fontSize: "20px" });
     expect(window.localStorage.getItem(UI_TEXT_SIZE_STORAGE_KEY)).toBe("20");
@@ -541,6 +548,8 @@ describe("App source workflow", () => {
     const openRender = await screen.findByRole("button", { name: /產出串連預覽/ });
     await act(async () => fireEvent.click(openRender));
     expect(await screen.findByRole("dialog", { name: "產出串連預覽" })).toBeInTheDocument();
+    expect(await screen.findByLabelText("轉檔前容量與時間預估")).toHaveTextContent("預估檔案大小");
+    expect(screen.getByLabelText("轉檔前容量與時間預估")).toHaveTextContent("目前剩餘");
     expect(within(screen.getByLabelText("交接疊化秒數")).getAllByRole("button")).toHaveLength(3);
     expect(within(screen.getByLabelText("預覽解析度")).getAllByRole("button")).toHaveLength(4);
 
@@ -564,12 +573,52 @@ describe("App source workflow", () => {
       resolution: "360P",
       videoCodec: "H265",
       includeWatermark: true,
+      audioProtection: DEFAULT_AUDIO_PROTECTION_OPTIONS,
       purpose: "CONCAT",
       prependIntro: false,
       subtitleBurnIn: { enabled: false, tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }], styleProfile: { verticalPositionPercent: 82, fontSizePx: 28, textColor: "#FFFFFF", shadowEnabled: true, outlineWidthPx: 2 } },
       includeBgm: true,
+      bgmScopes: { intro: false, main: true },
+      estimatedDurationMs: 19_500,
     }));
     expect(await screen.findByText("串連預覽已完成")).toBeInTheDocument();
+  });
+
+  it("enables local voice protection by default and persists its safe adjustable controls", async () => {
+    const api = mockApi();
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /產出串連預覽/ }));
+    const dialog = await screen.findByRole("dialog", { name: "產出串連預覽" });
+    expect(within(dialog).getByRole("checkbox", { name: "這次 MP4 啟用人聲與突發聲音保護" })).toBeChecked();
+    expect(within(dialog).getByRole("checkbox", { name: "保留遠處人群與市集氛圍" })).toBeChecked();
+    expect(within(dialog).getByRole("checkbox", { name: "保留與畫面相符的自然聲" })).toBeChecked();
+    fireEvent.change(within(dialog).getByLabelText("人聲最大壓低分貝"), { target: { value: "4.5" } });
+    fireEvent.change(within(dialog).getByLabelText("最大峰值上限"), { target: { value: "-2" } });
+    await waitFor(() => expect(api.updateUserPreferences).toHaveBeenCalledWith({ renderDefaults: { audioProtection: expect.objectContaining({ maxDuckingDb: 4.5, peakCeilingDb: -2 }) } }));
+    expect(within(dialog).getByText(/無法理解談話內容是否真的私密/)).toBeInTheDocument();
+  });
+
+  it("lets Main output apply BGM to Intro only and sends the exact scope to the renderer", async () => {
+    const intro = { id: "intro-bgm-scope", assetId: video.id, fileName: video.fileName, inMs: 1_000, outMs: 4_000, score: 91, reasons: ["開場"] };
+    const api = mockApi({ ...structuredClone(project), introSegments: [intro] });
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /產出串連預覽/ }));
+    const prompt = await screen.findByRole("dialog", { name: "正片開始提示頁設定" });
+    fireEvent.click(within(prompt).getByRole("button", { name: "儲存提示頁設定" }));
+    const outputDialog = await screen.findByRole("dialog", { name: "產出串連預覽" });
+    const introScope = within(outputDialog).getByRole("checkbox", { name: "片頭使用 MP3 配樂" });
+    const mainScope = within(outputDialog).getByRole("checkbox", { name: "正片使用 MP3 配樂" });
+    expect(introScope).toBeChecked();
+    expect(mainScope).toBeChecked();
+    fireEvent.click(mainScope);
+    expect(mainScope).not.toBeChecked();
+    expect(within(outputDialog).getByText(/提示頁前平滑淡出並停止/)).toBeInTheDocument();
+    await waitFor(() => expect(within(outputDialog).getByRole("button", { name: "OK，開始產出" })).toBeEnabled());
+    fireEvent.click(within(outputDialog).getByRole("button", { name: "OK，開始產出" }));
+    await waitFor(() => expect(api.startConcatRender).toHaveBeenCalledWith(expect.objectContaining({ includeBgm: true, bgmScopes: { intro: true, main: false } })));
+    expect(api.updateUserPreferences).toHaveBeenCalledWith({ renderDefaults: { mainBgmScopes: { intro: true, main: false } } });
   });
 
   it("uses an automatic last-folder output and lets this MP4 explicitly exclude MP3 music", async () => {
@@ -625,6 +674,50 @@ describe("App source workflow", () => {
     await waitFor(() => expect(api.playConcatOutput).toHaveBeenCalledWith("intro-old"));
   });
 
+  it("switches the shared preview page to Intro-only, burns confirmed Intro subtitles, and offers YouTube upload", async () => {
+    const segment = { id: "intro-output", assetId: video.id, fileName: video.fileName, inMs: 1_000, outMs: 6_000, score: 88, reasons: ["片頭事件"] };
+    const introProject = {
+      ...structuredClone(project),
+      introSegments: [segment],
+      introTimelineRevision: 1,
+      introSubtitleReviewRevision: 1,
+      subtitleCues: [{ id: "intro-cue", startMs: 0, endMs: 2_000, text: "片頭測試字幕", reviewStatus: "CONFIRMED" as const, timelineScope: "INTRO" as const }],
+    };
+    const api = mockApi(introProject);
+    const preferences = await api.getUserPreferences();
+    preferences.renderDefaults.prependIntro = false;
+    preferences.renderDefaults.autoUpload = false;
+    vi.mocked(api.getUserPreferences).mockResolvedValue(preferences);
+    api.getAiPublishAssets = vi.fn(async () => null);
+    vi.mocked(api.getYoutubeSettings).mockResolvedValue({ schemaVersion: 1, preferredBrowser: "CHROME", targetChannelName: "漫步風光", clientConfigured: true, connected: true, encryptionAvailable: true, channelId: "channel", channelTitle: "漫步風光", browsers: [{ id: "CHROME", label: "Google Chrome", available: true }, { id: "EDGE", label: "Microsoft Edge", available: true }] });
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /產出串連預覽/ }));
+    const mainOutput = await screen.findByRole("dialog", { name: "產出串連預覽" });
+    fireEvent.click(within(mainOutput).getByRole("radio", { name: /僅片頭預覽/ }));
+    const introOutput = await screen.findByRole("dialog", { name: "產出 Intro 預覽" });
+    expect(within(introOutput).getByRole("radio", { name: /僅片頭預覽/ })).toBeChecked();
+    expect(within(introOutput).getByText(/只輸出目前 1 個片頭片段/)).toBeInTheDocument();
+    const subtitleToggle = within(introOutput).getByRole("checkbox", { name: /將字幕永久嵌入/ });
+    expect(subtitleToggle).toBeEnabled();
+    fireEvent.click(subtitleToggle);
+    await waitFor(() => expect(within(introOutput).getByRole("button", { name: "OK，開始產出" })).toBeEnabled());
+    fireEvent.click(within(introOutput).getByRole("button", { name: "OK，開始產出" }));
+
+    await waitFor(() => expect(api.startConcatRender).toHaveBeenCalledWith(expect.objectContaining({
+      purpose: "INTRO",
+      orderedAssetIds: [video.id],
+      clipSelections: [{ assetId: video.id, inMs: 1_000, outMs: 6_000 }],
+      prependIntro: false,
+      subtitleBurnIn: expect.objectContaining({ enabled: true }),
+    })));
+    fireEvent.click(await screen.findByRole("button", { name: "上傳 YouTube 預覽" }));
+    const upload = await screen.findByRole("dialog", { name: "上傳片頭預覽到 YouTube" });
+    expect(within(upload).getByText("選定的片頭預覽")).toBeInTheDocument();
+    expect(api.getAiPublishAssets).not.toHaveBeenCalled();
+  });
+
   it("burns up to two independently styled subtitle languages into the concat request", async () => {
     const subtitleProject = { ...structuredClone(project), subtitleCues: [{ id: "cue", startMs: 0, endMs: 2_000, text: "歡迎來到河內", reviewStatus: "CONFIRMED" as const }] };
     const api = mockApi(subtitleProject); Object.defineProperty(window, "sourceApp", { configurable: true, value: api }); render(<App />);
@@ -640,8 +733,9 @@ describe("App source workflow", () => {
     const renderButton = within(dialog).getByRole("button", { name: "OK，開始產出" });
     await waitFor(() => expect(renderButton).toBeEnabled()); fireEvent.click(renderButton);
     await waitFor(() => expect(api.startConcatRender).toHaveBeenCalledWith(expect.objectContaining({ subtitleBurnIn: { enabled: true, tracks: [
-      { language: "zh-TW", position: "BOTTOM", fontSize1080p: 56 }, { language: "en", position: "TOP", fontSize1080p: 42 },
-    ], styleProfile: { verticalPositionPercent: 82, fontSizePx: 28, textColor: "#FFFFFF", shadowEnabled: true, outlineWidthPx: 2 } } })));
+      { language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }, { language: "en", position: "TOP", fontSize1080p: 42 },
+    ], styleProfile: { verticalPositionPercent: 82, fontSizePx: 56, textColor: "#FFFFFF", shadowEnabled: true, outlineWidthPx: 2 } } })));
+    expect(api.updateUserPreferences).toHaveBeenCalledWith(expect.objectContaining({ subtitlePreviewStyle: expect.objectContaining({ fontSizePx: 56 }) }));
   });
 
   it("allows turning off a persisted subtitle burn-in choice when subtitles are unavailable", async () => {
@@ -1303,19 +1397,36 @@ describe("App source workflow", () => {
     fireEvent.click(await screen.findByRole("button", { name: /CC 字幕/ }));
     const dialog = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
     expect(within(dialog).getByRole("checkbox", { name: "同時分析素材語音" })).not.toBeChecked();
+    fireEvent.change(within(dialog).getByLabelText("AI 目標字幕數"), { target: { value: "150" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "AI 知識型字幕草稿" }));
-    expect(api.generateAiSubtitles).toHaveBeenCalledWith({ includeSpeechTranscription: false, scopes: ["MAIN"], mode: "FILL_BLANKS" });
-    expect((await within(dialog).findAllByText("我們抵達河內老城")).length).toBeGreaterThanOrEqual(2);
+    expect(api.generateAiSubtitles).toHaveBeenCalledWith({ includeSpeechTranscription: false, scopes: ["MAIN"], mode: "FILL_BLANKS", targetCueCount: 150 });
+    expect(await within(dialog).findByLabelText("直接編輯第 1 筆字幕")).toHaveValue("我們抵達河內老城");
     expect(within(dialog).getByText("抵達老城")).toBeInTheDocument();
     expect(within(dialog).getByText("河內老城")).toBeInTheDocument();
     expect(within(dialog).getByText("街道名稱需人工確認")).toBeInTheDocument();
-    await waitFor(() => expect(api.ensurePreview).toHaveBeenCalledWith(video.id, "VIDEO_PROXY"));
-    fireEvent.click(within(dialog).getByRole("button", { name: /確認時間、畫面與文字/ }));
-    expect(within(dialog).getByRole("button", { name: /匯出 1 筆已確認 SRT/ })).toBeEnabled();
-    fireEvent.click(within(dialog).getByRole("button", { name: "保存字幕" }));
+    await waitFor(() => expect(api.ensureClipPreview).toHaveBeenCalledWith(video.id, 500, 1_500));
+    fireEvent.click(within(dialog).getByRole("button", { name: "確認並保存第 1 筆字幕" }));
     await waitFor(() => expect(api.setSubtitleCues).toHaveBeenCalledWith([expect.objectContaining({ id: "ai-draft", reviewStatus: "CONFIRMED" })]));
+    expect(within(dialog).getByRole("button", { name: /匯出 1 筆已確認 SRT/ })).toBeEnabled();
     fireEvent.click(within(dialog).getByRole("button", { name: /匯出 1 筆已確認 SRT/ }));
     await waitFor(() => expect(api.exportSubtitles).toHaveBeenCalledWith("srt-token", ["MAIN"]));
+  });
+
+  it("forces the visible subtitle scope back to per-cue picture and time review", async () => {
+    const cue = { id: "force-review-cue", startMs: 500, endMs: 1_500, text: "逐筆重新核對", timelineScope: "MAIN" as const, origin: "MANUAL" as const, reviewStatus: "CONFIRMED" as const };
+    const api = mockApi({ ...structuredClone(project), subtitleCues: [cue] });
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api }); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /CC 字幕/ }));
+    const dialog = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
+    fireEvent.click(within(dialog).getByRole("button", { name: /強制重新校對/ }));
+    const confirm = await screen.findByRole("alertdialog", { name: "強制重新校對字幕" });
+    expect(within(confirm).getByText(/短區段 Proxy 逐筆詢問/)).toBeInTheDocument();
+    expect(within(confirm).getByRole("button", { name: "取消，不重設" })).toHaveFocus();
+    fireEvent.click(within(confirm).getByRole("button", { name: "確認，開始逐筆校對" }));
+    await waitFor(() => expect(api.forceSubtitleReReview).toHaveBeenCalledWith(["MAIN"]));
+    expect(await within(dialog).findByRole("region", { name: "逐筆 Proxy 字幕校對" })).toHaveTextContent("第 1／1 筆");
+    expect(within(dialog).getByRole("button", { name: "不一致，修改文字／時間" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /匯出 0 筆已確認 SRT/ })).toBeDisabled();
   });
 
   it("keeps the shared preview history collapsed on the subtitle page until requested", async () => {
@@ -1335,6 +1446,20 @@ describe("App source workflow", () => {
     expect(within(dialog).queryByLabelText("片頭頁／字幕頁共用預覽")).not.toBeInTheDocument();
   });
 
+  it("marks both overlapping subtitle rows red until their times no longer overlap", async () => {
+    const oldCue = { id: "old-overlap", startMs: 0, endMs: 2_000, text: "既有字幕", timelineScope: "MAIN" as const, origin: "MANUAL" as const, reviewStatus: "CONFIRMED" as const };
+    const newCue = { id: "new-overlap", startMs: 1_000, endMs: 3_000, text: "照片分析建議", timelineScope: "MAIN" as const, origin: "AI_VISUAL" as const, reviewStatus: "DRAFT" as const };
+    const api = mockApi({ ...structuredClone(project), subtitleCues: [oldCue, newCue] });
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api }); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /CC 字幕/ }));
+    const dialog = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
+    expect(within(dialog).getByText(/有 2 筆新舊字幕時間重疊/)).toBeInTheDocument();
+    expect(dialog.querySelectorAll(".subtitle-cue-row.has-time-overlap")).toHaveLength(2);
+    fireEvent.change(within(dialog).getByLabelText("字幕結束 秒"), { target: { value: "0" } });
+    fireEvent.change(within(dialog).getByLabelText("字幕結束 毫秒"), { target: { value: "500" } });
+    await waitFor(() => expect(dialog.querySelectorAll(".subtitle-cue-row.has-time-overlap")).toHaveLength(0));
+  });
+
   it("targets Intro subtitles, builds a 480P synchronized preview, and persists overlay styling", async () => {
     const segment = { id: "subtitle-intro", assetId: video.id, fileName: video.fileName, inMs: 0, outMs: 3_000, score: 90, reasons: ["人物事件"] };
     const introCue = { id: "intro-ai", startMs: 0, endMs: 2_000, text: "河內人物故事開場", timelineScope: "INTRO" as const, origin: "AI_VISUAL" as const, reviewStatus: "CONFIRMED" as const, sourceAssetId: video.id, sourceInMs: 0, sourceOutMs: 2_000 };
@@ -1347,10 +1472,10 @@ describe("App source workflow", () => {
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "片頭字幕" }));
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "正片字幕" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "AI 知識型字幕草稿" }));
-    await waitFor(() => expect(api.generateAiSubtitles).toHaveBeenCalledWith({ includeSpeechTranscription: false, scopes: ["INTRO"], mode: "FILL_BLANKS" }));
+    await waitFor(() => expect(api.generateAiSubtitles).toHaveBeenCalledWith({ includeSpeechTranscription: false, scopes: ["INTRO"], mode: "FILL_BLANKS", targetCueCount: 100 }));
     await waitFor(() => expect(api.buildSubtitleIntroPreview).toHaveBeenCalledTimes(1));
     expect(await within(dialog).findByLabelText("480P 片頭字幕同步預覽")).toHaveAttribute("src", expect.stringMatching(/^preview-media:\/\/subtitle\//));
-    expect((await within(dialog).findAllByText("河內人物故事開場")).length).toBeGreaterThanOrEqual(2);
+    expect(await within(dialog).findByLabelText("直接編輯第 1 筆字幕")).toHaveValue("河內人物故事開場");
     fireEvent.change(within(dialog).getByLabelText("字幕高低位置"), { target: { value: "70" } });
     fireEvent.change(within(dialog).getByLabelText("字幕文字大小"), { target: { value: "36" } });
     fireEvent.change(within(dialog).getByLabelText("字幕文字顏色"), { target: { value: "#ffe066" } });
@@ -1367,7 +1492,7 @@ describe("App source workflow", () => {
     Object.defineProperty(window, "sourceApp", { configurable: true, value: api }); render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /CC 字幕/ }));
     const dialog = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
-    expect(within(dialog).getAllByText("可刪除字幕").length).toBeGreaterThanOrEqual(2);
+    expect(within(dialog).getByLabelText("直接編輯第 1 筆字幕")).toHaveValue("可刪除字幕");
     fireEvent.keyDown(window, { key: "Delete" });
     await waitFor(() => expect(api.setSubtitleCues).toHaveBeenCalledWith([]));
     expect(await within(dialog).findByText(/已刪除該筆字幕並保存/)).toBeInTheDocument();
@@ -1386,18 +1511,23 @@ describe("App source workflow", () => {
     fireEvent.click(await screen.findByRole("button", { name: /CC 字幕/ }));
     const dialog = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
     const allActions = within(dialog).getByRole("toolbar", { name: "字幕全部操作" });
-    expect(within(allActions).getByRole("button", { name: "全部取消確認" })).toBeEnabled();
-    fireEvent.click(within(allActions).getByRole("button", { name: "全部取消確認" }));
-    expect(within(allActions).getByRole("button", { name: "全部確認" })).toBeEnabled();
-    fireEvent.click(within(allActions).getByRole("button", { name: "全部確認" }));
+    expect(within(allActions).getByRole("button", { name: "全部取消確認並保存" })).toBeEnabled();
+    fireEvent.click(within(allActions).getByRole("button", { name: "全部取消確認並保存" }));
+    await waitFor(() => expect(api.setSubtitleCues).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ id: "range-1", reviewStatus: "DRAFT" }), expect.objectContaining({ id: "range-2", reviewStatus: "DRAFT" }), expect.objectContaining({ id: "range-3", reviewStatus: "DRAFT" }),
+    ])));
+    expect(within(allActions).getByRole("button", { name: "全部確認並保存" })).toBeEnabled();
+    fireEvent.click(within(allActions).getByRole("button", { name: "全部確認並保存" }));
+    await waitFor(() => expect(api.setSubtitleCues).toHaveBeenLastCalledWith(expect.arrayContaining([
+      expect.objectContaining({ id: "range-1", reviewStatus: "CONFIRMED" }), expect.objectContaining({ id: "range-2", reviewStatus: "CONFIRMED" }), expect.objectContaining({ id: "range-3", reviewStatus: "CONFIRMED" }),
+    ])));
     const first = within(dialog).getByRole("button", { name: /第一筆/ });
     const third = within(dialog).getByRole("button", { name: /第三筆/ });
     fireEvent.click(first);
     fireEvent.click(third, { shiftKey: true });
     expect(within(dialog).getByRole("toolbar", { name: "字幕批次操作" })).toHaveTextContent("已選 3 筆");
-    fireEvent.click(within(dialog).getByRole("button", { name: "取消確認" }));
-    fireEvent.click(within(dialog).getByRole("button", { name: "保存字幕" }));
-    await waitFor(() => expect(api.setSubtitleCues).toHaveBeenCalledWith(expect.arrayContaining([
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消確認並保存" }));
+    await waitFor(() => expect(api.setSubtitleCues).toHaveBeenLastCalledWith(expect.arrayContaining([
       expect.objectContaining({ id: "range-1", reviewStatus: "DRAFT" }), expect.objectContaining({ id: "range-2", reviewStatus: "DRAFT" }), expect.objectContaining({ id: "range-3", reviewStatus: "DRAFT" }),
     ])));
     fireEvent.click(within(dialog).getByRole("button", { name: "刪除選取" }));
@@ -1420,6 +1550,32 @@ describe("App source workflow", () => {
     fireEvent.click(rowDeleteButtons[1]);
     await waitFor(() => expect(api.setSubtitleCues).toHaveBeenCalledWith([expect.objectContaining({ id: "row-delete-1" })]));
     expect(await within(dialog).findByText(/已刪除該筆字幕並保存/)).toBeInTheDocument();
+  });
+
+  it("edits with a native caret and immediately saves row confirmation and timeline moves", async () => {
+    const cues = [
+      { id: "row-action-1", startMs: 0, endMs: 500, text: "第一段字幕", timelineScope: "MAIN" as const, origin: "MANUAL" as const, reviewStatus: "DRAFT" as const, sourceAssetId: video.id, sourceInMs: 0, sourceOutMs: 500 },
+      { id: "row-action-2", startMs: 600, endMs: 1_100, text: "第二段字幕", timelineScope: "MAIN" as const, origin: "MANUAL" as const, reviewStatus: "CONFIRMED" as const, sourceAssetId: video.id, sourceInMs: 600, sourceOutMs: 1_100 },
+    ];
+    const api = mockApi({ ...structuredClone(project), subtitleCues: cues });
+    vi.mocked(api.setSubtitleCues).mockImplementation(async (next) => ({ ...structuredClone(project), subtitleCues: next }));
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api }); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /CC 字幕/ }));
+    const dialog = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
+    const editor = within(dialog).getByLabelText("直接編輯第 1 筆字幕") as HTMLTextAreaElement;
+    editor.focus(); editor.setSelectionRange(2, 2);
+    expect(editor).toHaveFocus(); expect(editor.selectionStart).toBe(2);
+    fireEvent.change(editor, { target: { value: "第一段字幕已修改" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "確認並保存第 1 筆字幕" }));
+    await waitFor(() => expect(api.setSubtitleCues).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ id: "row-action-1", text: "第一段字幕已修改", reviewStatus: "CONFIRMED" }),
+    ])));
+    expect(await within(dialog).findByText("這筆字幕的文字、時間與確認狀態已立即保存。")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "下移第 1 筆字幕" }));
+    await waitFor(() => expect(api.setSubtitleCues).toHaveBeenLastCalledWith(expect.arrayContaining([
+      expect.objectContaining({ id: "row-action-1", startMs: 600, endMs: 1_100, sourceInMs: 600, reviewStatus: "DRAFT" }),
+      expect.objectContaining({ id: "row-action-2", startMs: 0, endMs: 500, sourceInMs: 0, reviewStatus: "DRAFT" }),
+    ])));
   });
 
   it("makes an exhausted API project unmistakable and explains why local Intro selection could still work", async () => {
@@ -1455,9 +1611,11 @@ describe("App source workflow", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: /匯入 SRT/ }));
     await waitFor(() => expect(api.chooseSubtitleInput).toHaveBeenCalledTimes(1));
     expect(await within(dialog).findByText(/已匯入 森林.srt 的 2 筆字幕/)).toBeInTheDocument();
-    expect(within(dialog).getByDisplayValue("森林步道")).toBeInTheDocument();
-    fireEvent.change(within(dialog).getByDisplayValue("森林步道"), { target: { value: "森林步道與生態養護" } });
-    expect(within(dialog).getByDisplayValue("森林步道與生態養護")).toBeInTheDocument();
+    const inlineEditor = within(dialog).getByLabelText("直接編輯第 1 筆字幕");
+    inlineEditor.focus();
+    fireEvent.change(inlineEditor, { target: { value: "森林步道與生態養護" } });
+    expect(inlineEditor).toHaveFocus();
+    expect(inlineEditor).toHaveValue("森林步道與生態養護");
     expect(within(dialog).getAllByText("匯入 SRT")).toHaveLength(2);
   });
 
@@ -1468,7 +1626,8 @@ describe("App source workflow", () => {
     const dialog = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
     expect(within(dialog).getByText(/全部字幕時間需要重新複核/)).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /匯出 0 筆已確認 SRT/ })).toBeDisabled();
-    fireEvent.click(within(dialog).getByRole("button", { name: /確認時間、畫面與文字/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /確認並立即保存/ }));
+    await waitFor(() => expect(api.setSubtitleCues).toHaveBeenCalledWith([expect.objectContaining({ id: "old", reviewStatus: "CONFIRMED" })]));
     expect(within(dialog).getByRole("button", { name: /匯出 1 筆已確認 SRT/ })).toBeEnabled();
   });
 
@@ -1546,7 +1705,7 @@ describe("App source workflow", () => {
     expect(within(output).getByText("0:02 → 0:14")).toBeInTheDocument();
   });
 
-  it("saves the recommended zoom enhancement, inserts its range at the chosen Intro rank, and opens 4K output", async () => {
+  it("inserts a zoom range without changing existing Intro ranges or target duration, and opens 4K output", async () => {
     const existing = { id: "existing-intro", assetId: video.id, fileName: video.fileName, inMs: 6_000, outMs: 9_000, score: 70, reasons: ["既有"] };
     const introProject = { ...structuredClone(project), introSegments: [existing], introTargetDurationMs: 180_000 };
     const api = mockApi(introProject); Object.defineProperty(window, "sourceApp", { configurable: true, value: api }); render(<App />);
@@ -1560,27 +1719,49 @@ describe("App source workflow", () => {
     fireEvent.click(within(dialog).getByRole("checkbox", { name: /儲存後開啟此時段的 4K MP4/ }));
     fireEvent.click(within(dialog).getByRole("button", { name: "保存片段設定" }));
     await waitFor(() => expect(api.setZoomSegments).toHaveBeenCalledWith(video.id, [expect.objectContaining({ enhancementPreset: "DETAIL", startMs: 0, endMs: 3_000 })]));
-    await waitFor(() => expect(api.setIntroTargetDuration).toHaveBeenCalledWith(183_000));
-    await waitFor(() => expect(api.setIntroSegments).toHaveBeenCalledWith([expect.objectContaining({ inMs: 0, outMs: 3_000, origin: "MANUAL" }), expect.objectContaining({ id: existing.id })]));
-    expect(vi.mocked(api.setIntroTargetDuration).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(api.setIntroSegments).mock.invocationCallOrder[0]);
+    await waitFor(() => expect(api.setIntroSegments).toHaveBeenCalledWith([expect.objectContaining({ inMs: 0, outMs: 3_000, origin: "MANUAL" }), expect.objectContaining({ id: existing.id, inMs: 6_000, outMs: 9_000 })]));
+    expect(api.setIntroTargetDuration).not.toHaveBeenCalled();
     const added = await screen.findByRole("dialog", { name: "片頭片段加入成功" });
     expect(added).toHaveTextContent("已加入片頭第 1 順位");
-    expect(added).toHaveTextContent("片頭時間上限同步調整為 3:03");
+    expect(added).toHaveTextContent("片頭目標時間 3:00 都保持不變");
     expect(await screen.findByRole("dialog", { name: "輸出最高 4K 時間段" })).toBeInTheDocument();
     fireEvent.click(within(added).getByRole("button", { name: "前往片頭確認" }));
     const studio = await screen.findByRole("dialog", { name: "AI 精彩片頭建議" });
     expect(within(studio).getAllByRole("button", { name: /從片頭移除/ })).toHaveLength(2);
   });
 
-  it("shows a friendly second close confirmation and defaults focus to continuing", async () => {
-    const api = mockApi(); Object.defineProperty(window, "sourceApp", { configurable: true, value: api }); render(<App />);
+  it("shows a friendly second close confirmation and places focus plus the Windows pointer on continuing", async () => {
+    const api = mockApi();
+    api.moveCursorToSafeAction = vi.fn();
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 420, y: 300, width: 150, height: 44, top: 300, right: 570, bottom: 344, left: 420, toJSON: () => ({}) });
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api }); render(<App />);
     await screen.findByText("素材清單");
     const callback = vi.mocked(api.onAppCloseRequested).mock.calls[0][0];
     act(() => callback());
     const dialog = screen.getByRole("dialog", { name: "再次確認關閉軟體" });
     expect(within(dialog).getByRole("button", { name: "繼續剪輯" })).toHaveFocus();
+    await waitFor(() => expect(api.moveCursorToSafeAction).toHaveBeenCalledWith({ x: 420, y: 300, width: 150, height: 44 }));
     fireEvent.click(within(dialog).getByRole("button", { name: "確定關閉" }));
     expect(api.confirmAppClose).toHaveBeenCalledTimes(1);
+    rect.mockRestore();
+  });
+
+  it("keeps the App open and visibly reports sleep protection during rendering", async () => {
+    const api = mockApi();
+    let publishJobs: ((jobs: import("../../src/shared/domain").BackgroundJobSnapshot[]) => void) | undefined;
+    api.getBackgroundJobs = vi.fn(async () => []);
+    api.onBackgroundJobs = vi.fn((callback) => { publishJobs = callback; });
+    api.clearBackgroundJobsListeners = vi.fn();
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api }); render(<App />);
+    await screen.findByText("素材清單");
+    act(() => publishJobs?.([{ id: "render-job", kind: "CONCAT_RENDER", label: "正片預覽產出", status: "RUNNING", startedAt: "2026-09-11T00:00:00.000Z", projectId: "project", projectName: "測試專案", projectRevision: 1, percent: 42 }]));
+    expect(screen.getByText(/Windows 防睡眠保護已開啟/)).toBeInTheDocument();
+    const requestClose = vi.mocked(api.onAppCloseRequested).mock.calls[0][0];
+    act(() => requestClose());
+    const dialog = screen.getByRole("dialog", { name: "再次確認關閉軟體" });
+    expect(within(dialog).getByText("轉檔完成前不能關閉")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "確定關閉" })).toBeDisabled();
+    expect(api.confirmAppClose).not.toHaveBeenCalled();
   });
 
   it("shows generated AI titles and composed Intro-first thumbnail results immediately", async () => {

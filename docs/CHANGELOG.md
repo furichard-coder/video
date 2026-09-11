@@ -2,6 +2,45 @@
 
 本檔案是每次可交付功能變更的簡短索引。完成一個階段後，必須同步更新本檔案、`README.md` 與 `VERIFICATION.md`；只有通過建置／測試的內容才可標記為完成。
 
+## v0.56.0 — 2026-09-11
+
+- 字幕列新增鄰接的單筆確認／刪除／上移／下移；格內 textarea 維持原生文字游標及直接編輯。
+- 單筆、全部及 Shift 複選的確認／取消確認改為 Main 寫入成功後即時完成；強制逐筆校對只有保存成功才進入下一筆。
+- 上下移交換同範圍相鄰字幕的時間與來源位置，兩筆回到待確認並立即保存；刪除仍不觸碰影片、照片或代理檔。
+- 底部只保留未確認文字／時間修改的備援保存，不再是確認字幕的必要步驟。
+- 驗證：49 個測試檔／296 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke 與 `npm audit` 全部通過。
+- 交付：`release/v0.56.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.56.0.exe`；SHA-256 `9F749DF3A780E83741AD587C69E235FE0945A6288A18087B686906A3D46658EF`。
+
+## v0.55.0 — 2026-09-11
+
+- Windows EXE 檔名開始帶版本；封裝 smoke 依 `package.json` 解析同一版本檔名。
+- App 小型確認視窗把鍵盤焦點及滑鼠游標放到安全預設動作；關閉確認固定為「繼續剪輯」。Renderer 矩形先在 Main 受視窗邊界驗證，再用固定 Windows helper 定位，不拼接 shell 字串。
+- 字幕逐筆預覽由整支影片代理改為精確 cue IN／OUT 的短區段代理；有效 cache 保存已驗證輸出 fingerprint，重看免重複 ffprobe，損壞／變更仍會重建。
+- 強制字幕校對先依目前片頭／正片主軸與疊化重新對位，再提供逐筆一致／不一致修改流程；字幕來源 OUT 會跟著新片段邊界更新。
+- 手動加入片頭影片、照片或局部放大時，既有各段 IN／OUT 與目標總時間維持不變；不再自動均衡或增加上限，剩餘容量不足時明確阻擋。
+- 驗證：49 個測試檔／295 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke、真實短區段 FFmpeg cache／損壞重建、來源 hash 與 `npm audit` 全部通過。
+- 交付：`release/v0.55.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.55.0.exe`；SHA-256 `8092E84F6F1B75D3F6EB021F8747679FB9BE2C330B6F989F6DFE5C73B16CFCAA`。
+
+## v0.54.0 — 2026-09-11
+
+- 所有影片轉檔預設啟用本機人聲／突發聲音保護：1–4 kHz sidechain detector、3–6 dB 有界平滑壓低、可關閉 EQ、Compressor 與 -1／-2 dB Peak Ceiling Limiter。
+- 遠處人群／市集氛圍及腳步／微弱招呼以較高門檻與較慢 attack／release 優先保留；UI 明示純聲學偵測不能理解內容是否私密，仍需人工聽檢。
+- 串連預覽的配樂可獨立勾選片頭及正片。片頭單選在正片提示頁前 1.5 秒淡出；正片單選在提示頁結束後才啟動配樂時間線。
+- 片頭／正片秒數、IN／OUT、順序、插入或疊化更動後，字幕依片段與來源內時間逐筆重新映射；新增「強制重新校對」可保留文字／時間並將所選範圍有效字幕改為待確認。
+- 新偏好相容舊設定；來源影片、原始音軌與 MP3 均保持唯讀，既有 partial／取消／磁碟預檢／防睡眠安全流程不變。
+- 驗證：48 個測試檔／293 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke、真實 FFmpeg 聲音保護濾鏡與 `npm audit` 全部通過。
+- 交付：`release/v0.54.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer.exe`；SHA-256 `13EF59AD462EA0E38A587D1BF69215B383EF9A179132C5D991AEADB603E3FE00`。
+
+## v0.53.0 — 2026-09-11
+
+- 串連預覽頁新增正片／僅片頭切換；獨立片頭可沿用同一套安全轉檔設定，完成後以 Chrome 拖放或 YouTube 官方 API 作不公開測試。
+- 自動片頭輸出新增「永久嵌入已確認片頭字幕」選項；Intro 僅讀取 `INTRO` 字幕，不混用正片字幕。
+- 字幕頁與實際輸出統一為 480p 字級基準；第一語言共用同一份大小／位置偏好並依輸出解析度等比例換算，第二翻譯語言維持獨立設定。
+- 字幕 ASS 時間改用扣除疊化後的片段起點，避免後續片段字幕逐段偏移。
+- 片頭 YouTube 測試不自動套用正片的 AI 標題、縮圖或章節；BiliBili／TikTok 仍只接受正片／Shorts／已確認既有成品。
+- 驗證：48 個測試檔／284 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke、真實片頭字幕 FFmpeg 輸出、來源 SHA-256 與 `npm audit` 全部通過。
+- 交付：`release/v0.53.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer.exe`；SHA-256 `514119FDD60474F9C9A454F356618EE2F4939202AB0FEFD8D0DA521C59697E93`。
+
 ## v0.49.0 — 2026-09-10
 
 - YouTube 新增並預設採用 Chrome 上傳頁＋檔案總管選取最新 MP4 的人工拖放交接；官方 API 保留為第二選項，發布仍需人工確認。

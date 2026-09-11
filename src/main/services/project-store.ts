@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { DEFAULT_BGM_VOLUME_PERCENT, DEFAULT_IMAGE_DURATION_MS, DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS, DEFAULT_INTRO_TARGET_DURATION_MS, DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT, DEFAULT_ZOOM_ENHANCEMENT_PRESET, DUNES_SHUTTER_EFFECT_ID, DUNES_SHUTTER_EFFECT_SHA256, INTRO_MAX_SEGMENT_MS, INTRO_MAX_SEGMENTS, INTRO_MIN_SEGMENT_MS, MANIFEST_SCHEMA_VERSION, MAX_IMAGE_DURATION_MS, MAX_MIX_VOLUME_PERCENT, MIN_IMAGE_DURATION_MS, PREVIEWER_VERSION, type AiPublishAssets, type AiStoryContext, type BgmTrack, type ImageDurationUpdateResult, type IntroAnalysisResult, type IntroSuggestion, type MainExclusionRange, type MainExclusionRangeUpdateResult, type MediaInsertion, type MusicSuggestionResult, type PlacementRequest, type PreviewRange, type PreviewRangeUpdateResult, type ProjectChangeSection, type ProjectChangedEvent, type ProjectColorSettings, type ProjectFileResult, type ProjectFileState, type ProjectHistoryState, type ProjectManifest, type RemovedIntroSegment, type RemovedMainAsset, type SortMode, type SourceAsset, type SubtitleCue, type SubtitleTimelineScope, type VolumeSegment, type WatermarkSettings, type ZoomEnhancementPreset, type ZoomSegment, type ZoomSegmentUpdateResult } from "../../shared/domain";
-import { clipMainExclusionRanges, clipVolumeSegments, clipZoomSegments, imageDurationMs, mainRenderSelections, normalizeMainExclusionRanges, validateBgmTrack, validateImageDurationMs, validateMediaInsertion, validatePercent, validateSubtitleCues, validateVolumeSegments, validateZoomSegments } from "../../shared/editing-rules";
+import { DEFAULT_BGM_VOLUME_PERCENT, DEFAULT_IMAGE_DURATION_MS, DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS, DEFAULT_INTRO_TARGET_DURATION_MS, DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT, DEFAULT_ZOOM_ENHANCEMENT_PRESET, DUNES_SHUTTER_EFFECT_ID, DUNES_SHUTTER_EFFECT_SHA256, INTRO_MAX_SEGMENT_MS, INTRO_MAX_SEGMENTS, INTRO_MIN_SEGMENT_MS, MANIFEST_SCHEMA_VERSION, MAX_IMAGE_DURATION_MS, MAX_MIX_VOLUME_PERCENT, MIN_IMAGE_DURATION_MS, PREVIEWER_VERSION, type AiPublishAssets, type AiStoryContext, type BgmTrack, type ImageDurationUpdateResult, type IntroAnalysisResult, type IntroSuggestion, type MainExclusionRange, type MainExclusionRangeUpdateResult, type MediaInsertion, type MusicSuggestionResult, type PlacementRequest, type PreviewRange, type PreviewRangeUpdateResult, type ProjectChangeSection, type ProjectChangedEvent, type ProjectColorSettings, type ProjectFileResult, type ProjectFileState, type ProjectHistoryState, type ProjectManifest, type RemovedIntroSegment, type RemovedMainAsset, type SortMode, type SourceAsset, type SubtitleCue, type SubtitleTimelineScope, type TransitionDurationSec, type VolumeSegment, type WatermarkSettings, type ZoomEnhancementPreset, type ZoomSegment, type ZoomSegmentUpdateResult } from "../../shared/domain";
+import { clipMainExclusionRanges, clipVolumeSegments, clipZoomSegments, imageDurationMs, normalizeMainExclusionRanges, validateBgmTrack, validateImageDurationMs, validateMediaInsertion, validatePercent, validateSubtitleCues, validateVolumeSegments, validateZoomSegments } from "../../shared/editing-rules";
 import { sortAssets } from "../../shared/sorting";
 import { DEFAULT_PROJECT_COLOR_SETTINGS, normalizeProjectColorSettings } from "../../shared/color-presets";
 import { balanceIntroSegments, normalizeIntroSegmentMaxDuration } from "../../shared/intro-duration";
 import { buildTimelinePlan } from "../../shared/timeline-plan";
+import { syncSubtitlesToTimeline } from "../../shared/subtitle-timeline-sync";
 import { isValidYoutubeChapterSet, youtubeTextLength } from "../../shared/publish-rules";
 import { DEFAULT_WATERMARK_SETTINGS, normalizeWatermarkSettings } from "../../shared/watermark";
 import { finalizePartialOutput } from "./atomic-output";
@@ -65,7 +66,7 @@ function createProject(): ProjectManifest {
   return {
     schemaVersion: MANIFEST_SCHEMA_VERSION, id: randomUUID(), name: "我的素材專案",
     sourcePolicy: "READ_ONLY", previewPolicy: "DERIVED_CACHE_ONLY_NOT_MASTER", previewerVersion: PREVIEWER_VERSION,
-    sortMode: "SMART_SEQUENCE", createdAt: now, updatedAt: now, sources: [], timelineOrder: [], pendingAssetIds: [],
+    sortMode: "SMART_SEQUENCE", createdAt: now, updatedAt: now, sources: [], timelineOrder: [], timelineTransitionSeconds: 0.3, pendingAssetIds: [],
     excludedMainAssetIds: [], recentMainRemovals: [], introSegments: [], introTargetDurationMs: DEFAULT_INTRO_TARGET_DURATION_MS, introSegmentMaxDurationMs: DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS, colorSettings: DEFAULT_PROJECT_COLOR_SETTINGS, watermarkSettings: structuredClone(DEFAULT_WATERMARK_SETTINGS), introExcludedSegmentIds: [], recentIntroRemovals: [],
     placementDecisions: [], mediaInsertions: [], photoSoundEffect: defaultPhotoSoundEffect(), bgmTracks: [], sourceAudioVolumePercent: DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT, aiStoryContext: defaultAiStoryContext(), subtitleCues: [], timelineRevision: 0, subtitleTimelineRevision: 0, mainTimelineRevision: 0, introTimelineRevision: 0, mainSubtitleReviewRevision: 0, introSubtitleReviewRevision: 0,
     audioMixPolicy: "ORIGINAL_PLUS_BGM_LIMITED_0_95",
@@ -75,7 +76,7 @@ function createProject(): ProjectManifest {
 function looksLikeProject(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
-  return (candidate.schemaVersion === 1 || candidate.schemaVersion === 2 || candidate.schemaVersion === 3 || candidate.schemaVersion === 4 || candidate.schemaVersion === 5 || candidate.schemaVersion === 6 || candidate.schemaVersion === 7 || candidate.schemaVersion === 8 || candidate.schemaVersion === 9 || candidate.schemaVersion === 10 || candidate.schemaVersion === 11 || candidate.schemaVersion === 12 || candidate.schemaVersion === 13 || candidate.schemaVersion === 14 || candidate.schemaVersion === 15 || candidate.schemaVersion === 16) && candidate.sourcePolicy === "READ_ONLY" && candidate.previewPolicy === "DERIVED_CACHE_ONLY_NOT_MASTER" && Array.isArray(candidate.sources);
+  return (candidate.schemaVersion === 1 || candidate.schemaVersion === 2 || candidate.schemaVersion === 3 || candidate.schemaVersion === 4 || candidate.schemaVersion === 5 || candidate.schemaVersion === 6 || candidate.schemaVersion === 7 || candidate.schemaVersion === 8 || candidate.schemaVersion === 9 || candidate.schemaVersion === 10 || candidate.schemaVersion === 11 || candidate.schemaVersion === 12 || candidate.schemaVersion === 13 || candidate.schemaVersion === 14 || candidate.schemaVersion === 15 || candidate.schemaVersion === 16 || candidate.schemaVersion === 17) && candidate.sourcePolicy === "READ_ONLY" && candidate.previewPolicy === "DERIVED_CACHE_ONLY_NOT_MASTER" && Array.isArray(candidate.sources);
 }
 
 function normalizeZoomEnhancementPreset(value: unknown): ZoomEnhancementPreset {
@@ -168,7 +169,9 @@ function migrateProject(raw: Record<string, unknown>): ProjectManifest {
     : DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT;
   return {
     ...(raw as unknown as ProjectManifest), schemaVersion: MANIFEST_SCHEMA_VERSION, previewerVersion: PREVIEWER_VERSION, sources,
-    timelineOrder: order, pendingAssetIds: pending,
+    timelineOrder: order,
+    timelineTransitionSeconds: raw.timelineTransitionSeconds === 0.5 || raw.timelineTransitionSeconds === 0.7 ? raw.timelineTransitionSeconds : 0.3,
+    pendingAssetIds: pending,
     excludedMainAssetIds, recentMainRemovals, introSegments, introTargetDurationMs: (() => { try { return normalizeIntroTargetDuration(raw.introTargetDurationMs ?? DEFAULT_INTRO_TARGET_DURATION_MS); } catch { return DEFAULT_INTRO_TARGET_DURATION_MS; } })(), introSegmentMaxDurationMs, colorSettings: normalizeProjectColorSettings(raw.colorSettings), watermarkSettings: normalizeWatermarkSettings(raw.watermarkSettings), introExcludedSegmentIds, recentIntroRemovals,
     placementDecisions: Array.isArray(raw.placementDecisions) ? raw.placementDecisions as ProjectManifest["placementDecisions"] : [],
     mediaInsertions,
@@ -213,6 +216,7 @@ export class ProjectStore {
         !Array.isArray(parsed.excludedMainAssetIds) || !Array.isArray(parsed.recentMainRemovals) ||
         !Array.isArray(parsed.introSegments) || !Number.isFinite(parsed.introTargetDurationMs) || !Number.isFinite(parsed.introSegmentMaxDurationMs) || !parsed.colorSettings || !parsed.watermarkSettings || !Array.isArray(parsed.introExcludedSegmentIds) || !Array.isArray(parsed.recentIntroRemovals) ||
         !Array.isArray(parsed.mediaInsertions) || !parsed.photoSoundEffect || !parsed.aiStoryContext || !Number.isFinite(parsed.sourceAudioVolumePercent) ||
+        (parsed.timelineTransitionSeconds !== 0.3 && parsed.timelineTransitionSeconds !== 0.5 && parsed.timelineTransitionSeconds !== 0.7) ||
         (parsed.sources as Partial<SourceAsset>[]).some((asset) => !Array.isArray(asset.zoomSegments) || asset.zoomSegments.some((segment) => !segment.enhancementPreset));
       this.current = migrateProject(parsed);
       if (migrated) await this.writeProjectFile(this.manifestPath, this.current);
@@ -319,6 +323,7 @@ export class ProjectStore {
 
   async removeMainAsset(assetId: string): Promise<ProjectManifest> {
     return this.mutate((project) => {
+      const previous = clone(project);
       if (!project.sources.some((asset) => asset.id === assetId)) throw new Error("找不到來源項目。");
       if (project.excludedMainAssetIds.includes(assetId)) return;
       const previousTimelineIndex = project.timelineOrder.indexOf(assetId);
@@ -336,11 +341,13 @@ export class ProjectStore {
       project.excludedMainAssetIds.push(assetId);
       project.recentMainRemovals = [...project.recentMainRemovals.filter((item) => item.assetId !== assetId), record];
       this.bumpTimeline(project);
+      this.syncTimelineSubtitles(previous, project, ["MAIN"]);
     });
   }
 
   async restoreMainAsset(assetId: string): Promise<ProjectManifest> {
     return this.mutate((project) => {
+      const previous = clone(project);
       const record = project.recentMainRemovals.find((item) => item.assetId === assetId);
       if (!record || !project.excludedMainAssetIds.includes(assetId) || !project.sources.some((asset) => asset.id === assetId)) throw new Error("找不到可恢復的正片素材。");
       project.excludedMainAssetIds = project.excludedMainAssetIds.filter((id) => id !== assetId);
@@ -352,17 +359,20 @@ export class ProjectStore {
         project.sortMode = record.previousSortMode;
       }
       this.bumpTimeline(project);
+      this.syncTimelineSubtitles(previous, project, ["MAIN"]);
     });
   }
 
   async setIntroSegments(segments: IntroSuggestion[]): Promise<ProjectManifest> {
     return this.mutate((project) => {
+      const previous = clone(project);
       if (!Array.isArray(segments)) throw new Error("片頭片段格式無效。");
       const normalized = this.validateIntroSegments(project, segments).filter((item) => !project.introExcludedSegmentIds.includes(item.id));
       if (new Set(normalized.map((item) => item.id)).size !== normalized.length) throw new Error("片頭片段不可重複。");
       if (JSON.stringify(project.introSegments) === JSON.stringify(normalized)) return;
       project.introSegments = normalized;
       this.bumpTimeline(project, "INTRO");
+      this.syncTimelineSubtitles(previous, project, ["INTRO"]);
     });
   }
 
@@ -375,12 +385,16 @@ export class ProjectStore {
 
   async setIntroSegmentMaxDuration(durationMs: number): Promise<ProjectManifest> {
     return this.mutate((project) => {
+      const previous = clone(project);
       const maximumMs = normalizeIntroSegmentMaxDuration(durationMs);
       const balanced = balanceIntroSegments(project.introSegments, project.sources, project.introTargetDurationMs, maximumMs);
       const rangesChanged = balanced.some((segment, index) => segment.inMs !== project.introSegments[index]?.inMs || segment.outMs !== project.introSegments[index]?.outMs);
       project.introSegmentMaxDurationMs = maximumMs;
       project.introSegments = balanced;
-      if (rangesChanged) this.bumpTimeline(project, "INTRO");
+      if (rangesChanged) {
+        this.bumpTimeline(project, "INTRO");
+        this.syncTimelineSubtitles(previous, project, ["INTRO"]);
+      }
     });
   }
 
@@ -399,6 +413,7 @@ export class ProjectStore {
 
   async removeIntroSegment(segmentId: string): Promise<ProjectManifest> {
     return this.mutate((project) => {
+      const previous = clone(project);
       const index = project.introSegments.findIndex((item) => item.id === segmentId);
       if (index < 0) throw new Error("找不到要從片頭移除的區段。");
       const record: RemovedIntroSegment = { segment: clone(project.introSegments[index]), previousIndex: index, removedAt: new Date().toISOString() };
@@ -406,11 +421,13 @@ export class ProjectStore {
       if (!project.introExcludedSegmentIds.includes(segmentId)) project.introExcludedSegmentIds.push(segmentId);
       project.recentIntroRemovals = [...project.recentIntroRemovals.filter((item) => item.segment.id !== segmentId), record];
       this.bumpTimeline(project, "INTRO");
+      this.syncTimelineSubtitles(previous, project, ["INTRO"]);
     });
   }
 
   async restoreIntroSegment(segmentId: string): Promise<ProjectManifest> {
     return this.mutate((project) => {
+      const previous = clone(project);
       const record = project.recentIntroRemovals.find((item) => item.segment.id === segmentId);
       if (!record || !project.sources.some((asset) => asset.id === record.segment.assetId)) throw new Error("找不到可恢復的片頭區段。");
       const [segment] = this.validateIntroSegments(project, [record.segment]);
@@ -420,12 +437,14 @@ export class ProjectStore {
         project.introSegments.splice(Math.max(0, Math.min(project.introSegments.length, record.previousIndex)), 0, segment);
       }
       this.bumpTimeline(project, "INTRO");
+      this.syncTimelineSubtitles(previous, project, ["INTRO"]);
     });
   }
 
   async setPreviewRange(assetId: string, inMs: number, outMs: number): Promise<PreviewRangeUpdateResult> {
     let result!: Omit<PreviewRangeUpdateResult, "project">;
     const project = await this.mutate((project) => {
+      const previous = clone(project);
       const index = project.sources.findIndex((item) => item.id === assetId);
       if (index < 0) throw new Error("找不到來源項目。");
       const asset = project.sources[index]; const durationMs = asset.mediaInfo?.durationMs;
@@ -442,7 +461,8 @@ export class ProjectStore {
         validateMediaInsertion(insertion, nextSources, project.mediaInsertions, insertion.id);
       }
       project.sources[index] = updated; result = { asset: clone(updated), adjustedVolumeSegmentCount: clipped.adjustedCount, adjustedMainExclusionRangeCount: clippedExclusions.adjustedCount, adjustedZoomSegmentCount: clippedZooms.adjustedCount };
-      this.bumpTimeline(project);
+      this.bumpTimeline(project, "BOTH");
+      this.syncTimelineSubtitles(previous, project, ["MAIN", "INTRO"]);
     });
     return { ...result, project };
   }
@@ -450,13 +470,15 @@ export class ProjectStore {
   async setImageDuration(assetId: string, durationMs: number): Promise<ImageDurationUpdateResult> {
     let updated!: SourceAsset;
     const project = await this.mutate((project) => {
+      const previous = clone(project);
       const index = project.sources.findIndex((item) => item.id === assetId);
       if (index < 0) throw new Error("找不到來源項目。");
       const asset = project.sources[index];
       if (asset.kind !== "IMAGE") throw new Error("只有照片可以設定顯示時間。");
       updated = { ...asset, imageDurationMs: validateImageDurationMs(durationMs) };
       project.sources[index] = updated;
-      this.bumpTimeline(project);
+      this.bumpTimeline(project, "BOTH");
+      this.syncTimelineSubtitles(previous, project, ["MAIN", "INTRO"]);
     });
     return { asset: clone(updated), project };
   }
@@ -473,6 +495,7 @@ export class ProjectStore {
 
   async addMediaInsertion(anchorVideoAssetId: string, insertedAssetId: string, atMs: number, sourceRange?: PreviewRange): Promise<ProjectManifest> {
     return this.mutate((project) => {
+      const previous = clone(project);
       if (!project.timelineOrder.includes(anchorVideoAssetId)) throw new Error("素材只能安插到目前正片順序中的影片。");
       const inserted = project.sources.find((item) => item.id === insertedAssetId);
       if (!inserted) throw new Error("找不到要安插的素材。");
@@ -491,22 +514,26 @@ export class ProjectStore {
       project.mediaInsertions.push({ id: randomUUID(), anchorVideoAssetId, insertedAssetId, ...normalized, sequenceIndex: project.mediaInsertions.filter((item) => item.anchorVideoAssetId === anchorVideoAssetId).length, previousPlacement, previousTimelineIndex, previousPendingIndex: previousPlacement === "PENDING" ? currentPendingIndex : undefined, createdAt: new Date().toISOString() });
       project.sortMode = "MANUAL_ORDER";
       this.bumpTimeline(project);
+      this.syncTimelineSubtitles(previous, project, ["MAIN"]);
     });
   }
 
   async updateMediaInsertion(insertionId: string, atMs: number, sourceRange: PreviewRange): Promise<ProjectManifest> {
     return this.mutate((project) => {
+      const previous = clone(project);
       const index = project.mediaInsertions.findIndex((item) => item.id === insertionId);
       if (index < 0) throw new Error("找不到素材安插設定。");
       const current = project.mediaInsertions[index];
       const normalized = validateMediaInsertion({ ...current, atMs, sourceInMs: sourceRange.inMs, sourceOutMs: sourceRange.outMs }, project.sources, project.mediaInsertions, current.id);
       project.mediaInsertions[index] = { ...current, ...normalized };
       this.bumpTimeline(project);
+      this.syncTimelineSubtitles(previous, project, ["MAIN"]);
     });
   }
 
   async removeMediaInsertion(insertionId: string): Promise<ProjectManifest> {
     return this.mutate((project) => {
+      const previous = clone(project);
       const index = project.mediaInsertions.findIndex((item) => item.id === insertionId);
       if (index < 0) throw new Error("找不到素材安插設定。");
       const [insertion] = project.mediaInsertions.splice(index, 1);
@@ -522,11 +549,13 @@ export class ProjectStore {
       }
       this.resequenceMediaInsertions(project, insertion.anchorVideoAssetId);
       this.bumpTimeline(project);
+      this.syncTimelineSubtitles(previous, project, ["MAIN"]);
     });
   }
 
   async moveMediaInsertion(insertionId: string, toIndex: number): Promise<ProjectManifest> {
     return this.mutate((project) => {
+      const previous = clone(project);
       const insertion = project.mediaInsertions.find((item) => item.id === insertionId);
       if (!insertion) throw new Error("找不到素材安插設定。");
       const siblings = project.mediaInsertions.filter((item) => item.anchorVideoAssetId === insertion.anchorVideoAssetId).sort((left, right) => left.atMs - right.atMs || left.sequenceIndex - right.sequenceIndex || left.createdAt.localeCompare(right.createdAt));
@@ -535,6 +564,7 @@ export class ProjectStore {
       const [moved] = siblings.splice(fromIndex, 1); siblings.splice(toIndex, 0, moved);
       siblings.forEach((item, index) => { const projectIndex = project.mediaInsertions.findIndex((candidate) => candidate.id === item.id); project.mediaInsertions[projectIndex] = { ...item, sequenceIndex: index }; });
       this.bumpTimeline(project);
+      this.syncTimelineSubtitles(previous, project, ["MAIN"]);
     });
   }
 
@@ -554,6 +584,7 @@ export class ProjectStore {
   async setMainExclusionRanges(assetId: string, ranges: MainExclusionRange[]): Promise<MainExclusionRangeUpdateResult> {
     let updated!: SourceAsset; let mergedRangeCount = 0;
     const project = await this.mutate((project) => {
+      const previous = clone(project);
       const index = project.sources.findIndex((item) => item.id === assetId);
       if (index < 0) throw new Error("找不到來源項目。");
       const asset = project.sources[index]; const durationMs = asset.mediaInfo?.durationMs;
@@ -567,6 +598,7 @@ export class ProjectStore {
       }
       project.sources[index] = updated;
       this.bumpTimeline(project);
+      this.syncTimelineSubtitles(previous, project, ["MAIN"]);
     });
     return { asset: clone(updated), mergedRangeCount, project };
   }
@@ -587,6 +619,7 @@ export class ProjectStore {
 
   async placeAsset(assetId: string, placement: PlacementRequest): Promise<ProjectManifest> {
     return this.mutate((project) => {
+      const previous = clone(project);
       if (!project.sources.some((asset) => asset.id === assetId)) throw new Error("找不到待安插素材。");
       if (project.excludedMainAssetIds.includes(assetId)) throw new Error("素材已從正片移除，請先從最近移除區恢復。");
       if (!(["FRONT", "END", "BEFORE", "AFTER", "PENDING"] as const).includes(placement.action)) throw new Error("安插位置選項無效。");
@@ -600,7 +633,11 @@ export class ProjectStore {
           if (anchorIndex < 0) throw new Error("安插位置的參考素材不存在。");
           index = anchorIndex + (placement.action === "AFTER" ? 1 : 0);
         }
-        project.timelineOrder.splice(index, 0, assetId); project.sortMode = "MANUAL_ORDER"; this.bumpTimeline(project);
+        project.timelineOrder.splice(index, 0, assetId); project.sortMode = "MANUAL_ORDER";
+      }
+      if (JSON.stringify(previous.timelineOrder) !== JSON.stringify(project.timelineOrder)) {
+        this.bumpTimeline(project);
+        this.syncTimelineSubtitles(previous, project, ["MAIN"]);
       }
       project.placementDecisions.push({ assetId, action: placement.action, anchorAssetId: placement.anchorAssetId, decidedAt: new Date().toISOString() });
     });
@@ -608,21 +645,36 @@ export class ProjectStore {
 
   async moveTimelineAsset(assetId: string, toIndex: number): Promise<ProjectManifest> {
     return this.mutate((project) => {
+      const previous = clone(project);
       const fromIndex = project.timelineOrder.indexOf(assetId);
       if (fromIndex < 0) throw new Error("素材不在已排定順序中。");
       const normalized = Math.max(0, Math.min(project.timelineOrder.length - 1, Math.round(toIndex)));
       if (normalized === fromIndex) return;
       project.timelineOrder.splice(fromIndex, 1); project.timelineOrder.splice(normalized, 0, assetId);
       project.sortMode = "MANUAL_ORDER"; this.bumpTimeline(project);
+      this.syncTimelineSubtitles(previous, project, ["MAIN"]);
+    });
+  }
+
+  async setTimelineTransitionSeconds(seconds: TransitionDurationSec): Promise<ProjectManifest> {
+    return this.mutate((project) => {
+      if (seconds !== 0.3 && seconds !== 0.5 && seconds !== 0.7) throw new Error("疊化秒數無效。");
+      if (project.timelineTransitionSeconds === seconds) return;
+      const previous = clone(project);
+      project.timelineTransitionSeconds = seconds;
+      this.bumpTimeline(project, "BOTH");
+      this.syncTimelineSubtitles(previous, project, ["MAIN", "INTRO"]);
     });
   }
 
   async setSortMode(sortMode: SortMode): Promise<ProjectManifest> {
     return this.mutate((project) => {
+      const previous = clone(project);
       project.sortMode = sortMode;
       if (sortMode !== "MANUAL_ORDER") {
         const placed = project.sources.filter((asset) => project.timelineOrder.includes(asset.id));
         project.timelineOrder = sortAssets(placed, sortMode).map((asset) => asset.id); this.bumpTimeline(project);
+        this.syncTimelineSubtitles(previous, project, ["MAIN"]);
       }
     });
   }
@@ -674,7 +726,7 @@ export class ProjectStore {
   async setSubtitleCues(cues: SubtitleCue[]): Promise<ProjectManifest> { return this.mutate((project) => {
     const normalized = validateSubtitleCues(cues);
     const mainDurationMs = buildTimelinePlan(project).durationMs;
-    const introDurationMs = project.introSegments.reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0);
+    const introDurationMs = buildTimelinePlan({ ...project, timelineOrder: [] }, { includeIntro: true }).durationMs;
     if (normalized.some((cue) => cue.timelineScope === "INTRO" ? cue.endMs > introDurationMs : cue.endMs > mainDurationMs)) throw new Error("字幕時間超出目前影片或所選片頭總時間，請調整 cue 或先完成影片順序。");
     const previousByScope = (scope: SubtitleTimelineScope) => project.subtitleCues.filter((cue) => (cue.timelineScope ?? "MAIN") === scope);
     const nextByScope = (scope: SubtitleTimelineScope) => normalized.filter((cue) => (cue.timelineScope ?? "MAIN") === scope);
@@ -684,6 +736,28 @@ export class ProjectStore {
     if (mainChanged) project.mainSubtitleReviewRevision = project.mainTimelineRevision ?? project.timelineRevision;
     if (introChanged) project.introSubtitleReviewRevision = project.introTimelineRevision ?? project.timelineRevision;
   }); }
+
+  async forceSubtitleReReview(scopes: SubtitleTimelineScope[]): Promise<ProjectManifest> {
+    return this.mutate((project) => {
+      if (!Array.isArray(scopes) || scopes.length < 1 || scopes.some((scope) => scope !== "INTRO" && scope !== "MAIN")) {
+        throw new Error("強制重新校對至少需要選擇片頭或正片。");
+      }
+      const selected = new Set(scopes);
+      const affected = project.subtitleCues.filter((cue) => selected.has(cue.timelineScope ?? "MAIN") && cue.reviewStatus !== "REJECTED");
+      if (!affected.length) throw new Error("目前選取範圍沒有可重新校對的字幕。");
+      // Re-derive every selected cue against the canonical current Intro/Main
+      // plan before starting the human picture review. This refreshes missing
+      // source anchors and respects the currently selected dissolve duration.
+      project.subtitleCues = syncSubtitlesToTimeline(project, project, scopes).cues;
+      const warning = "已由使用者強制重新校對；請逐筆播放確認畫面、字幕文字與頭尾時間。";
+      project.subtitleCues = project.subtitleCues.map((cue) => selected.has(cue.timelineScope ?? "MAIN") && cue.reviewStatus !== "REJECTED"
+        ? { ...cue, reviewStatus: "DRAFT", aiWarnings: [...new Set([...(cue.aiWarnings ?? []), warning])] }
+        : cue);
+      if (selected.has("MAIN")) project.mainSubtitleReviewRevision = (project.mainTimelineRevision ?? project.timelineRevision) - 1;
+      if (selected.has("INTRO")) project.introSubtitleReviewRevision = (project.introTimelineRevision ?? project.timelineRevision) - 1;
+      project.subtitleTimelineRevision = Math.min(project.mainSubtitleReviewRevision ?? project.timelineRevision, project.introSubtitleReviewRevision ?? project.timelineRevision);
+    });
+  }
 
   async replaceAiSubtitleDrafts(cues: SubtitleCue[], scopes: SubtitleTimelineScope[] = ["MAIN"], mode: "FILL_BLANKS" | "REPLACE_AI_SCOPE" | "PRESERVE_USER_EDITED" = "FILL_BLANKS"): Promise<ProjectManifest> { return this.mutate((project) => {
     if (!Array.isArray(cues) || cues.some((cue) => (cue.reviewStatus !== "DRAFT" && cue.reviewStatus !== "CONFIRMED") || (cue.origin !== "AI_SPEECH" && cue.origin !== "AI_VISUAL"))) throw new Error("AI 字幕格式無效。");
@@ -701,7 +775,7 @@ export class ProjectStore {
     });
     const normalized = validateSubtitleCues([...preserved, ...cues]);
     const mainDurationMs = buildTimelinePlan(project).durationMs;
-    const introDurationMs = project.introSegments.reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0);
+    const introDurationMs = buildTimelinePlan({ ...project, timelineOrder: [] }, { includeIntro: true }).durationMs;
     if (normalized.some((cue) => cue.timelineScope === "INTRO" ? cue.endMs > introDurationMs : cue.endMs > mainDurationMs)) throw new Error("AI 字幕時間超出所選片頭或正片總時間。");
     project.subtitleCues = normalized;
     project.subtitleTimelineRevision = project.timelineRevision;
@@ -720,7 +794,7 @@ export class ProjectStore {
       if (!assets || typeof assets !== "object" || !Array.isArray(assets.titles) || !Array.isArray(assets.thumbnails) || !Array.isArray(assets.chapters)) throw new Error("AI 發布素材格式無效。");
       if (assets.titles.length > 5 || assets.titles.some((title) => !title || typeof title.text !== "string" || !title.text.trim() || youtubeTextLength(title.text.trim()) > 100)) throw new Error("YouTube 標題候選必須為 1–5 筆，且每筆不可超過 100 字元。" );
       if (assets.thumbnails.length > 3 || assets.thumbnails.some((thumbnail) => !project.sources.some((source) => source.id === thumbnail.assetId) || !Number.isFinite(thumbnail.sourceTimeMs) || thumbnail.sourceTimeMs < 0)) throw new Error("縮圖候選必須綁定現有來源素材與有效時間碼。" );
-      const durationMs = mainRenderSelections(project).reduce((sum, clip) => sum + clip.outMs - clip.inMs, 0);
+      const durationMs = buildTimelinePlan(project).durationMs;
       if (assets.chapters.length && !isValidYoutubeChapterSet(assets.chapters, durationMs)) throw new Error("章節不符合 YouTube 規則：第一段 00:00、至少三段、時間遞增且每段至少 10 秒。" );
       if (typeof assets.description !== "string" || assets.description.length > 5_000 || !assets.topicSnapshot || typeof assets.topicSnapshot.topic !== "string") throw new Error("AI 發布說明或主題快照格式無效。" );
       project.aiPublishAssets = structuredClone(assets);
@@ -762,6 +836,17 @@ export class ProjectStore {
       order.splice(Math.max(0, Math.min(order.length, insertion.previousTimelineIndex)), 0, insertion.insertedAssetId);
     }
     return order;
+  }
+
+  private syncTimelineSubtitles(previous: ProjectManifest, project: ProjectManifest, scopes: SubtitleTimelineScope[]): void {
+    const result = syncSubtitlesToTimeline(previous, project, scopes);
+    project.subtitleCues = result.cues;
+    if (scopes.includes("MAIN") && result.fullyMapped.MAIN) project.mainSubtitleReviewRevision = project.mainTimelineRevision ?? project.timelineRevision;
+    if (scopes.includes("INTRO") && result.fullyMapped.INTRO) project.introSubtitleReviewRevision = project.introTimelineRevision ?? project.timelineRevision;
+    if ((project.mainSubtitleReviewRevision ?? -1) === (project.mainTimelineRevision ?? project.timelineRevision)
+      && (project.introSubtitleReviewRevision ?? -1) === (project.introTimelineRevision ?? project.timelineRevision)) {
+      project.subtitleTimelineRevision = project.timelineRevision;
+    }
   }
 
   private bumpTimeline(project: ProjectManifest, scope: "MAIN" | "INTRO" | "BOTH" = "MAIN"): void {

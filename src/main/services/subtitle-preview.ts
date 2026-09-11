@@ -61,7 +61,7 @@ export class SubtitlePreviewService {
       bgmIncluded: includeBgm,
       bgmState,
       sourceState,
-      transitionSeconds: 0.3,
+      transitionSeconds: project.timelineTransitionSeconds,
       canonicalMainTimelineDurationMs: buildTimelinePlan(project).durationMs,
     })).digest("hex");
     const directory = assertWithinRoot(this.cacheRoot, path.join(this.cacheRoot, cacheKey));
@@ -84,8 +84,9 @@ export class SubtitlePreviewService {
       outputToken: `subtitle-preview-${cacheKey}`,
       orderedAssetIds: outputIntroSegments.map((segment) => segment.assetId),
       clipSelections: outputIntroSegments.map((segment) => ({ assetId: segment.assetId, inMs: segment.inMs, outMs: segment.outMs })),
-      transitionSeconds: 0.3,
+      transitionSeconds: project.timelineTransitionSeconds,
       resolution: "480P",
+      videoCodec: "H265_QSV",
       purpose: "INTRO",
       includeBgm,
     }, outputPath, signal, onProgress);

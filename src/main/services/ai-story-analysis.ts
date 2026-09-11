@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { AiAnalysisProgress, AiSubtitleGenerationOptions, AiSubtitleGenerationResult, IntroSuggestion, ProjectManifest, RenderClipSelection, SourceAsset, SubtitleCue, SubtitleTimelineScope, VoiceInputLanguage, VoiceInputRequest, VoiceInputResult } from "../../shared/domain";
-import { mainRenderSelections } from "../../shared/editing-rules";
+import type { AiAnalysisProgress, AiSubtitleGenerationOptions, AiSubtitleGenerationResult, IntroSuggestion, MaterialSubtitleAnalysisRequest, MaterialSubtitleAnalysisResult, ProjectManifest, RenderClipSelection, SourceAsset, SubtitleCue, SubtitleTimelineScope, VoiceInputLanguage, VoiceInputRequest, VoiceInputResult } from "../../shared/domain";
+import { buildTimelinePlan } from "../../shared/timeline-plan";
 import { AiSettingsStore } from "./ai-settings";
 import { CodexCliStoryProvider, type CodexStoryRequest } from "./codex-cli-provider";
 import { OpenAiProvider, type OpenAiConnectionDiagnostic, type StoryFrameAnalysis, type TranscriptionSegment } from "./openai-provider";
@@ -11,10 +11,13 @@ import { ProjectStore } from "./project-store";
 import { runProcess } from "./process-runner";
 import { SourceService } from "./source-service";
 import { finalizePartialOutput } from "./atomic-output";
+import { GeminiMaterialAnalysisProvider } from "./gemini-material-analysis";
 
 export const AI_STORY_ANALYZER_VERSION = "story-match-v3-animal-species";
+export const MATERIAL_SUBTITLE_ANALYZER_VERSION = "material-subtitle-v3-gemini-timeline-sync";
 const MAX_AUDIO_CHUNK_MS = 240_000;
-const MAX_GENERATED_CUES = 100;
+const DEFAULT_GENERATED_CUES = 100;
+const MAX_GENERATED_CUES = 300;
 const MAX_VOICE_INPUT_BYTES = 25 * 1024 * 1024;
 const VOICE_MIME_TYPES = new Set(["audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/wav", "audio/x-wav"]);
 
@@ -28,6 +31,8 @@ interface Candidate {
   sourceEndMs: number;
   transcript: string;
   speaker?: string;
+  /** When present, storyboard extraction uses these exact source frame times. */
+  analysisFrameTimesMs?: number[];
 }
 
 interface VisualCache {
@@ -64,6 +69,7 @@ export class AiStoryAnalysisService {
     private readonly provider = new OpenAiProvider(),
     private readonly codexProvider = new CodexCliStoryProvider(cacheRoot),
     private readonly ffmpegExecutable = process.env.FFMPEG_PATH || "ffmpeg",
+    private readonly geminiProvider = new GeminiMaterialAnalysisProvider(),
   ) {}
 
   async initialize(): Promise<void> {
@@ -114,6 +120,8 @@ export class AiStoryAnalysisService {
     onProgress: (progress: AiAnalysisProgress) => void = () => undefined,
   ): Promise<AiSubtitleGenerationResult> {
     const project = this.store.getProject();
+    const requestedCueCount = options.targetCueCount === undefined ? DEFAULT_GENERATED_CUES : Math.round(Number(options.targetCueCount));
+    if (!Number.isFinite(requestedCueCount) || requestedCueCount < 1 || requestedCueCount > MAX_GENERATED_CUES) throw new Error(`AI 字幕目標數量必須介於 1 到 ${MAX_GENERATED_CUES}。`);
     if (!contextReady(project, "SUBTITLE")) throw new Error("請先在 AI 帳號設定填寫專案主題、故事、人物或地點，再產生字幕草稿。");
     const snapshot = this.settings.getSnapshot();
     const profile = snapshot.accounts.find((item) => item.id === snapshot.activeAccountId);
@@ -154,8 +162,8 @@ export class AiStoryAnalysisService {
     const plans = scopes.map((timelineScope) => ({
       timelineScope,
       clips: timelineScope === "INTRO"
-        ? project.introSegments.map((clip) => ({ assetId: clip.assetId, inMs: clip.inMs, outMs: clip.outMs }))
-        : mainRenderSelections(project),
+        ? buildTimelinePlan({ ...project, timelineOrder: [] }, { includeIntro: true }).clips
+        : buildTimelinePlan(project).clips,
     }));
     const totalClips = plans.reduce((sum, plan) => sum + plan.clips.length, 0);
     if (!totalClips) throw new Error(scopes.length === 1 && scopes[0] === "INTRO" ? "片頭沒有可分析的片段。" : "所選片頭／正片沒有可分析的保留片段。");
@@ -163,33 +171,44 @@ export class AiStoryAnalysisService {
     const assetById = new Map(project.sources.map((asset) => [asset.id, asset]));
     const confirmed = project.subtitleCues.filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED");
     const candidates: Candidate[] = [];
+    const visualSamplesPerClip = Math.max(1, Math.ceil(requestedCueCount / totalClips));
     let processedClips = 0;
 
     for (const plan of plans) {
-      let timelineOffsetMs = 0;
       const confirmedInScope = confirmed.filter((cue) => (cue.timelineScope ?? "MAIN") === plan.timelineScope);
-      for (const clip of plan.clips) {
+      for (let clipIndex = 0; clipIndex < plan.clips.length; clipIndex += 1) {
+        const clip = plan.clips[clipIndex];
+        const timelineOffsetMs = clip.outputStartMs;
+        const captionEndMs = plan.clips[clipIndex + 1]?.outputStartMs ?? clip.outputEndMs;
         if (signal?.aborted) throw new DOMException("AI 字幕分析已取消。", "AbortError");
         const asset = assetById.get(clip.assetId);
         const durationMs = clipDuration(clip);
-        if (!asset) { timelineOffsetMs += durationMs; processedClips += 1; continue; }
+        if (!asset) { processedClips += 1; continue; }
         const ready = await this.sources.ensureMetadata(asset.id, signal);
         if (durationMs >= 800) {
-          const visualDuration = Math.min(4_000, durationMs);
-          const localStart = Math.max(0, Math.round((durationMs - visualDuration) / 2));
-          const candidate: Candidate = {
-            origin: "AI_VISUAL",
-            timelineScope: plan.timelineScope,
-            timelineStartMs: timelineOffsetMs + localStart,
-            timelineEndMs: timelineOffsetMs + localStart + visualDuration,
-            sourceAsset: asset,
-            sourceStartMs: clip.inMs + localStart,
-            sourceEndMs: clip.inMs + localStart + visualDuration,
-            transcript: "",
-          };
-          if (!overlaps({ startMs: candidate.timelineStartMs, endMs: candidate.timelineEndMs }, confirmedInScope)) candidates.push(candidate);
+          const sampleCount = Math.min(visualSamplesPerClip, Math.max(1, Math.floor(durationMs / 800)));
+          for (let sampleIndex = 0; sampleIndex < sampleCount && candidates.length < requestedCueCount; sampleIndex += 1) {
+            const slotStart = Math.round(durationMs * sampleIndex / sampleCount);
+            const slotEnd = Math.round(durationMs * (sampleIndex + 1) / sampleCount);
+            const slotDuration = Math.max(100, slotEnd - slotStart);
+            const visualDuration = Math.min(4_000, Math.max(800, Math.floor(slotDuration * 0.8)), durationMs);
+            const localStart = Math.max(0, Math.min(durationMs - visualDuration, Math.round(slotStart + (slotDuration - visualDuration) / 2)));
+            const timelineStartMs = timelineOffsetMs + localStart;
+            const timelineEndMs = Math.min(captionEndMs, timelineStartMs + visualDuration);
+            const candidate: Candidate = {
+              origin: "AI_VISUAL",
+              timelineScope: plan.timelineScope,
+              timelineStartMs,
+              timelineEndMs,
+              sourceAsset: asset,
+              sourceStartMs: clip.inMs + localStart,
+              sourceEndMs: clip.inMs + localStart + visualDuration,
+              transcript: "",
+            };
+            if (timelineEndMs - timelineStartMs >= 100 && !overlaps({ startMs: candidate.timelineStartMs, endMs: candidate.timelineEndMs }, confirmedInScope)) candidates.push(candidate);
+          }
         }
-        if (asset.kind === "VIDEO" && options.includeSpeechTranscription && ready.mediaInfo?.audioCodec) {
+        if (candidates.length < requestedCueCount && asset.kind === "VIDEO" && options.includeSpeechTranscription && ready.mediaInfo?.audioCodec) {
           for (let chunkOffsetMs = 0; chunkOffsetMs < durationMs; chunkOffsetMs += MAX_AUDIO_CHUNK_MS) {
             const chunkDurationMs = Math.min(MAX_AUDIO_CHUNK_MS, durationMs - chunkOffsetMs);
             onProgress({ phase: "EXTRACTING_AUDIO", processed: processedClips, total: totalClips, currentName: asset.fileName });
@@ -199,20 +218,23 @@ export class AiStoryAnalysisService {
               const segments = await this.provider.transcribe(audioPath, account!, project.aiStoryContext.subtitleLanguage, signal);
               for (const segment of segments) {
                 const candidate = this.speechCandidate(asset, clip, timelineOffsetMs, chunkOffsetMs, chunkDurationMs, segment, plan.timelineScope);
-                if (candidate && !overlaps({ startMs: candidate.timelineStartMs, endMs: candidate.timelineEndMs }, confirmedInScope)) candidates.push(candidate);
+                if (candidate) candidate.timelineEndMs = Math.min(candidate.timelineEndMs, captionEndMs);
+                if (candidate && candidate.timelineEndMs - candidate.timelineStartMs >= 100 && candidates.length < requestedCueCount && !overlaps({ startMs: candidate.timelineStartMs, endMs: candidate.timelineEndMs }, confirmedInScope)) candidates.push(candidate);
               }
             } finally { await rm(audioPath, { force: true }); }
           }
         }
-        timelineOffsetMs += durationMs;
         processedClips += 1;
-        if (candidates.length >= MAX_GENERATED_CUES) break;
+        if (candidates.length >= requestedCueCount) break;
       }
-      if (candidates.length >= MAX_GENERATED_CUES) break;
+      if (candidates.length >= requestedCueCount) break;
     }
 
     const drafts: SubtitleCue[] = [];
-    const limited = candidates.slice(0, MAX_GENERATED_CUES);
+    const limited = [...candidates].sort((left, right) =>
+      Number(right.origin === "AI_SPEECH") - Number(left.origin === "AI_SPEECH") ||
+      left.timelineScope.localeCompare(right.timelineScope) || left.timelineStartMs - right.timelineStartMs,
+    ).slice(0, requestedCueCount);
     const codexAnalyses = storyBackend === "CODEX_CHATGPT"
       ? await this.analyzeCandidatesWithCodex(limited, project, profile.visionModel, signal, onProgress)
       : undefined;
@@ -264,6 +286,142 @@ export class AiStoryAnalysisService {
       accountName: storyBackend === "CODEX_CHATGPT" ? "Codex／ChatGPT 登入（API 額度備援）" : profile.name,
       analysisVersion: AI_STORY_ANALYZER_VERSION,
       providerLabel: storyBackend === "CODEX_CHATGPT" ? "CODEX_CHATGPT" : "OPENAI_API",
+    };
+  }
+
+  /**
+   * Analyze one photo or explicitly selected video frames and return editable
+   * subtitle drafts.  Nothing is written to the manifest until the user saves
+   * the reviewed drafts from the renderer.
+   */
+  async analyzeMaterialForSubtitles(
+    request: MaterialSubtitleAnalysisRequest,
+    signal?: AbortSignal,
+    onProgress: (progress: AiAnalysisProgress) => void = () => undefined,
+  ): Promise<MaterialSubtitleAnalysisResult> {
+    if (!request || typeof request.assetId !== "string" || (request.timelineScope !== "MAIN" && request.timelineScope !== "INTRO")) throw new Error("素材字幕分析要求格式無效。");
+    if (request.provider !== "CHATGPT" && request.provider !== "GEMINI") throw new Error("素材分析方式無效。");
+    const project = this.store.getProject();
+    if (!contextReady(project, "SUBTITLE")) throw new Error("請先在 AI 帳號／故事設定填寫目前簡略主題、故事、人物或地點。");
+    const asset = this.store.getAsset(request.assetId);
+    if (!asset) throw new Error("找不到要分析的來源素材。");
+    if (signal?.aborted) throw new DOMException("素材字幕分析已取消。", "AbortError");
+    const ready = await this.sources.ensureMetadata(asset.id, signal);
+    const durationMs = asset.kind === "IMAGE"
+      ? Math.max(1, ready.imageDurationMs ?? 5_000)
+      : ready.mediaInfo?.durationMs ?? 0;
+    if (asset.kind === "VIDEO" && durationMs <= 0) throw new Error("影片尚未取得有效時長，無法指定影格時間。");
+    const selectedTimes = asset.kind === "IMAGE"
+      ? [0]
+      : [...new Set((request.frameTimesMs ?? []).map((value) => Math.round(Number(value))).filter((value) => Number.isFinite(value)))];
+    if (asset.kind === "VIDEO" && !selectedTimes.length) throw new Error("影片至少要輸入一個影格時間點。");
+    if (selectedTimes.some((value) => value < 0 || value >= durationMs)) throw new Error(`影格時間必須介於 00:00 與 ${Math.ceil(durationMs / 1000)} 秒之間。`);
+    const retainedRange = asset.previewRange ?? { inMs: 0, outMs: durationMs };
+    if (asset.kind === "VIDEO" && selectedTimes.some((value) => value < retainedRange.inMs || value >= retainedRange.outMs)) throw new Error("影格時間必須落在目前素材保留的 IN／OUT 範圍內；若要分析被排除段，請先調整範圍。");
+
+    const fullPlan = buildTimelinePlan(project, { includeIntro: true });
+    const scoped = fullPlan.clips.filter((clip) => clip.scope === request.timelineScope);
+    const scopeOrigin = scoped[0]?.outputStartMs ?? 0;
+    if (!scoped.length) throw new Error(request.timelineScope === "INTRO" ? "目前片頭沒有可分析的片段。" : "目前正片沒有可分析的片段。");
+    const candidates: Candidate[] = [];
+    const warnings: string[] = [];
+    for (const sourceTimeMs of selectedTimes) {
+      const clipIndex = scoped.findIndex((item) => item.assetId === asset.id && sourceTimeMs >= item.inMs && sourceTimeMs < item.outMs);
+      const clip = clipIndex >= 0 ? scoped[clipIndex] : undefined;
+      if (!clip) { warnings.push(`${asset.fileName} 的 ${Math.round(sourceTimeMs / 1000)} 秒不在目前${request.timelineScope === "INTRO" ? "片頭" : "正片"}輸出範圍，已略過。`); continue; }
+      const localTimelineStart = Math.max(0, Math.round(clip.outputStartMs - scopeOrigin + (sourceTimeMs - clip.inMs)));
+      const clipTimelineEnd = Math.round(Math.min(clip.outputEndMs, scoped[clipIndex + 1]?.outputStartMs ?? clip.outputEndMs) - scopeOrigin);
+      const timelineEnd = Math.min(localTimelineStart + (asset.kind === "IMAGE" ? Math.min(durationMs, 4_000) : 3_000), clipTimelineEnd);
+      if (timelineEnd - localTimelineStart < 100) { warnings.push(`${asset.fileName} 的 ${Math.round(sourceTimeMs / 1000)} 秒距離片段尾端太近，無法建立可讀字幕時段，已略過。`); continue; }
+      candidates.push({
+        origin: "AI_VISUAL",
+        timelineScope: request.timelineScope,
+        timelineStartMs: localTimelineStart,
+        timelineEndMs: timelineEnd,
+        sourceAsset: asset,
+        sourceStartMs: sourceTimeMs,
+        sourceEndMs: asset.kind === "IMAGE" ? durationMs : Math.min(clip.outMs, durationMs, sourceTimeMs + 500),
+        transcript: "",
+        analysisFrameTimesMs: asset.kind === "IMAGE" ? undefined : [sourceTimeMs],
+      });
+    }
+    if (!candidates.length) throw new Error("沒有影格落在目前可輸出的時間線內。");
+
+    let account: ReturnType<AiSettingsStore["getRuntimeAccount"]> | undefined;
+    let storyBackend: "OPENAI_API" | "CODEX_CHATGPT" = "OPENAI_API";
+    let geminiAnalyses: Map<number, StoryFrameAnalysis> | undefined;
+    let codexAnalyses: Map<number, StoryFrameAnalysis> | undefined;
+    if (request.provider === "GEMINI") {
+      const gemini = this.settings.getRuntimeGeminiReview();
+      if (!gemini.apiKey) throw new Error("尚未設定 Gemini API Key。請到 AI 帳號／故事設定保存 Gemini 金鑰，再重新分析照片。");
+      geminiAnalyses = await this.analyzeCandidatesWithGemini(candidates, project, { model: gemini.model, apiKey: gemini.apiKey }, signal, onProgress);
+    } else {
+      const snapshot = this.settings.getSnapshot();
+      const profile = snapshot.accounts.find((item) => item.id === snapshot.activeAccountId);
+      if (!profile) throw new Error("找不到作用中的 AI 帳號設定。");
+      const readinessKey = stableKey({ accountId: profile.id, accountUpdatedAt: profile.updatedAt, model: profile.visionModel });
+      if (this.codexFallbackReadinessKey === readinessKey && Date.now() < this.codexFallbackReadinessExpiresAt) {
+        storyBackend = "CODEX_CHATGPT";
+      } else {
+        try {
+          account = this.settings.getRuntimeAccount();
+          if (this.storyReadinessKey !== readinessKey || Date.now() >= this.storyReadinessExpiresAt) {
+            await this.provider.testStoryConnection(account, signal);
+            this.storyReadinessKey = readinessKey;
+            this.storyReadinessExpiresAt = Date.now() + 10 * 60_000;
+          }
+        } catch (openAiError) {
+          try {
+            await this.codexProvider.testConnection(signal);
+            storyBackend = "CODEX_CHATGPT";
+            this.codexFallbackReadinessKey = readinessKey;
+            this.codexFallbackReadinessExpiresAt = Date.now() + 10 * 60_000;
+          } catch (codexError) {
+            throw new Error(`素材影像分析尚未開始。OpenAI API 不可用：${openAiError instanceof Error ? openAiError.message : String(openAiError)}；Codex／ChatGPT 備援也不可用：${codexError instanceof Error ? codexError.message : String(codexError)}`);
+          }
+        }
+      }
+      codexAnalyses = storyBackend === "CODEX_CHATGPT"
+        ? await this.analyzeCandidatesWithCodex(candidates, project, profile.visionModel, signal, onProgress)
+        : undefined;
+    }
+    onProgress({ phase: "SAMPLING_FRAMES", processed: 0, total: candidates.length, currentName: asset.fileName });
+    const drafts: SubtitleCue[] = [];
+    const overlapDetails: MaterialSubtitleAnalysisResult["overlaps"] = [];
+    for (let index = 0; index < candidates.length; index += 1) {
+      if (signal?.aborted) throw new DOMException("素材字幕分析已取消。", "AbortError");
+      const candidate = candidates[index];
+      onProgress({ phase: "MATCHING_STORY", processed: index, total: candidates.length, currentName: candidate.sourceAsset.fileName });
+      const analysis = geminiAnalyses?.get(index) ?? codexAnalyses?.get(index) ?? await this.analyzeCandidate(candidate, project, account!, "SUBTITLE", signal);
+      const text = (analysis.suggestedSubtitle || analysis.visualSummary).trim();
+      if (!text) { warnings.push(`${asset.fileName} 的第 ${index + 1} 個影格沒有產生可用字幕。`); continue; }
+      const cue: SubtitleCue = {
+        id: randomUUID(), startMs: candidate.timelineStartMs, endMs: candidate.timelineEndMs, text,
+        timelineScope: candidate.timelineScope, origin: "AI_VISUAL", reviewStatus: "DRAFT",
+        sourceAssetId: candidate.sourceAsset.id, sourceInMs: candidate.sourceStartMs, sourceOutMs: candidate.sourceEndMs,
+        visualSummary: analysis.visualSummary, eventSummary: analysis.eventSummary, peopleSummary: analysis.peopleSummary,
+        locationSummary: analysis.locationSummary, animalSpecies: analysis.animalSpecies ?? [], speciesExplanation: analysis.speciesExplanation ?? "",
+        topicRelevanceScore: analysis.topicRelevanceScore, transcriptVisualMatchScore: analysis.transcriptVisualMatchScore,
+        aiConfidence: analysis.confidence, aiWarnings: analysis.warnings, aiAnalysisVersion: MATERIAL_SUBTITLE_ANALYZER_VERSION,
+      };
+      const occupied = [...project.subtitleCues, ...drafts].filter((item) => (item.timelineScope ?? "MAIN") === candidate.timelineScope && item.reviewStatus !== "REJECTED");
+      const existingCues = occupied.filter((item) => overlaps(cue, [item])).map((item) => ({
+        id: item.id, startMs: item.startMs, endMs: item.endMs, text: item.text, reviewStatus: item.reviewStatus,
+      }));
+      if (existingCues.length) {
+        overlapDetails.push({ draftId: cue.id, existingCues });
+        warnings.push(`${asset.fileName} 的第 ${index + 1} 個影格與「${existingCues.map((item) => item.text).join("／").slice(0, 120)}」重疊；建議加入字幕頁調整新舊時間。`);
+      }
+      drafts.push(cue);
+    }
+    onProgress({ phase: "SAVING_DRAFTS", processed: candidates.length, total: candidates.length, currentName: "等待使用者確認字幕文字" });
+    return {
+      drafts,
+      overlaps: overlapDetails,
+      providerLabel: request.provider === "GEMINI" ? "GEMINI" : storyBackend,
+      analyzedFrameTimesMs: candidates.map((candidate) => candidate.sourceStartMs),
+      warnings,
+      analysisVersion: MATERIAL_SUBTITLE_ANALYZER_VERSION,
     };
   }
 
@@ -352,6 +510,32 @@ export class AiStoryAnalysisService {
     } catch (error) { await rm(output, { force: true }); throw error; }
   }
 
+  private async analyzeCandidatesWithGemini(
+    candidates: Candidate[],
+    project: ProjectManifest,
+    settings: { model: string; apiKey: string },
+    signal: AbortSignal | undefined,
+    onProgress: (progress: AiAnalysisProgress) => void,
+  ): Promise<Map<number, StoryFrameAnalysis>> {
+    const resultByIndex = new Map<number, StoryFrameAnalysis>();
+    for (let index = 0; index < candidates.length; index += 1) {
+      if (signal?.aborted) throw new DOMException("Gemini 素材分析已取消。", "AbortError");
+      const candidate = candidates[index];
+      const key = stableKey({ version: MATERIAL_SUBTITLE_ANALYZER_VERSION, backend: "GEMINI", source: candidate.sourceAsset.previewCacheKey, start: candidate.sourceStartMs, end: candidate.sourceEndMs, frameTimes: candidate.analysisFrameTimesMs, context: project.aiStoryContext, model: settings.model });
+      const resultPath = assertWithinRoot(path.join(this.cacheRoot, "results"), path.join(this.cacheRoot, "results", `${key}.json`));
+      try {
+        const cached = JSON.parse(await readFile(resultPath, "utf8")) as VisualCache;
+        if (cached.analyzerVersion === MATERIAL_SUBTITLE_ANALYZER_VERSION && cached.result) { resultByIndex.set(index, cached.result); continue; }
+      } catch { /* cache miss */ }
+      onProgress({ phase: "SAMPLING_FRAMES", processed: index, total: candidates.length, currentName: `Gemini 正在分析 ${candidate.sourceAsset.fileName}（${index + 1}/${candidates.length}）` });
+      const framePath = await this.extractStoryboard(candidate.sourceAsset, candidate.sourceStartMs, candidate.sourceEndMs, key, signal, candidate.analysisFrameTimesMs);
+      const result = await this.geminiProvider.analyze(framePath, { sourceFileName: candidate.sourceAsset.fileName, context: project.aiStoryContext, transcript: candidate.transcript }, settings, signal);
+      await this.writeAnalysisCache(resultPath, result, MATERIAL_SUBTITLE_ANALYZER_VERSION);
+      resultByIndex.set(index, result);
+    }
+    return resultByIndex;
+  }
+
   private async analyzeCandidatesWithCodex(
     candidates: Candidate[],
     project: ProjectManifest,
@@ -364,14 +548,14 @@ export class AiStoryAnalysisService {
     for (let index = 0; index < candidates.length; index += 1) {
       if (signal?.aborted) throw new DOMException("AI 字幕分析已取消。", "AbortError");
       const candidate = candidates[index];
-      const key = stableKey({ version: AI_STORY_ANALYZER_VERSION, backend: "CODEX_CHATGPT", mode: "SUBTITLE", source: candidate.sourceAsset.previewCacheKey, start: candidate.sourceStartMs, end: candidate.sourceEndMs, transcript: candidate.transcript, context: project.aiStoryContext, model });
+      const key = stableKey({ version: AI_STORY_ANALYZER_VERSION, backend: "CODEX_CHATGPT", mode: "SUBTITLE", source: candidate.sourceAsset.previewCacheKey, start: candidate.sourceStartMs, end: candidate.sourceEndMs, frameTimes: candidate.analysisFrameTimesMs, transcript: candidate.transcript, context: project.aiStoryContext, model });
       const resultPath = assertWithinRoot(path.join(this.cacheRoot, "results"), path.join(this.cacheRoot, "results", `${key}.json`));
       try {
         const cached = JSON.parse(await readFile(resultPath, "utf8")) as VisualCache;
         if (cached.analyzerVersion === AI_STORY_ANALYZER_VERSION && cached.result) { resultByIndex.set(index, cached.result); continue; }
       } catch { /* cache miss */ }
       onProgress({ phase: "SAMPLING_FRAMES", processed: index, total: candidates.length, currentName: candidate.sourceAsset.fileName });
-      const framePath = await this.extractStoryboard(candidate.sourceAsset, candidate.sourceStartMs, candidate.sourceEndMs, key, signal);
+      const framePath = await this.extractStoryboard(candidate.sourceAsset, candidate.sourceStartMs, candidate.sourceEndMs, key, signal, candidate.analysisFrameTimesMs);
       missing.push({
         index,
         key,
@@ -396,33 +580,33 @@ export class AiStoryAnalysisService {
     return resultByIndex;
   }
 
-  private async writeAnalysisCache(resultPath: string, result: StoryFrameAnalysis): Promise<void> {
+  private async writeAnalysisCache(resultPath: string, result: StoryFrameAnalysis, analyzerVersion = AI_STORY_ANALYZER_VERSION): Promise<void> {
     const partial = `${resultPath}.${process.pid}.${randomUUID()}.partial`;
     try {
-      await writeFile(partial, `${JSON.stringify({ analyzerVersion: AI_STORY_ANALYZER_VERSION, result }, null, 2)}\n`, "utf8");
+      await writeFile(partial, `${JSON.stringify({ analyzerVersion, result }, null, 2)}\n`, "utf8");
       await finalizePartialOutput(partial, resultPath);
     } catch (error) { await rm(partial, { force: true }); throw error; }
   }
 
   private async analyzeCandidate(candidate: Candidate, project: ProjectManifest, account: ReturnType<AiSettingsStore["getRuntimeAccount"]>, mode: "SUBTITLE" | "INTRO", signal?: AbortSignal): Promise<StoryFrameAnalysis> {
-    const key = stableKey({ version: AI_STORY_ANALYZER_VERSION, backend: "OPENAI_API", mode, source: candidate.sourceAsset.previewCacheKey, start: candidate.sourceStartMs, end: candidate.sourceEndMs, transcript: candidate.transcript, context: project.aiStoryContext, model: account.visionModel });
+    const key = stableKey({ version: AI_STORY_ANALYZER_VERSION, backend: "OPENAI_API", mode, source: candidate.sourceAsset.previewCacheKey, start: candidate.sourceStartMs, end: candidate.sourceEndMs, frameTimes: candidate.analysisFrameTimesMs, transcript: candidate.transcript, context: project.aiStoryContext, model: account.visionModel });
     const resultPath = assertWithinRoot(path.join(this.cacheRoot, "results"), path.join(this.cacheRoot, "results", `${key}.json`));
     try {
       const cached = JSON.parse(await readFile(resultPath, "utf8")) as VisualCache;
       if (cached.analyzerVersion === AI_STORY_ANALYZER_VERSION && cached.result) return cached.result;
     } catch { /* cache miss */ }
-    const framePath = await this.extractStoryboard(candidate.sourceAsset, candidate.sourceStartMs, candidate.sourceEndMs, key, signal);
+    const framePath = await this.extractStoryboard(candidate.sourceAsset, candidate.sourceStartMs, candidate.sourceEndMs, key, signal, candidate.analysisFrameTimesMs);
     const frame = `data:image/jpeg;base64,${(await readFile(framePath)).toString("base64")}`;
     const result = await this.provider.analyzeStoryFrames({ mode, transcript: candidate.transcript, frames: [frame], context: project.aiStoryContext, sourceFileName: candidate.sourceAsset.fileName }, account, signal);
     await this.writeAnalysisCache(resultPath, result);
     return result;
   }
 
-  private async extractStoryboard(asset: SourceAsset, startMs: number, endMs: number, key: string, signal?: AbortSignal): Promise<string> {
+  private async extractStoryboard(asset: SourceAsset, startMs: number, endMs: number, key: string, signal?: AbortSignal, requestedFrameTimesMs?: number[]): Promise<string> {
     const output = assertWithinRoot(path.join(this.cacheRoot, "frames"), path.join(this.cacheRoot, "frames", `${key}.jpg`));
     try { await readFile(output); return output; } catch { /* create */ }
     const duration = Math.max(100, endMs - startMs);
-    const times = [startMs + duration * 0.1, startMs + duration * 0.5, startMs + duration * 0.9].map((value) => Math.max(0, value / 1000));
+    const times = (requestedFrameTimesMs?.length ? requestedFrameTimesMs : [startMs + duration * 0.1, startMs + duration * 0.5, startMs + duration * 0.9]).map((value) => Math.max(0, value / 1000));
     const partial = `${output}.${process.pid}.jpg`;
     try {
       if (asset.kind === "IMAGE") {
@@ -430,10 +614,12 @@ export class AiStoryAnalysisService {
         await rename(partial, output);
         return output;
       }
+      const labels = times.map((_time, index) => `[${index}:v]scale=360:240:force_original_aspect_ratio=decrease,pad=360:240:(ow-iw)/2:(oh-ih)/2:black[f${index}]`).join(";");
+      const stack = times.length === 1 ? "[f0]null[out]" : `${times.map((_time, index) => `[f${index}]`).join("")}hstack=inputs=${times.length}[out]`;
       await runProcess(this.ffmpegExecutable, [
         "-hide_banner", "-loglevel", "error", "-nostdin",
         ...times.flatMap((time) => ["-ss", String(time), "-i", asset.sourcePath]),
-        "-filter_complex", "[0:v]scale=360:240:force_original_aspect_ratio=decrease,pad=360:240:(ow-iw)/2:(oh-ih)/2:black[a];[1:v]scale=360:240:force_original_aspect_ratio=decrease,pad=360:240:(ow-iw)/2:(oh-ih)/2:black[b];[2:v]scale=360:240:force_original_aspect_ratio=decrease,pad=360:240:(ow-iw)/2:(oh-ih)/2:black[c];[a][b][c]hstack=inputs=3[out]",
+        "-filter_complex", `${labels};${stack}`,
         "-map", "[out]", "-frames:v", "1", "-q:v", "4", "-y", partial,
       ], signal);
       await rename(partial, output);

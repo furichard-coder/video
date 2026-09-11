@@ -4,6 +4,8 @@ import { mainRenderSelections } from "./editing-rules";
 /** Canonical, deterministic output timeline used by estimates, subtitles and BGM mapping. */
 export interface TimelinePlanClip extends RenderClipSelection {
   scope: "MAIN" | "INTRO";
+  /** Stable identity for an Intro item, including repeated ranges from one source. */
+  segmentId?: string;
   outputStartMs: number;
   outputEndMs: number;
 }
@@ -20,10 +22,10 @@ export interface TimelinePlanOptions {
 }
 
 export function buildTimelinePlan(project: ProjectManifest, options: TimelinePlanOptions = {}): TimelinePlan {
-  const transitionMs = Math.max(0, Math.round((options.transitionSeconds ?? 0) * 1000));
+  const transitionMs = Math.max(0, Math.round((options.transitionSeconds ?? project.timelineTransitionSeconds ?? 0.3) * 1000));
   const source: TimelinePlanClip[] = [];
   if (options.includeIntro) {
-    for (const clip of project.introSegments) source.push({ ...clip, scope: "INTRO", outputStartMs: 0, outputEndMs: 0 });
+    for (const clip of project.introSegments) source.push({ ...clip, segmentId: clip.id, scope: "INTRO", outputStartMs: 0, outputEndMs: 0 });
   }
   for (const clip of mainRenderSelections(project)) source.push({ ...clip, scope: "MAIN", outputStartMs: 0, outputEndMs: 0 });
   let cursor = 0;

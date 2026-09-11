@@ -553,11 +553,10 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                 <div className="ai-section-heading">
                   <div>
                     <span>02</span>
-                    <h3>Gemini 輔助復核（可選）</h3>
+                    <h3>Gemini 圖片辨識與發布復核</h3>
                   </div>
                   <p>
-                    ChatGPT 完成主要草稿後，Gemini 2.5 Flash
-                    可對三張候選畫面、標題與縮圖再做一次選擇與風險提醒；沒有金鑰時會明確略過。
+                    Gemini 會逐張分析照片或指定影片影格的物種、名稱與場景，並簡化成字幕；也可在 ChatGPT 完成發布草稿後復核標題與縮圖。沒有金鑰時不會啟動。
                   </p>
                 </div>
                 <div className="ai-account-form translation-provider-form">
@@ -592,7 +591,7 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                       value={geminiApiKey}
                       placeholder={
                         snapshot.geminiReview?.credentialStatus === "MISSING"
-                          ? "尚未設定；本次會略過 Gemini"
+                          ? "尚未設定；Gemini 圖片分析無法啟動"
                           : "已安全保存（如要更換再輸入）"
                       }
                       onChange={(event) => setGeminiApiKey(event.target.value)}
@@ -610,7 +609,7 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                       }
                       onClick={() => void saveGeminiReview()}
                     >
-                      {geminiBusy ? "保存中…" : "保存 Gemini 輔助設定"}
+                      {geminiBusy ? "保存中…" : "保存 Gemini 設定"}
                     </button>
                     {snapshot.geminiReview?.credentialStatus ===
                       "SAVED_ENCRYPTED" && (
@@ -625,8 +624,7 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                     )}
                   </div>
                   <small className="ai-live-test-note">
-                    Gemini 是輔助審稿者；它推薦的候選仍可在 AI
-                    發布素材頁由您修改。所有發布動作仍需人工確認。
+                    素材頁明確選擇 Gemini 時，只送出該張低解析影格；不送完整原始影片。上方核取方塊只控制發布素材的第二次復核，不會停用你手動選擇的照片／影格分析。
                   </small>
                 </div>
               </section>

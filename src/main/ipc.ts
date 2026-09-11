@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell as electronShell } from "electron";
-import type { AiAccountSaveInput, AiPublishGenerationOptions, AiStoryContext, AiSubtitleGenerationOptions, BackgroundJobKind, BackgroundJobSnapshot, BackgroundJobStatus, BgmTrack, BrowserUploadPlatform, ConcatRenderRequest, ExternalMediaTarget, ExternalPlayerId, ExternalPlayerSettingsUpdate, GeminiReviewSettingsUpdate, IntroSuggestion, MainExclusionRange, MusicSuggestionRequest, PlacementRequest, PreviewVariant, ProjectColorSettings, SortMode, SubtitleCue, SubtitleTimelineScope, ThumbnailRenderRequest, TranslationSettingsUpdate, UserPreferencesUpdate, VoiceInputRequest, VolumeSegment, WatermarkSettings, YoutubeSettingsUpdate, YoutubeUploadRequest, ZoomSegment } from "../shared/domain";
+import type { AiAccountSaveInput, AiPublishGenerationOptions, AiStoryContext, AiSubtitleGenerationOptions, BackgroundJobKind, BackgroundJobSnapshot, BackgroundJobStatus, BgmTrack, BrowserUploadPlatform, ConcatRenderEstimateRequest, ConcatRenderRequest, ExternalMediaTarget, ExternalPlayerId, ExternalPlayerSettingsUpdate, GeminiReviewSettingsUpdate, IntroSuggestion, MainExclusionRange, MaterialSubtitleAnalysisRequest, MusicSuggestionRequest, PlacementRequest, PreviewVariant, ProjectColorSettings, SortMode, SubtitleCue, SubtitleTimelineScope, ThumbnailRenderRequest, TransitionDurationSec, TranslationSettingsUpdate, UserPreferencesUpdate, VoiceInputRequest, VolumeSegment, WatermarkSettings, YoutubeSettingsUpdate, YoutubeUploadRequest, ZoomSegment } from "../shared/domain";
 import { ConcatRenderService } from "./services/concat-render";
 import { IntroAnalyzer } from "./services/intro-analyzer";
 import { PreviewCache } from "./services/preview-cache";
@@ -26,6 +26,8 @@ import { nextAvailableOutputPath, safePreviewFileName } from "./services/output-
 import { MusicSuggestionService } from "./services/music-suggestion";
 import { AiPublishAssetsService } from "./services/ai-publish-assets";
 import { renderThumbnail } from "./services/thumbnail-render";
+import { estimateRenderOnDisk } from "./services/render-estimate";
+import { RenderPowerGuard } from "./services/render-power-guard";
 
 const SORT_MODES = new Set<SortMode>([
   "MANUAL_ORDER",
@@ -35,6 +37,8 @@ const SORT_MODES = new Set<SortMode>([
   "ADDED_ORDER",
 ]);
 const PREVIEW_VARIANTS = new Set<PreviewVariant>(["THUMBNAIL", "IMAGE_PREVIEW", "VIDEO_PROXY"]);
+const RENDER_RESOLUTIONS = new Set(["360P", "480P", "720P", "4K"]);
+const RENDER_CODECS = new Set(["H265_QSV", "H264_QSV", "H265", "H264"]);
 
 export function registerIpc(
   store: ProjectStore,
@@ -57,12 +61,14 @@ export function registerIpc(
   subtitlePreviews: SubtitlePreviewService,
   musicSuggestions: MusicSuggestionService,
   aiPublishAssets: AiPublishAssetsService,
+  renderPowerGuard: RenderPowerGuard,
 ): void {
   let importController: AbortController | undefined;
   let concatController: AbortController | undefined;
   let introController: AbortController | undefined;
   let subtitleExportController: AbortController | undefined;
   let aiSubtitleController: AbortController | undefined;
+  let materialAnalysisController: AbortController | undefined;
   let subtitlePreviewController: AbortController | undefined;
   let voiceInputController: AbortController | undefined;
   let musicSuggestionController: AbortController | undefined;
@@ -143,7 +149,10 @@ export function registerIpc(
   ipcMain.handle("app:get-info", () => ({ version: app.getVersion(), productName: app.getName() }));
   ipcMain.handle("preferences:get", () => userPreferences.snapshot());
   ipcMain.handle("background:get-jobs", () => { pruneBackgroundJobs(); return [...backgroundJobs.values()].sort((left, right) => right.startedAt.localeCompare(left.startedAt)); });
-  ipcMain.handle("preferences:update", (_event, update: UserPreferencesUpdate) => userPreferences.update(update));
+  ipcMain.handle("preferences:update", async (_event, update: UserPreferencesUpdate) => {
+    if (update?.renderDefaults?.transitionSeconds !== undefined) await store.setTimelineTransitionSeconds(update.renderDefaults.transitionSeconds);
+    return userPreferences.update(update);
+  });
   ipcMain.handle("project:get", () => store.getProject());
   ipcMain.handle("project:history-state", () => store.getHistoryState());
   ipcMain.handle("project:undo", () => store.undo());
@@ -218,6 +227,8 @@ export function registerIpc(
     store.setZoomSegments(assetId, segments));
   ipcMain.handle("project:place-asset", (_event, assetId: string, placement: PlacementRequest) => store.placeAsset(assetId, placement));
   ipcMain.handle("project:move-asset", (_event, assetId: string, toIndex: number) => store.moveTimelineAsset(assetId, toIndex));
+  ipcMain.handle("project:set-timeline-transition", (_event, seconds: TransitionDurationSec) => store.setTimelineTransitionSeconds(seconds));
+  ipcMain.handle("subtitle:force-re-review", (_event, scopes: SubtitleTimelineScope[]) => store.forceSubtitleReReview(scopes));
   ipcMain.handle("source:metadata", (_event, assetId: string) => sources.ensureMetadata(assetId));
   ipcMain.handle("project:set-sort", (_event, sortMode: SortMode) => {
     if (!SORT_MODES.has(sortMode)) throw new Error("排序模式無效。");
@@ -288,6 +299,14 @@ export function registerIpc(
     outputTokens.set(token, { outputPath, createdAt: Date.now(), allowOverwrite: false });
     return { token, displayPath: outputPath, automatic: true };
   });
+  ipcMain.handle("concat:estimate", async (_event, request: ConcatRenderEstimateRequest) => {
+    if (!request || typeof request.outputToken !== "string") throw new Error("轉檔預估要求格式無效。");
+    const selectedOutput = outputTokens.get(request.outputToken);
+    if (!selectedOutput || Date.now() - selectedOutput.createdAt > 30 * 60 * 1000) throw new Error("輸出位置授權已失效，請重新選擇儲存位置。");
+    if (!RENDER_RESOLUTIONS.has(request.resolution)) throw new Error("預估解析度無效。");
+    if (!RENDER_CODECS.has(request.videoCodec)) throw new Error("預估影片格式無效。");
+    return estimateRenderOnDisk(selectedOutput.outputPath, request.expectedDurationMs, request.resolution, request.videoCodec);
+  });
   ipcMain.handle("concat:start", async (event, request: ConcatRenderRequest) => {
     if (concatController) throw new Error("已有一個串連預覽正在產出，請先等待或取消。");
     if (!request || typeof request.outputToken !== "string") throw new Error("串連預覽要求格式無效。");
@@ -299,6 +318,10 @@ export function registerIpc(
     if (!selectedOutput.allowOverwrite && await stat(selectedOutput.outputPath).catch(() => undefined)) {
       throw new Error("自動產生的檔名已被其他程式使用，請按『重新產生檔名』後再試；既有檔案不會被覆寫。");
     }
+    if (!RENDER_RESOLUTIONS.has(request.resolution) || (request.videoCodec !== undefined && !RENDER_CODECS.has(request.videoCodec))) throw new Error("轉檔解析度或影片格式無效。");
+    const preflight = await estimateRenderOnDisk(selectedOutput.outputPath, request.estimatedDurationMs ?? 0, request.resolution, request.videoCodec ?? "H264");
+    if (!preflight.canRender) throw new Error(preflight.warning ?? "輸出磁碟空間不足 1 GB，本次不會開始轉檔。");
+    const releasePowerGuard = renderPowerGuard.acquire();
     const controller = new AbortController();
     concatController = controller;
     const backgroundJobId = beginBackgroundJob("CONCAT_RENDER", "片頭／正片預覽產出");
@@ -323,6 +346,7 @@ export function registerIpc(
     } finally {
       event.sender.removeListener("destroyed", cancelIfRendererCloses);
       if (concatController === controller) concatController = undefined;
+      releasePowerGuard();
     }
   });
   ipcMain.handle("concat:cancel", () => concatController?.abort());
@@ -575,6 +599,27 @@ export function registerIpc(
     }
   });
   ipcMain.handle("subtitle:ai-cancel", () => aiSubtitleController?.abort());
+  ipcMain.handle("subtitle:material-analyze", async (event, request: MaterialSubtitleAnalysisRequest) => {
+    if (materialAnalysisController) throw new Error("素材影像分析已在進行中。");
+    const controller = new AbortController(); materialAnalysisController = controller;
+    const backgroundJobId = beginBackgroundJob("AI_MATERIAL_ANALYSIS", "素材影像／物種字幕分析");
+    const cancelIfRendererCloses = () => controller.abort(); event.sender.once("destroyed", cancelIfRendererCloses);
+    try {
+      const result = await aiStory.analyzeMaterialForSubtitles(request, controller.signal, (progress) => {
+        updateBackgroundJob(backgroundJobId, { percent: progress.total ? Math.round(progress.processed / progress.total * 100) : 0, detail: progress.currentName ?? progress.phase });
+        if (!event.sender.isDestroyed()) event.sender.send("ai:analysis-progress", progress);
+      });
+      finishBackgroundJob(backgroundJobId, "COMPLETED", { detail: `已產生 ${result.drafts.length} 筆待確認字幕` });
+      return result;
+    } catch (error) {
+      finishBackgroundJob(backgroundJobId, error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED", { error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    } finally {
+      event.sender.removeListener("destroyed", cancelIfRendererCloses);
+      if (materialAnalysisController === controller) materialAnalysisController = undefined;
+    }
+  });
+  ipcMain.handle("subtitle:material-cancel", () => materialAnalysisController?.abort());
   ipcMain.handle("subtitle:build-intro-preview", async (event, includeBgm: boolean = false) => {
     if (subtitlePreviewController) throw new Error("480P 片頭字幕預覽正在建立中。");
     if (typeof includeBgm !== "boolean") throw new Error("片頭配樂預覽設定無效。");
@@ -591,7 +636,7 @@ export function registerIpc(
         outputPath: result.outputPath,
         sizeBytes: result.sizeBytes,
         expectedDurationMs: result.durationMs,
-        transitionSeconds: 0.3,
+        transitionSeconds: store.getProject().timelineTransitionSeconds,
         resolution: "480P",
         purpose: "INTRO",
         bgmAppliedCount: includeBgm ? store.getProject().bgmTracks.length : 0,
@@ -666,7 +711,7 @@ export function registerIpc(
   ipcMain.handle("youtube:upload", async (event, request: YoutubeUploadRequest) => {
     if (youtubeUploadController) throw new Error("已有 YouTube 上傳正在進行中。");
     const output = request && typeof request.jobId === "string" ? await outputHistory.get(request.jobId) : undefined;
-    if (!output || output.purpose === "INTRO" || output.purpose === "CLIP") throw new Error("片頭／單一時間段預覽不可直接當正片上傳；請選擇正片或已確認的既有 MP4。");
+    if (!output || output.purpose === "CLIP") throw new Error("單一時間段預覽不可直接上傳；請選擇正片、片頭、Shorts 或已確認的既有 MP4。");
     const controller = new AbortController(); youtubeUploadController = controller;
     const cancelIfRendererCloses = () => controller.abort(); event.sender.once("destroyed", cancelIfRendererCloses);
     try {
@@ -683,7 +728,7 @@ export function registerIpc(
   ipcMain.handle("youtube:open-video", (_event, videoId: string) => youtubeUpload.openVideo(videoId));
   ipcMain.handle("youtube:prepare-chrome-handoff", async (_event, jobId: string) => {
     const output = typeof jobId === "string" ? await outputHistory.get(jobId) : undefined;
-    if (!output || output.purpose === "INTRO" || output.purpose === "CLIP") throw new Error("片頭／單一時間段預覽不可直接當正片投稿；請選擇正片或已確認的既有 MP4。");
+    if (!output || output.purpose === "CLIP") throw new Error("單一時間段預覽不可直接上傳；請選擇正片、片頭、Shorts 或已確認的既有 MP4。");
     return platformUploadHandoff.openYoutubeChrome(output.outputPath);
   });
   ipcMain.handle("platform-upload:open", async (_event, jobId: string, platform: BrowserUploadPlatform) => {

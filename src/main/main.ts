@@ -1,6 +1,6 @@
 import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
-import { app, BrowserWindow, clipboard, ipcMain, protocol, safeStorage, session, shell } from "electron";
+import { app, BrowserWindow, clipboard, ipcMain, powerSaveBlocker, protocol, safeStorage, screen, session, shell } from "electron";
 import { registerIpc } from "./ipc";
 import { ConcatRenderService } from "./services/concat-render";
 import { IntroAnalyzer } from "./services/intro-analyzer";
@@ -25,6 +25,8 @@ import { SubtitlePreviewService } from "./services/subtitle-preview";
 import { MusicSuggestionService } from "./services/music-suggestion";
 import { AiPublishAssetsService } from "./services/ai-publish-assets";
 import type { CredentialProtector } from "./services/ai-settings";
+import { RenderPowerGuard } from "./services/render-power-guard";
+import { moveWindowsCursor, safeActionCenter } from "./services/safe-cursor";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -53,6 +55,7 @@ if (process.env.APP_TEST_USER_DATA_PATH) {
 
 let mainWindow: BrowserWindow | undefined;
 let applicationQuitting = false;
+const renderPowerGuard = new RenderPowerGuard(powerSaveBlocker);
 const confirmedCloseWindowIds = new Set<number>();
 
 app.on("before-quit", () => { applicationQuitting = true; });
@@ -82,6 +85,9 @@ function createWindow(): BrowserWindow {
     if (automated || applicationQuitting || confirmedCloseWindowIds.delete(window.id)) return;
     event.preventDefault();
     window.webContents.send("app:close-requested");
+  });
+  window.on("query-session-end", (event) => {
+    if (renderPowerGuard.isActive) event.preventDefault();
   });
 
   const devServer = process.env.VITE_DEV_SERVER_URL;
@@ -163,6 +169,7 @@ void app.whenReady().then(async () => {
   const platformUploadHandoff = new PlatformUploadHandoffService({ openExternal: (url) => shell.openExternal(url), showItemInFolder: (filePath) => shell.showItemInFolder(filePath), copyText: (value) => clipboard.writeText(value), openYoutubeInChrome: async (url) => { await youtubeBrowsers.open("CHROME", url); } });
   const userPreferences = new UserPreferencesStore(app.getPath("userData"));
   await userPreferences.initialize();
+  await store.setTimelineTransitionSeconds(userPreferences.snapshot().renderDefaults.transitionSeconds);
   const aiStory = new AiStoryAnalysisService(path.join(app.getPath("userData"), "cache", "ai-story"), store, sources, aiSettings);
   await aiStory.initialize();
   const aiPublishAssets = new AiPublishAssetsService(store, sources, previews, aiStory, aiSettings);
@@ -192,13 +199,26 @@ void app.whenReady().then(async () => {
   await playerSettings.initialize();
   const externalPlayers = new ExternalPlayerService(store, sources, previews, playerSettings, (targetPath) => shell.openPath(targetPath));
   const bgm = new BgmService(store, new MediaProbe());
-  registerIpc(store, sources, previews, concatRenderer, introAnalyzer, playerSettings, externalPlayers, bgm, aiSettings, aiStory, translationSettings, subtitleTranslation, youtubeSettings, youtubeUpload, platformUploadHandoff, outputHistory, userPreferences, subtitlePreviews, musicSuggestions, aiPublishAssets);
+  registerIpc(store, sources, previews, concatRenderer, introAnalyzer, playerSettings, externalPlayers, bgm, aiSettings, aiStory, translationSettings, subtitleTranslation, youtubeSettings, youtubeUpload, platformUploadHandoff, outputHistory, userPreferences, subtitlePreviews, musicSuggestions, aiPublishAssets, renderPowerGuard);
   ipcMain.removeAllListeners("app:confirm-close");
   ipcMain.on("app:confirm-close", (event) => {
     const target = BrowserWindow.fromWebContents(event.sender);
     if (!target || target.isDestroyed()) return;
+    if (renderPowerGuard.isActive) {
+      target.webContents.send("app:close-requested");
+      return;
+    }
     confirmedCloseWindowIds.add(target.id);
     target.close();
+  });
+  ipcMain.removeAllListeners("app:move-cursor-to-safe-action");
+  ipcMain.on("app:move-cursor-to-safe-action", (event, rect: { x: number; y: number; width: number; height: number }) => {
+    const target = BrowserWindow.fromWebContents(event.sender);
+    if (!target || target.isDestroyed() || typeof rect !== "object" || rect === null) return;
+    const [rendererWidth, rendererHeight] = target.getContentSize();
+    const point = safeActionCenter(target.getContentBounds(), { width: rendererWidth, height: rendererHeight }, rect);
+    if (!point) return;
+    moveWindowsCursor(screen.dipToScreenPoint(point));
   });
   mainWindow = createWindow();
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {

@@ -276,9 +276,12 @@ export function validateSubtitleCues(cues: SubtitleCue[]): SubtitleCue[] {
     };
   }).sort((a, b) => (a.timelineScope === "INTRO" ? 0 : 1) - (b.timelineScope === "INTRO" ? 0 : 1) || a.startMs - b.startMs || a.endMs - b.endMs);
   for (const timelineScope of ["INTRO", "MAIN"] as const) {
-    const scoped = normalized.filter((cue) => cue.timelineScope === timelineScope);
-    for (let index = 1; index < scoped.length; index += 1) {
-      if (scoped[index].startMs < scoped[index - 1].endMs) throw new Error(`${timelineScope === "INTRO" ? "片頭" : "正片"}字幕 cue 不可重疊；請調整時間。`);
+    const scoped = normalized.filter((cue) => cue.timelineScope === timelineScope && cue.reviewStatus !== "REJECTED");
+    for (let index = 0; index < scoped.length; index += 1) {
+      for (let following = index + 1; following < scoped.length && scoped[following].startMs < scoped[index].endMs; following += 1) {
+        const bothConfirmed = (scoped[index].reviewStatus ?? "CONFIRMED") === "CONFIRMED" && (scoped[following].reviewStatus ?? "CONFIRMED") === "CONFIRMED";
+        if (bothConfirmed) throw new Error(`${timelineScope === "INTRO" ? "片頭" : "正片"}已確認字幕不可重疊；請先將其中一筆改為待確認並調整時間。`);
+      }
     }
   }
   return normalized;

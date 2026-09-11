@@ -6,8 +6,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   buildConcatFilterGraph,
   buildWatermarkFilterChain,
+  concatInputStartTimesMs,
   ConcatRenderService,
   runFfmpegWithProgress,
+  selectBgmTracksForScopes,
+  validateAudioProtectionOptions,
+  validateBgmScopeSelection,
   validateMainStartCardOptions,
 } from "../src/main/services/concat-render";
 import { MediaProbe } from "../src/main/services/media-probe";
@@ -22,6 +26,7 @@ let firstPath: string;
 let secondPath: string;
 let outputPath: string;
 let shutterPath: string;
+let introPath: string;
 let store: ProjectStore;
 let sources: SourceService;
 let introStore: ProjectStore;
@@ -66,7 +71,7 @@ beforeAll(async () => {
   sources = new SourceService(store, new MediaProbe());
   await sources.importSelected([firstPath, secondPath]);
   await Promise.all(store.getProject().sources.map((asset) => sources.ensureMetadata(asset.id)));
-  const introPath = path.join(root, "intro-long.mp4");
+  introPath = path.join(root, "intro-long.mp4");
   await runProcess("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=30", "-f", "lavfi", "-i", "sine=frequency=550:sample_rate=48000", "-t", "8", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "-y", introPath]);
   introStore = new ProjectStore(path.join(root, "intro-app-data")); await introStore.initialize();
   introSources = new SourceService(introStore, new MediaProbe()); await introSources.importSelected([introPath]);
@@ -91,6 +96,39 @@ describe("concat preview filter plan", () => {
     expect(plan.filterGraph).toContain("duration=0.5:offset=9.5");
     expect(plan.filterGraph).toContain("duration=0.5:offset=29");
     expect(plan.filterGraph).toContain("anullsrc=r=48000:cl=stereo");
+  });
+
+  it("builds bounded voice ducking, speech-band EQ and the selected peak ceiling by default", () => {
+    const plan = buildConcatFilterGraph([{ sourcePath: "voice.mp4", durationMs: 4_000, hasAudio: true }], 0.3, "480P");
+    expect(plan.filterGraph).toContain("highpass=f=1000,lowpass=f=4000");
+    expect(plan.filterGraph).toContain("sidechaincompress=threshold=0.09:ratio=12:attack=45:release=500");
+    expect(plan.filterGraph).toContain("volume=0.501187");
+    expect(plan.filterGraph).toContain("equalizer=f=2500:t=q:w=0.8:g=-1.5");
+    expect(plan.filterGraph).toContain("acompressor=threshold=0.501187");
+    expect(plan.filterGraph).toContain("alimiter=limit=0.891251");
+    const disabled = buildConcatFilterGraph([{ sourcePath: "voice.mp4", durationMs: 4_000, hasAudio: true }], 0.3, "480P", [], 100, false, {
+      enabled: false, autoDuckVoiceAndSuddenSounds: true, preserveDistantCrowdAmbience: true,
+      preserveSceneMatchedSounds: true, eqEnabled: true, maxDuckingDb: 6, eqReductionDb: 1.5, peakCeilingDb: -1,
+    });
+    expect(disabled.filterGraph).not.toContain("sidechaincompress");
+    expect(disabled.filterGraph).not.toContain("equalizer=f=2500");
+    expect(disabled.filterGraph).toContain("alimiter=limit=0.95");
+    expect(() => validateAudioProtectionOptions({ ...validateAudioProtectionOptions(), maxDuckingDb: 8 })).toThrow(/3–6 dB/);
+  });
+
+  it("maps independent Intro/Main BGM scopes to the prompt-page boundaries", () => {
+    const mainStart = { durationSeconds: 3, line1: "正片", line2: "即將開始", line1FontSize1080p: 114, line2FontSize1080p: 90, lineGap1080p: 122, overlayOpacityPercent: 62, transitionStyle: "DISSOLVE" as const, sourceDurationMs: 4_000, line1TextFilePath: "one.txt", line2TextFilePath: "two.txt", fontFilePath: "font.ttc" };
+    const starts = concatInputStartTimesMs([
+      { sourcePath: "intro.mp4", durationMs: 4_000, hasAudio: true },
+      { sourcePath: "prompt.mp4", durationMs: 3_000, hasAudio: false, mainStartCard: mainStart },
+      { sourcePath: "main.mp4", durationMs: 8_000, hasAudio: true },
+    ], 0.5);
+    expect(starts).toEqual([0, 3_500, 6_000]);
+    const track = { id: "music", sourcePath: "music.mp3", fileName: "music.mp3", sizeBytes: 1, durationMs: 10_000, sourceInMs: 0, sourceOutMs: 10_000, timelineInMs: 0, timelineOutMs: 10_000, fadeInMs: 200, fadeOutMs: 200, volumePercent: 100, sourcePolicy: "READ_ONLY" as const, addedAt: "2026-09-11T00:00:00.000Z" };
+    expect(selectBgmTracksForScopes([track], { intro: true, main: false }, { introEndMs: starts[1], mainStartMs: starts[2] })).toMatchObject([{ timelineInMs: 0, timelineOutMs: 3_500, sourceOutMs: 3_500, fadeOutMs: 1_500 }]);
+    expect(selectBgmTracksForScopes([track], { intro: false, main: true }, { introEndMs: starts[1], mainStartMs: starts[2] })).toMatchObject([{ timelineInMs: 6_000, timelineOutMs: 16_000 }]);
+    expect(selectBgmTracksForScopes([track], { intro: true, main: true }, { introEndMs: starts[1], mainStartMs: starts[2] })).toEqual([track]);
+    expect(validateBgmScopeSelection({ intro: false, main: true })).toEqual({ intro: false, main: true });
   });
 
   it("rejects a transition that is not shorter than every clip", () => {
@@ -206,6 +244,7 @@ describe("concat preview integration", () => {
       signal,
     ) => {
       await writeFile(args.at(-1)!, "partial output");
+      if (signal?.aborted) throw new DOMException("已取消", "AbortError");
       await new Promise<void>((_resolve, reject) => {
         signal?.addEventListener("abort", () => reject(new DOMException("已取消", "AbortError")), { once: true });
       });
@@ -390,6 +429,35 @@ describe("concat preview integration", () => {
     expect(ffmpegArgs.slice(0, inputPositions[2] + 2).filter((item) => item === "3.2")).toHaveLength(2);
   });
 
+  it("ends Intro-only BGM before the Main-start prompt and shifts Main-only BGM past it", async () => {
+    const asset = introStore.getProject().sources[0];
+    const introClips = [{ id: "bgm-scope-intro", assetId: asset.id, fileName: asset.fileName, inMs: 0, outMs: 3_200, score: 90, reasons: ["開場"] }];
+    await introStore.setIntroSegments(introClips);
+    const bgmPath = path.join(root, "scope-music.mp3");
+    await writeFile(bgmPath, "read-only-test-music");
+    const track = { id: "scope-music", sourcePath: bgmPath, fileName: "scope-music.mp3", sizeBytes: 20, durationMs: 8_000, sourceInMs: 0, sourceOutMs: 8_000, timelineInMs: 0, timelineOutMs: 8_000, fadeInMs: 0, fadeOutMs: 200, volumePercent: 35, sourcePolicy: "READ_ONLY" as const, addedAt: "2026-09-11T00:00:00.000Z" };
+    await introStore.addBgmTracks([track]);
+    const clips = [...introClips, ...mainRenderSelections(introStore.getProject())];
+    const graphs: string[] = [];
+    const fakeRunner = async (_executable: string, args: string[], expectedDurationMs: number) => {
+      const scriptIndex = args.indexOf("-filter_complex_script");
+      graphs.push(await readFile(args[scriptIndex + 1], "utf8"));
+      await writeFile(args.at(-1)!, "valid-bgm-scope-preview");
+      return { cancelled: false, outTimeMs: expectedDurationMs };
+    };
+    const baseRequest = { orderedAssetIds: clips.map((clip) => clip.assetId), clipSelections: clips, transitionSeconds: 0.3 as const, resolution: "480P" as const, purpose: "CONCAT" as const, prependIntro: true, includeBgm: true, mainStartCard: { durationSeconds: 3, line1: "正片", line2: "即將開始", line1FontSize1080p: 114, line2FontSize1080p: 90, lineGap1080p: 122, overlayOpacityPercent: 62, transitionStyle: "DISSOLVE" as const } };
+    const renderer = new ConcatRenderService(introStore, introSources, "fake-ffmpeg", fakeRunner);
+    const introOnly = await renderer.render({ outputToken: "intro-bgm-only", ...baseRequest, bgmScopes: { intro: true, main: false } }, path.join(root, "intro-bgm-only.mp4"));
+    const mainOnly = await renderer.render({ outputToken: "main-bgm-only", ...baseRequest, bgmScopes: { intro: false, main: true } }, path.join(root, "main-bgm-only.mp4"));
+    expect(introOnly.bgmScopesApplied).toEqual({ intro: true, main: false });
+    expect(graphs[0]).toContain("atrim=start=0:end=2.9");
+    expect(graphs[0]).toContain("afade=t=out:st=1.4:d=1.5");
+    expect(mainOnly.bgmScopesApplied).toEqual({ intro: false, main: true });
+    expect(graphs[1]).toContain("adelay=5600:all=1");
+    await introStore.removeBgmTrack(track.id);
+    await rm(bgmPath);
+  });
+
   it("renders the required 3-second Main-start prompt from a read-only source with two Chinese text rows", async () => {
     const asset = introStore.getProject().sources[0];
     const introClips = [{ id: "title-card-intro", assetId: asset.id, fileName: asset.fileName, inMs: 0, outMs: 3_200, score: 90, reasons: ["開場"] }];
@@ -566,7 +634,7 @@ describe("concat preview integration", () => {
     const mixedOutput = path.join(root, "mixed-bgm.mp4");
     const result = await new ConcatRenderService(store, sources).render({ outputToken: "bgm", ...currentMainRequest(), transitionSeconds: 0.3, resolution: "360P" }, mixedOutput);
     const stats = await volumeStats(mixedOutput, 0.2, 0.8);
-    expect(result.bgmAppliedCount).toBe(1); expect(result.mixPolicy).toBe("ORIGINAL_PLUS_BGM_LIMITED_0_95");
+    expect(result).toMatchObject({ bgmAppliedCount: 1, mixPolicy: "VOICE_DUCK_EQ_COMPRESS_LIMIT", audioProtectionApplied: true, audioPeakCeilingDb: -1, bgmScopesApplied: { intro: false, main: true } });
     expect(result.expectedDurationMs).toBe(1_800);
     expect(stats.max).toBeLessThanOrEqual(0.5); expect(stats.mean).toBeGreaterThan(-20);
     expect(await sha256(bgmPath)).toBe(bgmHash);
@@ -613,5 +681,34 @@ describe("concat preview integration", () => {
     expect(Number(/lavfi\.signalstats\.YMAX=(\d+)/.exec(signal.stdout)?.[1] ?? 0)).toBeGreaterThan(150);
     expect(await sha256(firstPath)).toBe(before);
     expect((await readdir(path.join(root, "subtitle-cache"))).filter((name) => name.endsWith(".ass"))).toEqual([]);
+  }, 45_000);
+
+  it("actually burns confirmed Intro subtitles into an Intro-only YouTube test preview", async () => {
+    const introSubtitleStore = new ProjectStore(path.join(root, "intro-subtitle-app-data")); await introSubtitleStore.initialize();
+    const introSubtitleSources = new SourceService(introSubtitleStore, new MediaProbe()); await introSubtitleSources.importSelected([introPath]);
+    const source = await introSubtitleSources.ensureMetadata(introSubtitleStore.getProject().sources[0].id);
+    const segment = { id: "intro-subtitle-segment", assetId: source.id, fileName: source.fileName, inMs: 0, outMs: 3_200, score: 90, reasons: ["片頭測試"] };
+    await introSubtitleStore.setIntroSegments([segment]);
+    await introSubtitleStore.setSubtitleCues([{ id: "intro-confirmed", startMs: 150, endMs: 1_050, text: "片頭字幕測試", timelineScope: "INTRO", reviewStatus: "CONFIRMED" }]);
+    const before = await sha256(introPath);
+    const translations = { translate: async () => ({ byLanguage: { "zh-TW": ["片頭字幕測試"] }, providers: ["ORIGINAL"] }) };
+    const output = path.join(root, "intro-subtitle-youtube-preview.mp4");
+    const result = await new ConcatRenderService(introSubtitleStore, introSubtitleSources, undefined, undefined, undefined, translations as never, path.join(root, "intro-subtitle-cache")).render({
+      outputToken: "intro-subtitle",
+      orderedAssetIds: [source.id],
+      clipSelections: [segment],
+      transitionSeconds: 0.3,
+      resolution: "360P",
+      purpose: "INTRO",
+      subtitleBurnIn: {
+        enabled: true,
+        tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }],
+        styleProfile: { verticalPositionPercent: 82, fontSizePx: 36, textColor: "#FFFFFF", shadowEnabled: true, outlineWidthPx: 2 },
+      },
+    }, output);
+    expect(result).toMatchObject({ purpose: "INTRO", subtitleBurnedLanguages: ["zh-TW"] });
+    expect(await new MediaProbe().probe(output)).toMatchObject({ width: 640, height: 360, videoCodec: "h264" });
+    expect(await sha256(introPath)).toBe(before);
+    expect((await readdir(path.join(root, "intro-subtitle-cache"))).filter((name) => name.endsWith(".ass"))).toEqual([]);
   }, 45_000);
 });

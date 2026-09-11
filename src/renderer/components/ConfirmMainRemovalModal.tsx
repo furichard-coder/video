@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { ProjectManifest, SourceAsset } from "../../shared/domain";
+import { SafeDefaultButton } from "./SafeDefaultButton";
 
 interface Props {
   asset: SourceAsset;
@@ -28,7 +29,7 @@ export function ConfirmMainRemovalModal({ asset, project, busy, onCancel, onConf
         <ul><li>手動順序與素材安插決策：{placementCount} 筆相關紀錄</li><li>影片內照片／影片安插：{mediaInsertionCount} 項（會隨此影片暫停進入正片，恢復影片時一併恢復）</li><li>音量區段：{asset.volumeSegments?.length ?? 0} 段</li><li>正片排除區段：{asset.mainExclusionRanges?.length ?? 0} 段</li></ul>
         <p>Intro 引用與正片獨立：{introCount ? `現有 ${introCount} 個片頭區段會保留。` : "目前沒有片頭區段引用此來源。"}</p>
       </div>
-      <footer><button className="secondary-button" type="button" autoFocus disabled={busy} onClick={onCancel}>取消，保留正片</button><button className="danger-button" type="button" disabled={busy} onClick={onConfirm} aria-label={`確認從正片移除 ${asset.fileName}`}>{busy ? "正在移除…" : "確認從正片移除"}</button></footer>
+      <footer><SafeDefaultButton className="secondary-button" type="button" disabled={busy} onClick={onCancel}>取消，保留正片</SafeDefaultButton><button className="danger-button" type="button" disabled={busy} onClick={onConfirm} aria-label={`確認從正片移除 ${asset.fileName}`}>{busy ? "正在移除…" : "確認從正片移除"}</button></footer>
     </section>
   </div>;
 }

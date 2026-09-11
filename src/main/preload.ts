@@ -8,8 +8,10 @@ import type {
   AiStoryContext,
   AiPublishGenerationOptions,
   AiSubtitleGenerationOptions,
+  MaterialSubtitleAnalysisRequest,
   ConcatRenderProgress,
   ConcatRenderRequest,
+  ConcatRenderEstimateRequest,
   ExternalMediaTarget,
   ExternalPlayerId,
   ExternalPlayerSettingsUpdate,
@@ -37,12 +39,14 @@ import type {
   TranslationSettingsUpdate,
   VoiceInputRequest,
   ThumbnailRenderRequest,
+  TransitionDurationSec,
   PublishProgress,
 } from "../shared/domain";
 
 const api: AppApi = {
   getAppInfo: () => ipcRenderer.invoke("app:get-info"),
   confirmAppClose: () => ipcRenderer.send("app:confirm-close"),
+  moveCursorToSafeAction: (rect) => ipcRenderer.send("app:move-cursor-to-safe-action", rect),
   onAppCloseRequested: (callback: () => void) => {
     ipcRenderer.on("app:close-requested", () => callback());
   },
@@ -87,6 +91,8 @@ const api: AppApi = {
   setZoomSegments: (assetId: string, segments: ZoomSegment[]) => ipcRenderer.invoke("main:set-zoom-segments", assetId, segments),
   placeAsset: (assetId: string, placement: PlacementRequest) => ipcRenderer.invoke("project:place-asset", assetId, placement),
   moveTimelineAsset: (assetId: string, toIndex: number) => ipcRenderer.invoke("project:move-asset", assetId, toIndex),
+  setTimelineTransitionSeconds: (seconds: TransitionDurationSec) => ipcRenderer.invoke("project:set-timeline-transition", seconds),
+  forceSubtitleReReview: (scopes: SubtitleTimelineScope[]) => ipcRenderer.invoke("subtitle:force-re-review", scopes),
   setSortMode: (sortMode: SortMode) => ipcRenderer.invoke("project:set-sort", sortMode),
   ensureMetadata: (assetId: string) => ipcRenderer.invoke("source:metadata", assetId),
   ensurePreview: (assetId: string, variant: PreviewVariant) =>
@@ -99,6 +105,7 @@ const api: AppApi = {
     ipcRenderer.invoke("preview:cancel-clip", assetId, inMs, outMs),
   chooseConcatOutput: (suggestedName: string) => ipcRenderer.invoke("concat:choose-output", suggestedName),
   prepareConcatOutput: (suggestedName: string) => ipcRenderer.invoke("concat:prepare-output", suggestedName),
+  estimateConcatRender: (request: ConcatRenderEstimateRequest) => ipcRenderer.invoke("concat:estimate", request),
   startConcatRender: (request: ConcatRenderRequest) => ipcRenderer.invoke("concat:start", request),
   cancelConcatRender: () => ipcRenderer.invoke("concat:cancel"),
   revealConcatOutput: (jobId: string) => ipcRenderer.invoke("concat:reveal", jobId),
@@ -130,6 +137,8 @@ const api: AppApi = {
   onPublishProgress: (callback: (progress: PublishProgress) => void) => { ipcRenderer.on("publish:progress", (_event, progress: PublishProgress) => callback(progress)); },
   clearPublishProgressListeners: () => ipcRenderer.removeAllListeners("publish:progress"),
   generateAiSubtitles: (options: AiSubtitleGenerationOptions) => ipcRenderer.invoke("subtitle:ai-generate", options),
+  analyzeMaterialForSubtitles: (request: MaterialSubtitleAnalysisRequest) => ipcRenderer.invoke("subtitle:material-analyze", request),
+  cancelMaterialSubtitleAnalysis: () => ipcRenderer.invoke("subtitle:material-cancel"),
   buildSubtitleIntroPreview: (includeBgm = false) => ipcRenderer.invoke("subtitle:build-intro-preview", includeBgm),
   cancelSubtitleIntroPreview: () => ipcRenderer.invoke("subtitle:cancel-intro-preview"),
   cancelAiSubtitles: () => ipcRenderer.invoke("subtitle:ai-cancel"),

@@ -89,10 +89,17 @@ describe("preview cache integration", () => {
     const clipKey = /video_clip_proxy\/([a-f0-9]{64})/.exec(created.url)?.[1];
     expect(clipKey).toBeTruthy();
     const clipPath = await previews.resolveClipExisting(video.id, clipKey!);
+    const marker = JSON.parse(await readFile(path.join(path.dirname(clipPath), `clip-${clipKey}.json`), "utf8")) as { outputSizeBytes?: number; outputModifiedAt?: string };
+    expect(marker.outputSizeBytes).toBe((await stat(clipPath)).size);
+    expect(marker.outputModifiedAt).toBeTruthy();
     const clipInfo = await new MediaProbe().probe(clipPath);
     expect(clipInfo.durationMs).toBeGreaterThanOrEqual(500);
     expect(clipInfo.durationMs).toBeLessThanOrEqual(750);
     expect(clipInfo.videoCodec).toBe("h264");
+    expect(await sha256(videoPath)).toBe(beforeHash);
+    await writeFile(clipPath, "broken");
+    expect((await previews.ensureClip(video.id, 200, 800)).cacheStatus).toBe("CREATED");
+    expect((await new MediaProbe().probe(clipPath)).videoCodec).toBe("h264");
     expect(await sha256(videoPath)).toBe(beforeHash);
   }, 30_000);
 

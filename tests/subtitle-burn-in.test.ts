@@ -24,7 +24,32 @@ describe("subtitle ASS burn-in", () => {
       styleProfile: { verticalPositionPercent: 24, fontSizePx: 36, textColor: "#FFE066", shadowEnabled: false, outlineWidthPx: 3 },
     }, { byLanguage: { "zh-TW": ["樣式一致"] }, providers: ["ORIGINAL"] });
     expect(result.content).toContain("&H0066E0FF");
-    expect(result.content).toContain(",16,");
+    expect(result.content).toContain(",36,&H0066E0FF");
+    expect(result.content).toContain(",3,0,2,");
+    expect(result.content).toContain("\\an8\\pos");
+
+    const fourK = buildSubtitleAss(project, [{ assetId: asset.id, inMs: 0, outMs: 10_000 }], 0, 0.3, "4K", {
+      enabled: true,
+      tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }],
+      styleProfile: { verticalPositionPercent: 24, fontSizePx: 36, textColor: "#FFE066", shadowEnabled: false, outlineWidthPx: 3 },
+    }, { byLanguage: { "zh-TW": ["樣式一致"] }, providers: ["ORIGINAL"] });
+    expect(fourK.content).toContain(",162,&H0066E0FF");
+  });
+
+  it("uses the 480p preview size only for the primary track and preserves translated-track sizing", () => {
+    const result = buildSubtitleAss(project, [{ assetId: asset.id, inMs: 0, outMs: 10_000 }], 0, 0.3, "480P", {
+      enabled: true,
+      tracks: [
+        { language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 },
+        { language: "en", position: "TOP", fontSize1080p: 42 },
+      ],
+      styleProfile: { verticalPositionPercent: 82, fontSizePx: 36, textColor: "#FFFFFF", shadowEnabled: true, outlineWidthPx: 2 },
+    }, { byLanguage: { "zh-TW": ["字幕頁預覽"], en: ["Independent translation"] }, providers: ["ORIGINAL", "OPENAI"] });
+    expect(result.content).toContain("Style: Lang1,Microsoft JhengHei,36,");
+    expect(result.content).toContain("Style: Lang2,Arial,19,");
+    expect(result.content).toContain("Dialogue: 0,0:00:01.00,0:00:03.00,Lang1");
+    expect(result.content).toContain("\\an2\\pos");
+    expect(result.content).toContain("Dialogue: 1,0:00:01.00,0:00:03.00,Lang2");
     expect(result.content).toContain("\\an8\\pos");
   });
 
@@ -50,6 +75,17 @@ describe("subtitle ASS burn-in", () => {
     const result = buildSubtitleAss(introProject, [{ assetId: asset.id, inMs: 0, outMs: 3_000 }, { assetId: asset.id, inMs: 0, outMs: 10_000 }], 1, 0.3, "480P", { enabled: true, tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }] }, { byLanguage: { "zh-TW": ["片頭", "正片"] }, providers: ["ORIGINAL"] });
     expect(result.content).toContain("0:00:00.00,0:00:01.00");
     expect(result.content).toContain("0:00:02.70,0:00:03.70");
+  });
+
+  it("burns only Intro cues for an Intro-only preview", () => {
+    const introProject = { ...project, introSegments: [{ id: "intro", assetId: asset.id, fileName: asset.fileName, inMs: 0, outMs: 3_000, score: 90, reasons: ["事件"] }], subtitleCues: [
+      { id: "intro-cue", startMs: 400, endMs: 1_400, text: "片頭測試字幕", timelineScope: "INTRO" as const, reviewStatus: "CONFIRMED" as const },
+      { id: "main-cue", startMs: 0, endMs: 1_000, text: "正片不應出現", timelineScope: "MAIN" as const, reviewStatus: "CONFIRMED" as const },
+    ] };
+    const result = buildSubtitleAss(introProject, [{ assetId: asset.id, inMs: 0, outMs: 3_000 }], 1, 0.3, "480P", { enabled: true, tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }] }, { byLanguage: { "zh-TW": ["片頭測試字幕"] }, providers: ["ORIGINAL"] }, undefined, "INTRO");
+    expect(result.eventCount).toBe(1);
+    expect(result.content).toContain("片頭測試字幕");
+    expect(result.content).not.toContain("正片不應出現");
   });
 
   it("shifts Main subtitles past the inserted start prompt without moving Intro subtitles", () => {

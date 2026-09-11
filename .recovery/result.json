@@ -1,0 +1,6 @@
+{
+  "status": "FAILED",
+  "startedAt": "2026-09-10T05:28:24.587Z",
+  "failedAt": "2026-09-10T05:28:24.617Z",
+  "message": "Error: 字幕翻譯與嵌入服務尚未初始化，已阻擋輸出。\n    at ConcatRenderService.render (C:\\Users\\fgg88\\OneDrive\\文件\\ChatGPT\\YT影片 剪輯SOP\\video-editor-app\\dist-electron\\main\\services\\concat-render.js:611:23)\n    at async file:///C:/Users/fgg88/OneDrive/%E6%96%87%E4%BB%B6/ChatGPT/YT%E5%BD%B1%E7%89%87%20%E5%89%AA%E8%BC%AFSOP/video-editor-app/.recovery/recover-interrupted-concat.mjs:176:18"
+}

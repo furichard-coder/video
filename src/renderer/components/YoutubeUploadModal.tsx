@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AiPublishAssets, PreviewResolution, YoutubePrivacyStatus, YoutubeSettingsSnapshot, YoutubeUploadProgress, YoutubeUploadResult } from "../../shared/domain";
+import type { AiPublishAssets, PreviewOutputPurpose, PreviewResolution, YoutubePrivacyStatus, YoutubeSettingsSnapshot, YoutubeUploadProgress, YoutubeUploadResult } from "../../shared/domain";
 import { buildYoutubeDescription, chapterText, isValidYoutubeChapterSet, youtubeTextLength } from "../../shared/publish-rules";
 import { formatBytes, formatDuration } from "../format";
 
@@ -12,6 +12,7 @@ interface Props {
     durationMs?: number;
     expectedDurationMs?: number;
     aspectRatio?: "PORTRAIT_9_16" | "LANDSCAPE_16_9";
+    purpose?: PreviewOutputPurpose;
   };
   onOpenSettings(): void;
   onClose(): void;
@@ -32,10 +33,11 @@ function selectedThumbnail(assets?: AiPublishAssets) {
 }
 
 export function YoutubeUploadModal({ renderResult, onOpenSettings, onClose, publishAssets }: Props) {
+  const previewLabel = renderResult.purpose === "INTRO" ? "片頭預覽" : renderResult.purpose === "SHORTS" ? "Shorts 預覽" : "正片預覽";
   const [settings, setSettings] = useState<YoutubeSettingsSnapshot>();
   const [activePublishAssets, setActivePublishAssets] = useState<AiPublishAssets | undefined>(publishAssets);
   const [title, setTitle] = useState(selectedTitle(publishAssets) ?? fileStem(renderResult.outputPath));
-  const [description, setDescription] = useState(() => publishAssets ? buildYoutubeDescription(publishAssets).text : "SceneryWalker 正片預覽（不公開連結供人工檢查）。");
+  const [description, setDescription] = useState(() => publishAssets ? buildYoutubeDescription(publishAssets).text : `SceneryWalker ${previewLabel}（不公開連結供人工檢查）。`);
   const [thumbnailPath, setThumbnailPath] = useState(selectedThumbnail(publishAssets)?.outputPath);
   const [privacyStatus, setPrivacyStatus] = useState<YoutubePrivacyStatus>("unlisted");
   const [madeForKids, setMadeForKids] = useState<"UNSET" | "NO" | "YES">("UNSET");
@@ -56,7 +58,9 @@ export function YoutubeUploadModal({ renderResult, onOpenSettings, onClose, publ
   useEffect(() => {
     void refreshSettings();
     void window.sourceApp.getUserPreferences().then((preferences) => setPrivacyStatus(preferences.youtubeUploadDefaults.privacyStatus)).catch(() => undefined);
-    if (!publishAssets) void window.sourceApp.getAiPublishAssets?.().then((assets) => { if (assets) applyPublishAssets(assets); }).catch(() => undefined);
+    // Intro previews are short-lived QA uploads. Do not silently attach the
+    // main video's title, chapters, or thumbnail to an intro-only test.
+    if (!publishAssets && renderResult.purpose !== "INTRO") void window.sourceApp.getAiPublishAssets?.().then((assets) => { if (assets) applyPublishAssets(assets); }).catch(() => undefined);
     window.sourceApp.onYoutubeUploadProgress(setProgress);
     return () => window.sourceApp.clearYoutubeUploadProgressListeners();
   }, []);
@@ -87,8 +91,8 @@ export function YoutubeUploadModal({ renderResult, onOpenSettings, onClose, publ
   };
 
   return <div className="modal-backdrop nested-modal" role="presentation">
-    <section className="youtube-upload-modal" role="dialog" aria-modal="true" aria-label="上傳正片預覽到 YouTube">
-      <header className="modal-header"><div><span className="eyebrow">YOUTUBE PREVIEW DELIVERY · v0.45</span><h2>{reviewing ? "上傳前集中確認" : "上傳正片預覽到 YouTube"}</h2><p>{reviewing ? "逐項看過影片、縮圖、文字、頻道與可見度後，才可開始上傳。" : "任何解析度都可上傳供人工預覽；預設「不公開」，不通知訂閱者。"}</p></div><button className="icon-button" type="button" disabled={uploading} onClick={onClose} aria-label="關閉">×</button></header>
+    <section className="youtube-upload-modal" role="dialog" aria-modal="true" aria-label={`上傳${previewLabel}到 YouTube`}>
+      <header className="modal-header"><div><span className="eyebrow">YOUTUBE PREVIEW DELIVERY · v0.53</span><h2>{reviewing ? "上傳前集中確認" : `上傳${previewLabel}到 YouTube`}</h2><p>{reviewing ? "逐項看過影片、縮圖、文字、頻道與可見度後，才可開始上傳。" : "正片或僅片頭都能以任何解析度上傳供人工預覽；預設「不公開」，不通知訂閱者。"}</p></div><button className="icon-button" type="button" disabled={uploading} onClick={onClose} aria-label="關閉">×</button></header>
       {result ? <div className="youtube-upload-complete"><span className="complete-mark">✓</span><h3>影片已交給 YouTube 處理</h3><p>已要求以「{result.requestedPrivacyStatus === "unlisted" ? "不公開" : "私人"}」上傳到「{result.channelTitle ?? settings?.channelTitle}」。請開啟影片或 YouTube Studio 再確認處理狀態、可見度與版權檢查。</p>{result.thumbnailStatus === "FAILED" && <p className="inline-warning">影片已成功上傳，但縮圖失敗：{result.thumbnailError ?? "未知錯誤"}{thumbnailPath && <button className="secondary-button" onClick={async () => { try { await window.sourceApp.retryYoutubeThumbnail?.(result.videoId, thumbnailPath); setResult({ ...result, thumbnailStatus: "UPLOADED", thumbnailError: undefined }); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } }}>重試縮圖</button>}</p>}{result.thumbnailStatus === "UPLOADED" && <p className="inline-notice">影片與選定縮圖都已送出。</p>}<div className="output-path-box"><span>預覽連結</span><strong>{result.videoUrl}</strong></div><div className="concat-footer-actions"><button className="secondary-button" type="button" onClick={() => navigator.clipboard?.writeText(result.videoUrl)}>複製連結</button><button className="youtube-connect-button" type="button" onClick={() => void window.sourceApp.openYoutubeVideo(result.videoId)}>用設定的瀏覽器觀看</button><button className="primary-button" type="button" onClick={onClose}>完成</button></div></div> : reviewing ? <div className="youtube-upload-body youtube-final-review">
         <section className="youtube-review-media-grid">
           <article><header><strong>① 影片畫面與聲音</strong><small>{renderResult.resolution ?? "既有 MP4"} · {durationMs ? formatDuration(durationMs) : "片長待播放器讀取"}</small></header><video src={videoPreviewUrl} controls preload="metadata" aria-label="YouTube 上傳影片預覽" /><p title={renderResult.outputPath}>{renderResult.outputPath}</p></article>
@@ -108,7 +112,7 @@ export function YoutubeUploadModal({ renderResult, onOpenSettings, onClose, publ
         {error && <p className="inline-error" role="alert">{error}</p>}
         <footer className="youtube-upload-actions">{uploading ? <button className="cancel-button" type="button" onClick={() => void window.sourceApp.cancelYoutubeUpload()}>取消上傳</button> : <><button className="secondary-button" type="button" onClick={() => { setReviewing(false); setReviewConfirmed(false); }}>返回修改</button><button className="youtube-connect-button" type="button" disabled={!reviewConfirmed || !channelMatches || !title.trim() || titleLength > 100 || madeForKids === "UNSET" || !chaptersIncluded || !chaptersValid} onClick={() => void startUpload()}>確認內容並開始上傳</button></>}</footer>
       </div> : <div className="youtube-upload-body">
-        <section className="youtube-upload-source"><span>選定的正片預覽</span><strong title={renderResult.outputPath}>{renderResult.outputPath}</strong><small>{renderResult.resolution ?? "既有 MP4"} · {formatBytes(renderResult.sizeBytes)}</small></section>
+        <section className="youtube-upload-source"><span>選定的{previewLabel}</span><strong title={renderResult.outputPath}>{renderResult.outputPath}</strong><small>{renderResult.resolution ?? "既有 MP4"} · {formatBytes(renderResult.sizeBytes)}</small></section>
         {!settings ? <div className="loading-shell"><span className="spinner" /><p>正在確認 YouTube 帳號…</p></div> : <>
           <div className={`youtube-channel-card ${channelMatches ? "is-ready" : "is-blocked"}`}><span>{channelMatches ? "將上傳到" : "上傳已阻擋"}</span><strong>{settings.channelTitle ?? "尚未連結頻道"}</strong><small>{channelMatches ? `目標名稱已核對：${settings.targetChannelName}` : settings.connected ? `目前頻道與目標「${settings.targetChannelName}」不符` : "請先匯入 OAuth client 並完成 Google 授權"}</small><button className="secondary-button" type="button" disabled={uploading} onClick={onOpenSettings}>YouTube 設定／連結</button></div>
           <label className="youtube-upload-field">影片標題<input value={title} maxLength={100} disabled={uploading} onChange={(event) => setTitle(event.target.value)} /><small>{titleLength}/100</small></label>

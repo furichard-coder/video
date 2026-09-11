@@ -59,7 +59,7 @@ describe("project watermark settings", () => {
       visibleDurationSeconds: 12,
       chinese: { ...DEFAULT_WATERMARK_SETTINGS.chinese, text: "山海\n漫步" },
     });
-    expect(saved).toMatchObject({ schemaVersion: 16, watermarkSettings: { startSeconds: 8, intervalSeconds: 120, visibleDurationSeconds: 12 } });
+    expect(saved).toMatchObject({ schemaVersion: 17, watermarkSettings: { startSeconds: 8, intervalSeconds: 120, visibleDurationSeconds: 12 } });
     const restored = await new ProjectStore(root).initialize();
     expect(restored.watermarkSettings).toEqual(saved.watermarkSettings);
     const raw = JSON.parse(await readFile(path.join(root, "projects", "default", "project.source-manifest.json"), "utf8"));

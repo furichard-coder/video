@@ -11,9 +11,9 @@ afterEach(async () => { await Promise.all(roots.splice(0).map((item) => rm(item,
 describe("user preferences", () => {
   it("defaults new renders to H.265, watermark on and Chrome drag-and-drop handoff", async () => {
     const store = new UserPreferencesStore(await root()); await store.initialize();
-    expect(store.snapshot().renderDefaults).toMatchObject({ videoCodec: "H265", includeWatermark: true, youtubeHandoffMode: "CHROME_DRAG_DROP" });
-    const changed = await store.update({ renderDefaults: { videoCodec: "H264", includeWatermark: false, youtubeHandoffMode: "OFFICIAL_API" } });
-    expect(changed.renderDefaults).toMatchObject({ videoCodec: "H264", includeWatermark: false, youtubeHandoffMode: "OFFICIAL_API" });
+    expect(store.snapshot().renderDefaults).toMatchObject({ videoCodec: "H265_QSV", includeWatermark: true, mainBgmScopes: { intro: true, main: true }, audioProtection: { enabled: true, autoDuckVoiceAndSuddenSounds: true, preserveDistantCrowdAmbience: true, preserveSceneMatchedSounds: true, eqEnabled: true, maxDuckingDb: 6, eqReductionDb: 1.5, peakCeilingDb: -1 }, youtubeHandoffMode: "CHROME_DRAG_DROP" });
+    const changed = await store.update({ renderDefaults: { videoCodec: "H264", includeWatermark: false, mainBgmScopes: { intro: true, main: false }, audioProtection: { enabled: true, autoDuckVoiceAndSuddenSounds: true, preserveDistantCrowdAmbience: false, preserveSceneMatchedSounds: true, eqEnabled: true, maxDuckingDb: 4.5, eqReductionDb: 2, peakCeilingDb: -2 }, youtubeHandoffMode: "OFFICIAL_API" } });
+    expect(changed.renderDefaults).toMatchObject({ videoCodec: "H264", includeWatermark: false, mainBgmScopes: { intro: true, main: false }, audioProtection: { maxDuckingDb: 4.5, eqReductionDb: 2, peakCeilingDb: -2 }, youtubeHandoffMode: "OFFICIAL_API" });
   });
   it("persists last UI, render, upload and voice defaults across reopen", async () => {
     const dataRoot = await root();
