@@ -1856,10 +1856,9 @@ button:disabled {
 }
 .zoom-segment-rows article {
   display: grid;
-  grid-template-columns: 62px minmax(110px, 0.8fr) auto minmax(110px, 0.8fr) auto repeat(
-      3,
-      minmax(84px, 0.55fr)
-    ) minmax(170px, 1fr) auto;
+  grid-template-columns:
+    62px minmax(110px, 0.8fr) auto minmax(110px, 0.8fr) auto repeat(3, minmax(84px, 0.55fr))
+    minmax(170px, 1fr) auto;
   align-items: end;
   gap: 7px;
   padding: 10px;

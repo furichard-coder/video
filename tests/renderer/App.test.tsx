@@ -3399,19 +3399,17 @@ describe("App source workflow", () => {
   it("shows a friendly second close confirmation and places focus plus the Windows pointer on continuing", async () => {
     const api = mockApi();
     api.moveCursorToSafeAction = vi.fn();
-    const rect = vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockReturnValue({
-        x: 420,
-        y: 300,
-        width: 150,
-        height: 44,
-        top: 300,
-        right: 570,
-        bottom: 344,
-        left: 420,
-        toJSON: () => ({}),
-      });
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 420,
+      y: 300,
+      width: 150,
+      height: 44,
+      top: 300,
+      right: 570,
+      bottom: 344,
+      left: 420,
+      toJSON: () => ({}),
+    });
     Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
     render(<App />);
     await screen.findByText("素材清單");

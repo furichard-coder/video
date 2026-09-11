@@ -34,11 +34,9 @@ export class GeminiPublishReviewProvider {
       "請用繁體中文回傳 JSON。summary 要說明整體觀感與最重要的一項改善；recommendedTitleId、recommendedThumbnailId 只能使用提供的 ID；warnings 為需人工確認的風險。",
     ].join("\n\n");
     const imageParts = await Promise.all(
-      input.candidates
-        .slice(0, 3)
-        .map(async (candidate) => ({
-          inlineData: { mimeType: "image/jpeg", data: (await readFile(candidate.framePath)).toString("base64") },
-        })),
+      input.candidates.slice(0, 3).map(async (candidate) => ({
+        inlineData: { mimeType: "image/jpeg", data: (await readFile(candidate.framePath)).toString("base64") },
+      })),
     );
     const response = await this.fetcher(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.model)}:generateContent`,
