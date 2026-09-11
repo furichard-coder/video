@@ -125,6 +125,10 @@ export function AudioProtectionSettings({ value, disabled = false, stepLabel, co
           這是純本機聲學偵測，不會把音訊送到
           AI；它能判斷清晰／強烈的人聲頻段與音量突變，但無法理解談話內容是否真的私密，也無法百分之百分辨笑聲、叫賣與其他同頻聲音。完成後仍請播放人工複核。
         </small>
+        <small>
+          效果最明顯的組合：最大自動壓低 6 dB，並關閉「保留遠處人群」以使用較靈敏的觸發門檻；EQ
+          與峰值上限本來就只做細微修正，聽感變化不大屬正常。
+        </small>
       </fieldset>
     </section>
   );

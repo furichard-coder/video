@@ -2,6 +2,15 @@
 
 本檔案是每次可交付功能變更的簡短索引。完成一個階段後，必須同步更新本檔案、`README.md` 與 `VERIFICATION.md`；只有通過建置／測試的內容才可標記為完成。
 
+## v0.58.0 — 2026-09-12
+
+- 字幕顯示格式新增「每行字數」6–40 手動覆寫，留空維持原本依寬度自動換行；隨顯示預設保存並直通 ASS 燒錄。
+- 字幕頁預覽浮層改用與燒錄完全相同的共用換行邏輯，看到的斷行即成品斷行（480P 預覽與 4K 輸出換行一致）。
+- Master bus 改為透明峰值保護（acompressor -6dB/ratio4 → -1dB/ratio2），不再磨平整體動態，保留逐段 ducking 的對比；實測 detector 頻段 burst 仍壓低約 4 dB、底噪不動、非 detector 大音量段落多保留約 1.9 dB 對比，峰值仍受限。
+- 音訊設定頁補充最有效組合說明與 EQ／上限本來就細微的提示。
+- 驗證：51 個測試檔／306 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke 與 `npm audit` 全部通過。
+- 交付：`release/v0.58.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.58.0.exe`。
+
 ## v0.57.0 — 2026-09-12
 
 - 片頭／正片轉檔改為背景工作：轉檔中按 × 回主畫面，編碼繼續，主畫面背景工作列顯示即時進度；重開轉檔頁會接回監控（可取消，不會重複啟動），完成後成品出現在輸出檔案庫。

@@ -1,8 +1,15 @@
-# Current Product Spec — v0.57.0
+# Current Product Spec — v0.58.0
 
 ## Scope
 
 Windows-first read-only source organizer. The first visible workflow remains source selection, thumbnail/proxy preview, ordering, IN/OUT, Intro and preview MP4 output. Sources, SOP files and previous releases are never overwritten.
+
+## v0.58.0 adjustable subtitle width with true preview, transparent master bus
+
+- Subtitle display format gains 每行字數: 6–40 manual override, blank means automatic width-derived wrap as before. The setting persists with the existing style preset and flows into ASS burn-in.
+- The subtitle-page preview overlay wraps with the identical shared helper, so line breaks match the finished MP4 at any output resolution (wrap ratio is resolution-invariant by construction).
+- Master bus no longer rides the program: acompressor threshold -6 dB ratio 4 → -1 dB ratio 2, so it only catches true peaks under the ceiling and preserves the contrast created by per-clip ducking. Measured on synthetic material: detector-band bursts still duck ≈4 dB, beds untouched, non-detector loud passages keep ≈1.9 dB more contrast than before, peaks still capped.
+- Audio panel documents the most audible combination (6 dB + crowd preservation off) and states EQ/ceiling are subtle by design.
 
 ## v0.57.0 background render with concurrent subtitle work
 

@@ -209,4 +209,25 @@ describe("user preferences", () => {
       /至少需要選擇一項/,
     );
   });
+
+  it("clamps the subtitle per-line character override and keeps auto when absent", async () => {
+    const dataRoot = await root();
+    const store = new UserPreferencesStore(dataRoot);
+    await store.initialize();
+    const base = {
+      verticalPositionPercent: 82,
+      fontSizePx: 28,
+      textColor: "#FFFFFF",
+      shadowEnabled: true,
+      outlineWidthPx: 2,
+    };
+    await store.update({ subtitlePreviewStyle: { ...base, maxCharactersPerLine: 3 } });
+    expect(store.snapshot().subtitlePreviewStyle.maxCharactersPerLine).toBe(6);
+    await store.update({ subtitlePreviewStyle: { ...base, maxCharactersPerLine: 100 } });
+    expect(store.snapshot().subtitlePreviewStyle.maxCharactersPerLine).toBe(40);
+    await store.update({ subtitlePreviewStyle: { ...base, maxCharactersPerLine: 12 } });
+    expect(store.snapshot().subtitlePreviewStyle.maxCharactersPerLine).toBe(12);
+    await store.update({ subtitlePreviewStyle: { ...base, maxCharactersPerLine: Number.NaN } });
+    expect(store.snapshot().subtitlePreviewStyle.maxCharactersPerLine).toBeUndefined();
+  });
 });

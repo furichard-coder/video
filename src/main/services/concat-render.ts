@@ -534,8 +534,11 @@ export function buildConcatFilterGraph(
     filters.push(chain.join(","));
     bgmLabels.push(`bgm${bgmIndex}`);
   });
+  // Master bus stays transparent: it only catches true peaks just under the
+  // ceiling instead of riding the program. A lower threshold here would erase
+  // the contrast created by the per-clip ducking above.
   const finalDynamics = audioProtection.enabled
-    ? `acompressor=threshold=0.501187:ratio=4:attack=15:release=300:makeup=1,alimiter=limit=${ffmpegNumber(10 ** (audioProtection.peakCeilingDb / 20))}:attack=5:release=100`
+    ? `acompressor=threshold=0.891251:ratio=2:attack=15:release=300:makeup=1,alimiter=limit=${ffmpegNumber(10 ** (audioProtection.peakCeilingDb / 20))}:attack=5:release=100`
     : "alimiter=limit=0.95";
   if (bgmLabels.length) {
     filters.push(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ProjectManifest, SourceAsset } from "../src/shared/domain";
+import type { ProjectManifest, SourceAsset, SubtitleBurnInOptions } from "../src/shared/domain";
 import { buildSubtitleAss, escapeFfmpegFilterPath, wrapSubtitleText } from "../src/main/services/subtitle-burn-in";
 
 const asset: SourceAsset = {
@@ -175,6 +175,75 @@ describe("subtitle ASS burn-in", () => {
     expect(result.content).toContain("\\an2\\pos");
     expect(result.content).toContain("Dialogue: 1,0:00:01.00,0:00:03.00,Lang2");
     expect(result.content).toContain("\\an8\\pos");
+  });
+
+  it("honors the manual per-line character override from the style profile", () => {
+    const options = (maxCharactersPerLine?: number): SubtitleBurnInOptions => ({
+      enabled: true,
+      tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }],
+      styleProfile: {
+        verticalPositionPercent: 82,
+        fontSizePx: 36,
+        textColor: "#FFFFFF",
+        shadowEnabled: true,
+        outlineWidthPx: 2,
+        ...(maxCharactersPerLine === undefined ? {} : { maxCharactersPerLine }),
+      },
+    });
+    const translations = {
+      byLanguage: { "zh-TW": [project.subtitleCues[0].text] },
+      providers: ["ORIGINAL"],
+    } as never;
+    const countBreaks = (content: string) => content.split("\\N").length - 1;
+    const clips = [{ assetId: asset.id, inMs: 0, outMs: 10_000 }] as never;
+    const auto = buildSubtitleAss(project, clips, 0, 0.3, "480P", options(), translations);
+    const narrow = buildSubtitleAss(project, clips, 0, 0.3, "480P", options(6), translations);
+    expect(countBreaks(auto.content)).toBe(1);
+    expect(countBreaks(narrow.content)).toBeGreaterThanOrEqual(3);
+  });
+
+  it("breaks lines identically across output resolutions", () => {
+    const styleProfile = {
+      verticalPositionPercent: 82,
+      fontSizePx: 36,
+      textColor: "#FFFFFF",
+      shadowEnabled: true,
+      outlineWidthPx: 2,
+    };
+    const translations = {
+      byLanguage: { "zh-TW": [project.subtitleCues[0].text] },
+      providers: ["ORIGINAL"],
+    } as never;
+    const clips = [{ assetId: asset.id, inMs: 0, outMs: 10_000 }] as never;
+    const countBreaks = (content: string) => content.split("\\N").length - 1;
+    const at480 = buildSubtitleAss(
+      project,
+      clips,
+      0,
+      0.3,
+      "480P",
+      {
+        enabled: true,
+        tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }],
+        styleProfile,
+      },
+      translations,
+    );
+    const at4k = buildSubtitleAss(
+      project,
+      clips,
+      0,
+      0.3,
+      "4K",
+      {
+        enabled: true,
+        tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }],
+        styleProfile,
+      },
+      translations,
+    );
+    expect(countBreaks(at4k.content)).toBe(countBreaks(at480.content));
+    expect(countBreaks(at4k.content)).toBeGreaterThanOrEqual(1);
   });
 
   it("blocks stale timeline subtitles and escapes Chinese/spaced Windows paths", () => {

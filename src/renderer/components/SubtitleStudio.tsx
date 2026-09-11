@@ -13,6 +13,14 @@ import type {
   SubtitleTimelineScope,
 } from "../../shared/domain";
 import { buildTimelinePlan } from "../../shared/timeline-plan";
+import {
+  SUBTITLE_WRAP_MANUAL_MAX,
+  SUBTITLE_WRAP_MANUAL_MIN,
+  SUBTITLE_WRAP_REFERENCE_WIDTH,
+  isCjkText,
+  resolveSubtitleWrapLimit,
+  wrapSubtitleText,
+} from "../../shared/subtitle-text";
 import { formatDuration } from "../format";
 import { SharedIntroPreviewHistory } from "./SharedIntroPreviewHistory";
 import { TimecodeInput } from "./TimecodeInput";
@@ -567,7 +575,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     try {
       const saved = await window.sourceApp.updateUserPreferences({ subtitlePreviewStyle: subtitleStyle });
       setSubtitleStyle(saved.subtitlePreviewStyle);
-      setNotice("字幕位置、大小、顏色、陰影與外框已保存為下次預設。");
+      setNotice("字幕位置、大小、顏色、陰影、外框與每行字數已保存為下次預設。");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -1282,7 +1290,20 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
               )}
               {activeOverlayCue && (
                 <div className="subtitle-overlay-preview" style={overlayStyle}>
-                  {activeOverlayCue.text}
+                  {wrapSubtitleText(
+                    activeOverlayCue.text,
+                    resolveSubtitleWrapLimit(
+                      subtitleStyle.maxCharactersPerLine,
+                      SUBTITLE_WRAP_REFERENCE_WIDTH,
+                      subtitleStyle.fontSizePx,
+                      isCjkText(activeOverlayCue.text),
+                    ),
+                  ).map((line, index, lines) => (
+                    <span key={index}>
+                      {line}
+                      {index < lines.length - 1 && <br />}
+                    </span>
+                  ))}
                 </div>
               )}
             </section>
@@ -1410,6 +1431,31 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                   }
                 />
                 <span>px</span>
+              </label>
+              <label>
+                每行字數{" "}
+                <input
+                  aria-label="字幕每行最多字數"
+                  type="number"
+                  min={SUBTITLE_WRAP_MANUAL_MIN}
+                  max={SUBTITLE_WRAP_MANUAL_MAX}
+                  placeholder="自動"
+                  value={subtitleStyle.maxCharactersPerLine ?? ""}
+                  onChange={(event) => {
+                    const raw = event.target.value.trim();
+                    setSubtitleStyle((current) => ({
+                      ...current,
+                      maxCharactersPerLine:
+                        raw === ""
+                          ? undefined
+                          : Math.max(
+                              SUBTITLE_WRAP_MANUAL_MIN,
+                              Math.min(SUBTITLE_WRAP_MANUAL_MAX, Math.floor(Number(raw) || 0)),
+                            ),
+                    }));
+                  }}
+                />
+                <span>字{subtitleStyle.maxCharactersPerLine === undefined ? "（自動）" : ""}</span>
               </label>
               <button type="button" className="secondary-button" disabled={busy} onClick={() => void saveStyle()}>
                 儲存顯示格式

@@ -21,6 +21,7 @@ import type {
   YoutubePrivacyStatus,
 } from "../../shared/domain";
 import { DEFAULT_AUDIO_PROTECTION_OPTIONS, DEFAULT_MAIN_START_CARD_OPTIONS } from "../../shared/domain";
+import { SUBTITLE_WRAP_MANUAL_MAX, SUBTITLE_WRAP_MANUAL_MIN } from "../../shared/subtitle-text";
 import { finalizePartialOutput } from "./atomic-output";
 
 const DIRECTORY_KEYS = new Set<PreferenceDirectoryKey>([
@@ -130,6 +131,12 @@ export function sanitizeSubtitlePreviewStyle(value: unknown): SubtitlePreviewSty
     const parsed = Number(input);
     return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, Math.round(parsed))) : defaultValue;
   };
+  const wrapLimit = (input: unknown): number | undefined => {
+    const parsed = Math.floor(Number(input));
+    return Number.isFinite(parsed)
+      ? Math.max(SUBTITLE_WRAP_MANUAL_MIN, Math.min(SUBTITLE_WRAP_MANUAL_MAX, parsed))
+      : undefined;
+  };
   return {
     verticalPositionPercent: number(candidate.verticalPositionPercent, 10, 92, fallback.verticalPositionPercent),
     fontSizePx: number(candidate.fontSizePx, 16, 72, fallback.fontSizePx),
@@ -139,6 +146,7 @@ export function sanitizeSubtitlePreviewStyle(value: unknown): SubtitlePreviewSty
         : fallback.textColor,
     shadowEnabled: candidate.shadowEnabled !== false,
     outlineWidthPx: number(candidate.outlineWidthPx, 0, 8, fallback.outlineWidthPx),
+    maxCharactersPerLine: wrapLimit(candidate.maxCharactersPerLine),
   };
 }
 
@@ -190,6 +198,12 @@ export function sanitizeSubtitleBurnInOptions(value: unknown): SubtitleBurnInOpt
             0,
             Math.min(8, Number.isFinite(Number(style.outlineWidthPx)) ? Number(style.outlineWidthPx) : 2),
           ),
+          maxCharactersPerLine: Number.isFinite(Math.floor(Number(style.maxCharactersPerLine)))
+            ? Math.max(
+                SUBTITLE_WRAP_MANUAL_MIN,
+                Math.min(SUBTITLE_WRAP_MANUAL_MAX, Math.floor(Number(style.maxCharactersPerLine))),
+              )
+            : undefined,
         }
       : undefined;
   return {

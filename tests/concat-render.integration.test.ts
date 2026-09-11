@@ -199,7 +199,7 @@ describe("concat preview filter plan", () => {
     expect(plan.filterGraph).toContain("sidechaincompress=threshold=0.09:ratio=12:attack=45:release=500");
     expect(plan.filterGraph).toContain("volume=0.501187");
     expect(plan.filterGraph).toContain("equalizer=f=2500:t=q:w=0.8:g=-1.5");
-    expect(plan.filterGraph).toContain("acompressor=threshold=0.501187");
+    expect(plan.filterGraph).toContain("acompressor=threshold=0.891251:ratio=2");
     expect(plan.filterGraph).toContain("alimiter=limit=0.891251");
     const disabled = buildConcatFilterGraph(
       [{ sourcePath: "voice.mp4", durationMs: 4_000, hasAudio: true }],

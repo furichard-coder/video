@@ -14,6 +14,13 @@ import { mainRenderSelections } from "../../shared/editing-rules";
 import { buildTimelinePlan } from "../../shared/timeline-plan";
 import type { SubtitleTranslationResult } from "./subtitle-translation";
 import { sanitizeSubtitleBurnInOptions } from "./user-preferences";
+import {
+  SUBTITLE_WRAP_REFERENCE_WIDTH,
+  resolveSubtitleWrapLimit,
+  wrapSubtitleText,
+} from "../../shared/subtitle-text";
+
+export { wrapSubtitleText };
 
 const RESOLUTIONS: Record<PreviewResolution, { width: number; height: number }> = {
   "360P": { width: 640, height: 360 },
@@ -37,38 +44,6 @@ function assTime(milliseconds: number): string {
   const seconds = Math.floor((centiseconds % 6_000) / 100);
   const fraction = centiseconds % 100;
   return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(fraction).padStart(2, "0")}`;
-}
-
-function splitLongToken(token: string, maxLength: number): string[] {
-  const parts: string[] = [];
-  for (let index = 0; index < token.length; index += maxLength) parts.push(token.slice(index, index + maxLength));
-  return parts;
-}
-
-export function wrapSubtitleText(text: string, maxCharacters: number): string[] {
-  const limit = Math.max(4, Math.floor(maxCharacters));
-  const explicit = text.replace(/\r/g, "").split("\n");
-  const result: string[] = [];
-  for (const paragraph of explicit) {
-    if (!paragraph) {
-      result.push("");
-      continue;
-    }
-    const tokens = /\s/.test(paragraph)
-      ? paragraph.split(/\s+/).flatMap((token) => splitLongToken(token, limit))
-      : splitLongToken(paragraph, limit);
-    let line = "";
-    for (const token of tokens) {
-      const candidate = line ? `${line} ${token}` : token;
-      if (candidate.length <= limit) line = candidate;
-      else {
-        if (line) result.push(line);
-        line = token;
-      }
-    }
-    if (line) result.push(line);
-  }
-  return result.length ? result : [""];
 }
 
 function escapeAssLine(value: string): string {
@@ -235,7 +210,15 @@ export function buildSubtitleAss(
       .filter((candidate) => candidate.position === track.position).length;
     const fontSize = resolvedFontSizes[trackIndex];
     const cjk = track.language !== "en";
-    const maxCharacters = Math.max(8, Math.floor((width * 0.82) / (fontSize * (cjk ? 1 : 0.58))));
+    // Wrap against the fixed 480p reference canvas (not the output width) so the
+    // preview overlay and every output resolution break lines identically.
+    const wrapBaseFontSize = sharedStyle ? sharedStyle.fontSizePx : (fontSize * 480) / height;
+    const maxCharacters = resolveSubtitleWrapLimit(
+      sharedStyle?.maxCharactersPerLine,
+      SUBTITLE_WRAP_REFERENCE_WIDTH,
+      wrapBaseFontSize,
+      cjk,
+    );
     confirmed.forEach((cue, cueIndex) => {
       const scope = cue.timelineScope ?? "MAIN";
       const scopedClips = scope === "INTRO" ? introClips : mainClips;

@@ -231,6 +231,11 @@ export interface SubtitleStyleProfile {
   textColor: string;
   shadowEnabled: boolean;
   outlineWidthPx: number;
+  /**
+   * Max characters per subtitle line. Undefined (or non-numeric) keeps the
+   * automatic width-derived wrap so older preferences keep working.
+   */
+  maxCharactersPerLine?: number;
 }
 
 /** Backwards-compatible name used by existing preference and renderer code. */
