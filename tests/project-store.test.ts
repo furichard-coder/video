@@ -930,6 +930,34 @@ describe("ProjectStore", () => {
     expect(await readFile(photoPath, "utf8")).toBe("photo-source");
   });
 
+  it("stores the per-clip silent auto-dub flag without touching the timeline revision", async () => {
+    const root = await tempRoot();
+    const videoPath = path.join(root, "silent.mp4");
+    const photoPath = path.join(root, "still.jpg");
+    await writeFile(videoPath, "silent-source");
+    await writeFile(photoPath, "photo-source");
+    const store = new ProjectStore(path.join(root, "app-data"));
+    await store.initialize();
+    const video = {
+      ...asset(videoPath, "d"),
+      metadataState: "READY" as const,
+      mediaInfo: { durationMs: 5_000 },
+    };
+    await store.addAssets([video, photo(photoPath, "e")]);
+    const revision = store.getProject().timelineRevision;
+    let project = await store.setDubWithBgm(video.id, false);
+    expect(project.sources.find((item) => item.id === video.id)?.dubWithBgm).toBe(false);
+    expect(project.timelineRevision).toBe(revision);
+    project = await store.setDubWithBgm(video.id, true);
+    expect(project.sources.find((item) => item.id === video.id)?.dubWithBgm).toBe(true);
+    await expect(store.setDubWithBgm(video.id, "true" as unknown as boolean)).rejects.toThrow(/設定無效/);
+    const stillId = project.sources.find((item) => item.kind === "IMAGE")!.id;
+    await expect(store.setDubWithBgm(stillId, true)).rejects.toThrow(/只有影片/);
+    await expect(store.setDubWithBgm("0".repeat(64), true)).rejects.toThrow(/只有影片/);
+    const reopened = new ProjectStore(path.join(root, "app-data"));
+    expect((await reopened.initialize()).sources.find((item) => item.id === video.id)?.dubWithBgm).toBe(true);
+  });
+
   it("inserts a newly imported pending-folder asset and returns it to pending when cancelled", async () => {
     const root = await tempRoot();
     const dataRoot = path.join(root, "app-data");

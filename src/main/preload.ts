@@ -89,6 +89,7 @@ const api: AppApi = {
     ipcRenderer.invoke("source:set-image-duration", assetId, durationMs),
   setPhotoSoundEnabled: (assetId: string, enabled: boolean) =>
     ipcRenderer.invoke("source:set-photo-sound", assetId, enabled),
+  setDubWithBgm: (assetId: string, enabled: boolean) => ipcRenderer.invoke("source:set-dub-with-bgm", assetId, enabled),
   addMediaInsertion: (anchorVideoAssetId, insertedAssetId, atMs, sourceRange) =>
     ipcRenderer.invoke("main:add-media-insertion", anchorVideoAssetId, insertedAssetId, atMs, sourceRange),
   updateMediaInsertion: (insertionId, atMs, sourceRange) =>

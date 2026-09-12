@@ -1253,7 +1253,8 @@ describe("concat preview integration", () => {
     );
     const stats = await volumeStats(mixedOutput, 0.2, 0.8);
     expect(result).toMatchObject({
-      bgmAppliedCount: 1,
+      bgmAppliedCount: 2,
+      autoDubClipCount: 1,
       mixPolicy: "VOICE_DUCK_EQ_COMPRESS_LIMIT",
       audioProtectionApplied: true,
       audioPeakCeilingDb: -1,
@@ -1299,6 +1300,66 @@ describe("concat preview integration", () => {
     await store.removeBgmTrack(pending.id);
     await store.setMainExclusionRanges(assets[0].id, []);
   }, 45_000);
+
+  it("auto-dubs silent clips with the first READY BGM track unless opted out", async () => {
+    const dubPath = path.join(root, "dub-source.mp3");
+    await runProcess("ffmpeg", [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=880:sample_rate=48000",
+      "-t",
+      "3",
+      "-c:a",
+      "libmp3lame",
+      "-q:a",
+      "4",
+      "-y",
+      dubPath,
+    ]);
+    // Parked outside the output so it never applies as normal BGM; it only feeds auto-dub.
+    await store.addBgmTracks([
+      {
+        id: "bgm-dub-source",
+        sourcePath: dubPath,
+        fileName: path.basename(dubPath),
+        sizeBytes: (await stat(dubPath)).size,
+        durationMs: 3_000,
+        sourceInMs: 0,
+        sourceOutMs: 3_000,
+        timelineInMs: 999_999,
+        timelineOutMs: 1_002_999,
+        fadeInMs: 100,
+        fadeOutMs: 100,
+        volumePercent: 100,
+        sourcePolicy: "READ_ONLY" as const,
+        addedAt: new Date().toISOString(),
+      },
+    ]);
+    const clips = store.getProject().sources.slice(0, 2);
+    expect(clips[1].mediaInfo?.audioCodec).toBeUndefined();
+    const dubbedOutput = path.join(root, "dubbed.mp4");
+    const dubbed = await new ConcatRenderService(store, sources).render(
+      { outputToken: "dub", ...currentMainRequest(), transitionSeconds: 0.3, resolution: "360P" },
+      dubbedOutput,
+    );
+    // First clip has audio, second is silent: exactly one auto-dub.
+    expect(dubbed).toMatchObject({ autoDubClipCount: 1, bgmAppliedCount: 1 });
+    expect((await volumeStats(dubbedOutput, 1.5, 0.9)).mean).toBeGreaterThan(-35);
+    await store.setDubWithBgm(clips[1].id, false);
+    const mutedOutput = path.join(root, "dubbed-optout.mp4");
+    const mutedResult = await new ConcatRenderService(store, sources).render(
+      { outputToken: "dub-optout", ...currentMainRequest(), transitionSeconds: 0.3, resolution: "360P" },
+      mutedOutput,
+    );
+    expect(mutedResult).toMatchObject({ autoDubClipCount: 0, bgmAppliedCount: 0 });
+    expect((await volumeStats(mutedOutput, 1.5, 0.9)).mean).toBeLessThan(-60);
+    await store.setDubWithBgm(clips[1].id, true);
+    await store.removeBgmTrack("bgm-dub-source");
+  }, 90_000);
 
   it("honors rotation metadata and renders a portrait clip over same-source blurred side fill", async () => {
     const basePath = path.join(root, "rotation-base.mp4");

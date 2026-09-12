@@ -4,6 +4,7 @@ import {
   SUBTITLE_WRAP_MANUAL_MIN,
   SUBTITLE_WRAP_REFERENCE_WIDTH,
   isCjkText,
+  overlayAnchorForPosition,
   resolveSubtitleWrapLimit,
   wrapSubtitleText,
 } from "../../src/shared/subtitle-text";
@@ -40,6 +41,14 @@ describe("subtitle text wrapping", () => {
     expect(preview).toBe(Math.max(8, Math.floor((SUBTITLE_WRAP_REFERENCE_WIDTH * 0.82) / 28)));
   });
 
+  it("maps preview overlay anchors the same way as burn-in positions", () => {
+    expect(overlayAnchorForPosition(10)).toBe("TOP");
+    expect(overlayAnchorForPosition(37.9)).toBe("TOP");
+    expect(overlayAnchorForPosition(38)).toBe("MIDDLE");
+    expect(overlayAnchorForPosition(64)).toBe("MIDDLE");
+    expect(overlayAnchorForPosition(64.1)).toBe("BOTTOM");
+    expect(overlayAnchorForPosition(82)).toBe("BOTTOM");
+  });
   it("honors the manual override and clamps it to the supported range", () => {
     expect(resolveSubtitleWrapLimit(12, 3840, 126, true)).toBe(12);
     expect(resolveSubtitleWrapLimit(3, 3840, 126, true)).toBe(SUBTITLE_WRAP_MANUAL_MIN);

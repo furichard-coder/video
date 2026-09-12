@@ -8,9 +8,11 @@ import type {
   SortMode,
   SourceAsset,
   SubtitleTimelineScope,
+  UserPreferences,
   ViewMode,
 } from "../shared/domain";
 import { mainRenderSelections } from "../shared/editing-rules";
+import { introSegmentsForOutput } from "../shared/intro-duration";
 import { buildTimelinePlan } from "../shared/timeline-plan";
 import { AssetCard } from "./components/AssetCard";
 import { ConcatRenderModal } from "./components/ConcatRenderModal";
@@ -36,8 +38,12 @@ import { MaterialSubtitleAnalysisModal } from "./components/MaterialSubtitleAnal
 import { SafeDefaultButton } from "./components/SafeDefaultButton";
 import { formatBytes } from "./format";
 import {
+  applyGridOutputIncludeIntro,
+  applyGridOutputTimesVisible,
   applyUiTextSize,
   applyUiZoom,
+  readGridOutputIncludeIntro,
+  readGridOutputTimesVisible,
   readUiTextSize,
   readUiZoom,
   stepUiZoom,
@@ -121,6 +127,9 @@ export function App() {
   const [showWatermarkSettings, setShowWatermarkSettings] = useState(false);
   const [uiTextSize, setUiTextSize] = useState<UiTextSize>(() => readUiTextSize());
   const [uiZoom, setUiZoom] = useState<UiZoomPercent>(() => readUiZoom());
+  const [showGridOutputTimes, setShowGridOutputTimes] = useState<boolean>(() => readGridOutputTimesVisible());
+  const [gridOutputIncludeIntro, setGridOutputIncludeIntro] = useState<boolean>(() => readGridOutputIncludeIntro());
+  const [renderDefaults, setRenderDefaults] = useState<UserPreferences["renderDefaults"]>();
   const [externalAsset, setExternalAsset] = useState<SourceAsset>();
   const [externalOpeningId, setExternalOpeningId] = useState<string>();
   const [volumeAsset, setVolumeAssetState] = useState<SourceAsset>();
@@ -190,6 +199,7 @@ export function App() {
         setProjectFilePath(fileState.filePath);
         setAppInfo(info);
         setViewMode(preferences.viewMode);
+        setRenderDefaults(preferences.renderDefaults);
       })
       .catch((reason: unknown) => {
         setError(reason instanceof Error ? reason.message : String(reason));
@@ -314,6 +324,54 @@ export function App() {
   const sortedVideos = useMemo(() => sortedAssets.filter((asset) => asset.kind === "VIDEO"), [sortedAssets]);
   const mainClips = useMemo(() => (project ? mainRenderSelections(project) : []), [project]);
   const timelineDurationMs = useMemo(() => (project ? buildTimelinePlan(project).durationMs : 0), [project]);
+  /**
+   * Lead time before the first Main clip in a CONCAT render: confirmed intro
+   * output plus the main-start card, following the current render defaults.
+   */
+  const gridOutputOffsetMs = useMemo(() => {
+    if (!project || !renderDefaults?.prependIntro) return 0;
+    try {
+      const introMs = introSegmentsForOutput(project.introSegments, project.introSegmentMaxDurationMs).reduce(
+        (sum, segment) => sum + Math.max(0, segment.outMs - segment.inMs),
+        0,
+      );
+      const cardMs = Math.max(0, Math.round((renderDefaults.mainStartCard?.durationSeconds ?? 0) * 1000));
+      return introMs + cardMs;
+    } catch {
+      return 0;
+    }
+  }, [project, renderDefaults]);
+  /** Per-asset output ranges on the Main timeline, shifted by the lead time when enabled. */
+  const assetOutputRanges = useMemo(() => {
+    const ranges = new Map<string, Array<{ startMs: number; endMs: number }>>();
+    if (!project || !showGridOutputTimes) return ranges;
+    const plan = buildTimelinePlan(project, {
+      includeIntro: false,
+      transitionSeconds: renderDefaults?.transitionSeconds,
+    });
+    const offset = gridOutputIncludeIntro ? gridOutputOffsetMs : 0;
+    for (const clip of plan.clips) {
+      const list = ranges.get(clip.assetId) ?? [];
+      list.push({ startMs: clip.outputStartMs + offset, endMs: clip.outputEndMs + offset });
+      ranges.set(clip.assetId, list);
+    }
+    return ranges;
+  }, [project, showGridOutputTimes, gridOutputIncludeIntro, gridOutputOffsetMs, renderDefaults?.transitionSeconds]);
+
+  const changeShowGridOutputTimes = (visible: boolean) => {
+    applyGridOutputTimesVisible(visible);
+    setShowGridOutputTimes(visible);
+  };
+  const changeGridOutputIncludeIntro = (include: boolean) => {
+    applyGridOutputIncludeIntro(include);
+    setGridOutputIncludeIntro(include);
+  };
+  const refreshRenderDefaults = useCallback(() => {
+    void window.sourceApp
+      .getUserPreferences()
+      .then((preferences) => setRenderDefaults(preferences.renderDefaults))
+      .catch(() => undefined);
+  }, []);
 
   const closeProjectViews = () => {
     setSelectedAsset(undefined);
@@ -996,6 +1054,12 @@ export function App() {
                 onGridDragStart={beginGridDrag}
                 onGridDragEnter={moveGridDragOver}
                 onGridDragEnd={() => void finishGridDrag()}
+                outputRanges={assetOutputRanges.get(asset.id)}
+                outputRangeScopeLabel={
+                  gridOutputIncludeIntro
+                    ? "串聯成品時間（含片頭＋即將開始提示頁，依目前轉出預設估算）"
+                    : "串聯成品時間（正片內相對時間，不含片頭＋提示頁）"
+                }
               />
             ))}
           </div>
@@ -1133,7 +1197,10 @@ export function App() {
           }
           projectName={project.name}
           onPurposeChange={setConcatRenderPurpose}
-          onClose={() => setShowConcatRender(false)}
+          onClose={() => {
+            setShowConcatRender(false);
+            refreshRenderDefaults();
+          }}
         />
       )}
       {showIntroStudio && (
@@ -1153,8 +1220,12 @@ export function App() {
         <DisplaySettingsModal
           textSize={uiTextSize}
           zoomPercent={uiZoom}
+          showGridOutputTimes={showGridOutputTimes}
+          gridOutputIncludeIntro={gridOutputIncludeIntro}
           onTextSizeChange={setUiTextSize}
           onZoomChange={setUiZoom}
+          onShowGridOutputTimesChange={changeShowGridOutputTimes}
+          onGridOutputIncludeIntroChange={changeGridOutputIncludeIntro}
           onClose={() => setShowDisplaySettings(false)}
         />
       )}

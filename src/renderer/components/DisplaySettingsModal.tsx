@@ -4,12 +4,26 @@ import { UI_TEXT_SIZE_OPTIONS, UI_ZOOM_LEVELS } from "../ui-preferences";
 interface Props {
   textSize: UiTextSize;
   zoomPercent: UiZoomPercent;
+  showGridOutputTimes: boolean;
+  gridOutputIncludeIntro: boolean;
   onTextSizeChange(size: UiTextSize): void;
   onZoomChange(percent: UiZoomPercent): void;
+  onShowGridOutputTimesChange(visible: boolean): void;
+  onGridOutputIncludeIntroChange(include: boolean): void;
   onClose(): void;
 }
 
-export function DisplaySettingsModal({ textSize, zoomPercent, onTextSizeChange, onZoomChange, onClose }: Props) {
+export function DisplaySettingsModal({
+  textSize,
+  zoomPercent,
+  showGridOutputTimes,
+  gridOutputIncludeIntro,
+  onTextSizeChange,
+  onZoomChange,
+  onShowGridOutputTimesChange,
+  onGridOutputIncludeIntroChange,
+  onClose,
+}: Props) {
   const zoomIndex = UI_ZOOM_LEVELS.indexOf(zoomPercent);
   return (
     <div
@@ -76,6 +90,34 @@ export function DisplaySettingsModal({ textSize, zoomPercent, onTextSizeChange, 
                   <em style={{ fontSize: `${option.value}px` }}>Aa 中文</em>
                 </label>
               ))}
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>網格串聯後時間</legend>
+            <div className="text-size-options">
+              <label className={showGridOutputTimes ? "is-selected" : ""}>
+                <input
+                  type="checkbox"
+                  checked={showGridOutputTimes}
+                  onChange={(event) => onShowGridOutputTimesChange(event.target.checked)}
+                />
+                <span>
+                  <strong>顯示串聯後時間段</strong>
+                  <small>每個轉出片段在成品中的始末</small>
+                </span>
+              </label>
+              <label className={gridOutputIncludeIntro ? "is-selected" : ""}>
+                <input
+                  type="checkbox"
+                  checked={gridOutputIncludeIntro}
+                  disabled={!showGridOutputTimes}
+                  onChange={(event) => onGridOutputIncludeIntroChange(event.target.checked)}
+                />
+                <span>
+                  <strong>含片頭＋提示頁時間</strong>
+                  <small>關閉則只顯示正片內相對時間</small>
+                </span>
+              </label>
             </div>
           </fieldset>
           <section className="grid-text-sample" aria-label="網格文字預覽">

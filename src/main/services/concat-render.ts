@@ -55,6 +55,7 @@ import { sanitizeAudioProtectionOptions, sanitizeBgmScopeSelection } from "./use
 
 export interface ConcatInput {
   sourcePath: string;
+  assetId?: string;
   startMs?: number;
   durationMs: number;
   hasAudio: boolean;
@@ -868,6 +869,7 @@ export class ConcatRenderService {
       }
       return {
         sourcePath: asset.sourcePath,
+        assetId: asset.id,
         startMs,
         durationMs: outMs - startMs,
         hasAudio: asset.kind === "VIDEO" && Boolean(asset.mediaInfo?.audioCodec),
@@ -939,7 +941,31 @@ export class ConcatRenderService {
           }
         : undefined;
     const bgmTracks = selectBgmTracksForScopes(currentProject.bgmTracks, bgmScopesApplied, bgmBoundaries);
-    for (const track of bgmTracks) {
+    // Silent-video auto-dub: clips with no audio track get the first READY
+    // BGM track laid under exactly their output range, reusing that track's
+    // own volume/fade settings. Opt out per clip from the grid card.
+    const dubSourceTrack = currentProject.bgmTracks.find(
+      (track) => track.resolutionStatus === "READY" && track.sourcePath,
+    );
+    const autoDubTracks: BgmRenderInput[] = [];
+    if (request.includeBgm !== false && (purpose === "CONCAT" || purpose === "INTRO") && dubSourceTrack) {
+      inputs.forEach((input, index) => {
+        if (input.mainStartCard || input.isImage || input.hasAudio) return;
+        const asset = assets.find((item) => item.id === input.assetId);
+        if (!asset || asset.kind !== "VIDEO" || asset.dubWithBgm === false) return;
+        const spanMs = Math.max(0, Math.round(input.durationMs));
+        const startMs = Math.round(inputStartTimesMs[index] ?? 0);
+        autoDubTracks.push({
+          ...dubSourceTrack,
+          id: randomUUID(),
+          timelineInMs: startMs,
+          timelineOutMs: startMs + spanMs,
+          sourceInMs: dubSourceTrack.sourceInMs,
+          sourceOutMs: dubSourceTrack.sourceInMs + spanMs,
+        });
+      });
+    }
+    for (const track of dubSourceTrack && autoDubTracks.length ? [...bgmTracks, dubSourceTrack] : bgmTracks) {
       if (track.resolutionStatus === "NEEDS_LOCAL_FILE" || !track.sourcePath) {
         throw new Error(`配樂「${track.fileName}」只有 YouTube 參考連結，尚未指定自有或已授權的本機 MP3，已阻擋輸出。`);
       }
@@ -965,7 +991,9 @@ export class ConcatRenderService {
       throw new Error(
         `Shorts 總長 ${Math.ceil(basePlan.expectedDurationMs / 1000)} 秒超過目前 ${request.shortsMaxDurationSec ?? 60} 秒上限。`,
       );
-    const activeBgmTracks = bgmTracks.filter((track) => track.timelineInMs < basePlan.expectedDurationMs);
+    const activeBgmTracks = [...bgmTracks, ...autoDubTracks].filter(
+      (track) => track.timelineInMs < basePlan.expectedDurationMs,
+    );
     const plan = buildConcatFilterGraph(
       inputs,
       request.transitionSeconds,
@@ -1173,6 +1201,7 @@ export class ConcatRenderService {
         purpose,
         bgmAppliedCount: activeBgmTracks.length,
         bgmScopesApplied,
+        autoDubClipCount: autoDubTracks.length,
         photoShutterAppliedCount,
         mixPolicy: audioProtection.enabled ? "VOICE_DUCK_EQ_COMPRESS_LIMIT" : "ORIGINAL_PLUS_BGM_LIMITED_0_95",
         audioProtectionApplied: audioProtection.enabled,

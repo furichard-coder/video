@@ -50,6 +50,18 @@ export function isCjkText(text: string): boolean {
 }
 
 /**
+ * Preview overlay anchor matching the burned ASS anchor for the same
+ * vertical position: TOP grows down, BOTTOM grows up, MIDDLE stays centered.
+ * Thresholds mirror the burn-in position mapping so multi-line blocks drift
+ * the same way on screen and in the file.
+ */
+export function overlayAnchorForPosition(verticalPositionPercent: number): "TOP" | "MIDDLE" | "BOTTOM" {
+  if (verticalPositionPercent < 38) return "TOP";
+  if (verticalPositionPercent > 64) return "BOTTOM";
+  return "MIDDLE";
+}
+
+/**
  * Effective per-line character limit. A manual override (already clamped to
  * 6–40 by UI/sanitize) wins; otherwise derive from the frame width and font
  * size exactly as before, so older styles render identically.

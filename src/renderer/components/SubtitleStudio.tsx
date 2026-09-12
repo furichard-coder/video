@@ -18,6 +18,7 @@ import {
   SUBTITLE_WRAP_MANUAL_MIN,
   SUBTITLE_WRAP_REFERENCE_WIDTH,
   isCjkText,
+  overlayAnchorForPosition,
   resolveSubtitleWrapLimit,
   wrapSubtitleText,
 } from "../../shared/subtitle-text";
@@ -834,8 +835,17 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   const scrubberMinimumMs = useIntroTimelinePreview ? 0 : (selected?.startMs ?? 0);
   const scrubberMaximumMs = useIntroTimelinePreview ? displayedDurationMs : (selected?.endMs ?? displayedDurationMs);
   const previewCanvasUnit = 100 / 480;
+  const overlayAnchor = overlayAnchorForPosition(subtitleStyle.verticalPositionPercent);
   const overlayStyle = {
     top: `${subtitleStyle.verticalPositionPercent}%`,
+    // Grow the block the same way the burned ASS anchor does (top-down for
+    // TOP, bottom-up for BOTTOM), otherwise multi-line previews drift.
+    transform:
+      overlayAnchor === "BOTTOM"
+        ? "translate(-50%, -100%)"
+        : overlayAnchor === "TOP"
+          ? "translate(-50%, 0)"
+          : "translate(-50%, -50%)",
     color: subtitleStyle.textColor,
     fontSize: `${subtitleStyle.fontSizePx * previewCanvasUnit}cqh`,
     WebkitTextStroke: `${subtitleStyle.outlineWidthPx * previewCanvasUnit}cqh #000000`,
@@ -1445,13 +1455,9 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                     const raw = event.target.value.trim();
                     setSubtitleStyle((current) => ({
                       ...current,
-                      maxCharactersPerLine:
-                        raw === ""
-                          ? undefined
-                          : Math.max(
-                              SUBTITLE_WRAP_MANUAL_MIN,
-                              Math.min(SUBTITLE_WRAP_MANUAL_MAX, Math.floor(Number(raw) || 0)),
-                            ),
+                      // Commit the raw integer while typing; Main clamps to
+                      // 6–40 on save, so partial input never snaps around.
+                      maxCharactersPerLine: raw === "" ? undefined : Math.floor(Number(raw) || 0),
                     }));
                   }}
                 />

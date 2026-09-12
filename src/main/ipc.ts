@@ -295,6 +295,9 @@ export function registerIpc(
   ipcMain.handle("source:set-photo-sound", (_event, assetId: string, enabled: boolean) =>
     store.setPhotoSoundEnabled(assetId, enabled),
   );
+  ipcMain.handle("source:set-dub-with-bgm", (_event, assetId: string, enabled: boolean) =>
+    store.setDubWithBgm(assetId, enabled),
+  );
   ipcMain.handle(
     "main:add-media-insertion",
     (

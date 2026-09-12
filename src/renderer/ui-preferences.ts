@@ -59,3 +59,48 @@ export function stepUiZoom(current: UiZoomPercent, direction: -1 | 1): UiZoomPer
   const index = Math.max(0, UI_ZOOM_LEVELS.indexOf(current));
   return UI_ZOOM_LEVELS[Math.max(0, Math.min(UI_ZOOM_LEVELS.length - 1, index + direction))];
 }
+
+export const GRID_OUTPUT_TIMES_VISIBLE_KEY = "scenerywalker.grid-output-times-visible.v1";
+export const GRID_OUTPUT_INCLUDE_INTRO_KEY = "scenerywalker.grid-output-include-intro.v1";
+
+function readFlag(storage: Pick<Storage, "getItem">, key: string, fallback: boolean): boolean {
+  try {
+    const raw = storage.getItem(key);
+    if (raw === null) return fallback;
+    return raw === "1";
+  } catch {
+    return fallback;
+  }
+}
+
+function applyFlag(value: boolean, storage: Pick<Storage, "setItem">, key: string): void {
+  try {
+    storage.setItem(key, value ? "1" : "0");
+  } catch {
+    // The display setting still applies for this session if persistent storage is unavailable.
+  }
+}
+
+/** Grid cards show each clip's output time range after concatenation. Defaults on. */
+export function readGridOutputTimesVisible(storage: Pick<Storage, "getItem"> = window.localStorage): boolean {
+  return readFlag(storage, GRID_OUTPUT_TIMES_VISIBLE_KEY, true);
+}
+
+export function applyGridOutputTimesVisible(
+  value: boolean,
+  storage: Pick<Storage, "setItem"> = window.localStorage,
+): void {
+  applyFlag(value, storage, GRID_OUTPUT_TIMES_VISIBLE_KEY);
+}
+
+/** Output ranges include the intro + main-start card lead time. Defaults on. */
+export function readGridOutputIncludeIntro(storage: Pick<Storage, "getItem"> = window.localStorage): boolean {
+  return readFlag(storage, GRID_OUTPUT_INCLUDE_INTRO_KEY, true);
+}
+
+export function applyGridOutputIncludeIntro(
+  value: boolean,
+  storage: Pick<Storage, "setItem"> = window.localStorage,
+): void {
+  applyFlag(value, storage, GRID_OUTPUT_INCLUDE_INTRO_KEY);
+}

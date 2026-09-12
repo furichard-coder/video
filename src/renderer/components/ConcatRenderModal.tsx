@@ -704,7 +704,7 @@ export function ConcatRenderModal({
                 ? `已在取消位置安全寫完 MPEG-4 尾端並驗證可播放；成品較原計畫短（原計畫 ${formatDuration(result.plannedDurationMs)}）。`
                 : isClip
                   ? "已從最高品質來源重新編碼固定時間段，並套用已保存的局部放大；未使用代理作為輸出來源。"
-                  : `已依目前順序串接 ${renderItems.length} 個${isIntro ? "建議片段" : "影片／照片片段"}${result.includedIntroSegmentCount ? `，前方包含 ${result.includedIntroSegmentCount} 段已確認片頭${result.mainStartCardDurationSeconds ? `及 ${result.mainStartCardDurationSeconds} 秒正片開始提示頁` : ""}` : ""}，交接處套用 ${result.transitionSeconds} 秒疊化${result.photoShutterAppliedCount ? `，${result.photoShutterAppliedCount} 次照片出現已加入沙丘快門聲` : ""}${result.bgmAppliedCount ? `，並在${result.bgmScopesApplied?.intro && result.bgmScopesApplied?.main ? "片頭與正片" : result.bgmScopesApplied?.intro ? "片頭" : "正片"}混入 ${result.bgmAppliedCount} 首配樂` : ""}。`}
+                  : `已依目前順序串接 ${renderItems.length} 個${isIntro ? "建議片段" : "影片／照片片段"}${result.includedIntroSegmentCount ? `，前方包含 ${result.includedIntroSegmentCount} 段已確認片頭${result.mainStartCardDurationSeconds ? `及 ${result.mainStartCardDurationSeconds} 秒正片開始提示頁` : ""}` : ""}，交接處套用 ${result.transitionSeconds} 秒疊化${result.photoShutterAppliedCount ? `，${result.photoShutterAppliedCount} 次照片出現已加入沙丘快門聲` : ""}${result.bgmAppliedCount ? `，並在${result.bgmScopesApplied?.intro && result.bgmScopesApplied?.main ? "片頭與正片" : result.bgmScopesApplied?.intro ? "片頭" : "正片"}混入 ${result.bgmAppliedCount} 首配樂` : ""}${result.autoDubClipCount ? `，其中 ${result.autoDubClipCount} 個無聲片段已自動鋪上第一首配樂` : ""}。`}
             </p>
             {result.subtitleBurnedLanguages?.length ? (
               <p className="inline-notice">

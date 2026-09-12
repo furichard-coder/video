@@ -1,8 +1,15 @@
-# Current Product Spec — v0.58.0
+# Current Product Spec — v0.59.0
 
 ## Scope
 
 Windows-first read-only source organizer. The first visible workflow remains source selection, thumbnail/proxy preview, ordering, IN/OUT, Intro and preview MP4 output. Sources, SOP files and previous releases are never overwritten.
+
+## v0.59.0 silent auto-dub, grid output times, subtitle wrap fixes
+
+- Silent VIDEO clips (no audio track) are auto-dubbed at render with the first READY BGM track laid under exactly their output range, reusing that track's volume/fades. The grid card shows a default-on 無聲自動配音 checkbox for silent videos; opting out keeps the clip silent. Applies to 片頭/串聯 renders when BGM is enabled; the result reports autoDubClipCount.
+- Grid cards show each rendered clip's output time range (串聯後 mm:ss→mm:ss) computed from the canonical timeline plan with the active transition. Display settings add two switches: show/hide the ranges, and include/exclude the 片頭＋即將開始提示頁 lead time (estimated from current render defaults).
+- Subtitle wrap fixes: the 每行字數 field no longer clamps while typing (raw integer committed, Main clamps 6–40 on save), and the preview overlay anchors multi-line blocks the same way as the burned ASS anchor (top-down / centered / bottom-up) so tall subtitles no longer drift off-screen.
+- The dub flag is render-only metadata: toggling it never bumps the timeline revision and never triggers subtitle re-review.
 
 ## v0.58.0 adjustable subtitle width with true preview, transparent master bus
 

@@ -39,6 +39,9 @@ interface AssetCardProps {
   onGridDragStart(assetId: string): void;
   onGridDragEnter(assetId: string): void;
   onGridDragEnd(): void;
+  /** Output ranges on the concatenated timeline; absent when the asset is not rendered or display is off. */
+  outputRanges?: Array<{ startMs: number; endMs: number }>;
+  outputRangeScopeLabel?: string;
 }
 
 export function AssetCard({
@@ -68,6 +71,8 @@ export function AssetCard({
   onGridDragStart,
   onGridDragEnter,
   onGridDragEnd,
+  outputRanges,
+  outputRangeScopeLabel,
 }: AssetCardProps) {
   const rootRef = useRef<HTMLElement>(null);
   const [visible, setVisible] = useState(false);
@@ -80,6 +85,7 @@ export function AssetCard({
   const [rangeNotice, setRangeNotice] = useState<string>();
   const [imageDurationBusy, setImageDurationBusy] = useState(false);
   const [photoSoundBusy, setPhotoSoundBusy] = useState(false);
+  const [dubBusy, setDubBusy] = useState(false);
   const [photoAnalysisEnabled, setPhotoAnalysisEnabled] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const dragHoldTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -274,6 +280,24 @@ export function AssetCard({
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setPhotoSoundBusy(false);
+    }
+  };
+
+  const changeDubWithBgm = async (enabled: boolean) => {
+    setDubBusy(true);
+    setError(undefined);
+    try {
+      const updated = await window.sourceApp.setDubWithBgm(asset.id, enabled);
+      onProjectUpdated(updated);
+      setRangeNotice(
+        enabled
+          ? "已啟用無聲配音；轉出時自動鋪上第一首配樂（沿用該配樂音量設定）。"
+          : "已關閉這支影片的無聲配音；轉出時該片段保持無聲。",
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setDubBusy(false);
     }
   };
 
@@ -473,6 +497,16 @@ export function AssetCard({
             <dt>編碼</dt>
             <dd>{codec || "讀取中／未提供"}</dd>
           </div>
+          {outputRanges?.length ? (
+            <div>
+              <dt>串聯後</dt>
+              <dd title={outputRangeScopeLabel}>
+                {outputRanges
+                  .map((range) => `${formatDuration(range.startMs)}→${formatDuration(range.endMs)}`)
+                  .join("、")}
+              </dd>
+            </div>
+          ) : null}
         </dl>
 
         {viewMode === "LIST" && (
@@ -641,6 +675,20 @@ export function AssetCard({
           >
             ✦ 影格分析 → 字幕
           </button>
+        )}
+        {asset.kind === "VIDEO" && asset.mediaInfo && !asset.mediaInfo.audioCodec && (
+          <label className="photo-sound-toggle">
+            <input
+              type="checkbox"
+              checked={asset.dubWithBgm !== false}
+              disabled={dubBusy}
+              onChange={(event) => void changeDubWithBgm(event.target.checked)}
+            />
+            <span>
+              <strong>預設勾選：無聲自動配音</strong>
+              <small>轉出時鋪上第一首配樂 · 沿用該配樂音量</small>
+            </span>
+          </label>
         )}
         {rangeNotice && <p className="inline-notice">{rangeNotice}</p>}
         {(error || asset.metadataError) && <p className="inline-error">{error ?? asset.metadataError}</p>}

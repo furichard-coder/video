@@ -356,6 +356,11 @@ export interface SourceAsset {
   mediaInfo?: BasicMediaInfo;
   imageDurationMs?: number;
   photoSoundEnabled?: boolean;
+  /**
+   * Silent VIDEO clips are auto-dubbed with the first READY BGM track unless
+   * explicitly false. Undefined keeps the default (dub when no audio track).
+   */
+  dubWithBgm?: boolean;
   previewRange?: PreviewRange;
   volumeSegments?: VolumeSegment[];
   mainExclusionRanges?: MainExclusionRange[];
@@ -843,6 +848,8 @@ export interface ConcatRenderResult {
   purpose: PreviewRenderPurpose;
   bgmAppliedCount?: number;
   bgmScopesApplied?: BgmScopeSelection;
+  /** Silent clips auto-dubbed with the first READY BGM track in this render. */
+  autoDubClipCount?: number;
   photoShutterAppliedCount?: number;
   mixPolicy?: "ORIGINAL_PLUS_BGM_LIMITED_0_95" | "VOICE_DUCK_EQ_COMPRESS_LIMIT";
   audioProtectionApplied?: boolean;
@@ -1185,6 +1192,7 @@ export interface AppApi {
   setPreviewRange(assetId: string, range: PreviewRange): Promise<PreviewRangeUpdateResult>;
   setImageDuration(assetId: string, durationMs: number): Promise<ImageDurationUpdateResult>;
   setPhotoSoundEnabled(assetId: string, enabled: boolean): Promise<ProjectManifest>;
+  setDubWithBgm(assetId: string, enabled: boolean): Promise<ProjectManifest>;
   addMediaInsertion(
     anchorVideoAssetId: string,
     insertedAssetId: string,

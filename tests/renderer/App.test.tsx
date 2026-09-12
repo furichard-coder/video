@@ -330,6 +330,12 @@ function mockApi(initialProject: ProjectManifest = project): AppApi {
       ),
       timelineRevision: initialProject.timelineRevision + 1,
     })),
+    setDubWithBgm: vi.fn(async (assetId, enabled) => ({
+      ...structuredClone(initialProject),
+      sources: initialProject.sources.map((item) =>
+        item.id === assetId ? { ...structuredClone(item), dubWithBgm: enabled } : structuredClone(item),
+      ),
+    })),
     addMediaInsertion: vi.fn(async (anchorVideoAssetId, insertedAssetId, atMs, sourceRange) => ({
       ...structuredClone(initialProject),
       timelineOrder: initialProject.timelineOrder.filter((id) => id !== insertedAssetId),

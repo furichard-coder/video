@@ -871,6 +871,15 @@ export class ProjectStore {
     });
   }
 
+  async setDubWithBgm(assetId: string, enabled: boolean): Promise<ProjectManifest> {
+    return this.mutate((project) => {
+      if (typeof enabled !== "boolean") throw new Error("無聲配音設定無效。");
+      const index = project.sources.findIndex((item) => item.id === assetId);
+      if (index < 0 || project.sources[index].kind !== "VIDEO") throw new Error("只有影片可以設定無聲配音。");
+      project.sources[index] = { ...project.sources[index], dubWithBgm: enabled };
+    });
+  }
+
   async addMediaInsertion(
     anchorVideoAssetId: string,
     insertedAssetId: string,
