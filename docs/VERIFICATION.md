@@ -11,6 +11,8 @@
 
 （可攜版路徑與 hash 於封裝完成後補。）
 
+v0.59.0 可攜版位於 `release\\v0.59.0\\SceneryWalkerSourceOrganizer-win32-x64\\SceneryWalkerSourceOrganizer-v0.59.0.exe`，資料夾大小 `407344242` bytes，SHA-256 `21DFF2529E1E75C8F606695A970C60ECBE026DBE1EF98C5C38A16096EF48B8EF`。封裝 smoke 已結束，未留下 v0.59.0 程序（當時使用者正在使用 v0.58.0 的 5 個程序未動）；未修改來源媒體、未上傳影片，也未安排關機或睡眠。
+
 ## v0.58.0 字幕寬度可調與透明 master bus（2026-09-12）
 
 | 項目           | 結果                                                                                                                                                                                    |

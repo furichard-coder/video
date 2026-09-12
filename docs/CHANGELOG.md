@@ -9,7 +9,7 @@
 - 字幕每行字數輸入改為打字時不亂跳（存檔時才夾到 6–40）；預覽浮層多行生長方向與燒錄錨點一致，不會再往上溢出畫面。
 - 配音開關不動時間軸版本，不觸發字幕重審。
 - 驗證：52 個測試檔／311 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke 與 `npm audit` 全部通過。
-- 交付：（待補 exe 路徑與 hash）。
+- 交付：`release/v0.59.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.59.0.exe`；SHA-256 `21DFF2529E1E75C8F606695A970C60ECBE026DBE1EF98C5C38A16096EF48B8EF`。
 
 ## v0.58.0 — 2026-09-12
 
