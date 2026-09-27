@@ -35,6 +35,25 @@ describe("UTF-8 SRT export", () => {
     ).rejects.toMatchObject({ name: "AbortError" });
     expect(await readdir(root)).toEqual([]);
   });
+  it("wraps exported cues with the language default or per-cue override", () => {
+    const chinese = serializeSrt([{ id: "zh", startMs: 0, endMs: 1_000, text: "一二三四五六七八九十十一十二十三" }]);
+    expect(chinese).toContain("一二三四五六七八九十十一\r\n十二十三");
+    const manual = serializeSrt([{ id: "en", startMs: 0, endMs: 1_000, text: "ABCDEFGHIJ", lineWidthChars: 6 }]);
+    expect(manual).toContain("ABCDEF\r\nGHIJ");
+  });
+  it("keeps standard SRT text and timing unchanged when a cue has canvas position metadata", () => {
+    const plain = serializeSrt([{ id: "positioned", startMs: 250, endMs: 1_250, text: "位置不寫入 SRT" }]);
+    const positioned = serializeSrt([
+      {
+        id: "positioned",
+        startMs: 250,
+        endMs: 1_250,
+        text: "位置不寫入 SRT",
+        position: { xPercent: 25, yPercent: 70 },
+      },
+    ]);
+    expect(positioned).toBe(plain);
+  });
   it("imports UTF-8 BOM, multiline text and dot/comma milliseconds as editable cues", async () => {
     let id = 0;
     const cues = parseSrt(

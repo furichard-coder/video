@@ -14,7 +14,7 @@ const account: AiAccountProfile & { apiKey: string } = {
   transcriptionModel: "gpt-4o-transcribe-diarize",
   credentialStatus: "SAVED_ENCRYPTED",
   updatedAt: "2026-09-02T00:00:00.000Z",
-  apiKey: "sk-secret-never-log",
+  apiKey: "fixture-secret-never-log",
 };
 async function root(): Promise<string> {
   const value = await mkdtemp(path.join(os.tmpdir(), "source-app-openai-"));

@@ -11,6 +11,7 @@ import { formatBytes, formatDate, formatDuration, formatResolution } from "../fo
 import { ClipRangeControl } from "./ClipRangeControl";
 import { retainedDurationMs } from "../../shared/editing-rules";
 import { filenameDisplayPriority } from "../filename-display";
+import { normalizeAudioTrackGates } from "../../shared/insertion-audio-plan";
 
 interface AssetCardProps {
   asset: SourceAsset;
@@ -30,6 +31,7 @@ interface AssetCardProps {
   onOpenMaterialEditor?(asset: SourceAsset, section: "VOLUME" | "INSERT"): void;
   mediaInsertions: Array<MediaInsertion & { insertedFileName: string; insertedKind: "VIDEO" | "IMAGE" }>;
   availableMediaCount: number;
+  insertionOccurrenceCount?: number;
   onProjectUpdated(project: import("../../shared/domain").ProjectManifest): void;
   onMove(delta: -1 | 1): void;
   canMoveUp: boolean;
@@ -40,7 +42,12 @@ interface AssetCardProps {
   onGridDragEnter(assetId: string): void;
   onGridDragEnd(): void;
   /** Output ranges on the concatenated timeline; absent when the asset is not rendered or display is off. */
-  outputRanges?: Array<{ startMs: number; endMs: number }>;
+  outputRanges?: Array<{
+    startMs: number;
+    endMs: number;
+    sourceDurationMs?: number;
+    insertedDurationMs?: number;
+  }>;
   outputRangeScopeLabel?: string;
 }
 
@@ -62,6 +69,7 @@ export function AssetCard({
   onOpenMaterialEditor,
   mediaInsertions,
   availableMediaCount,
+  insertionOccurrenceCount = 0,
   onProjectUpdated,
   onMove,
   canMoveUp,
@@ -302,6 +310,17 @@ export function AssetCard({
   };
 
   const displayTime = asset.mediaInfo?.captureTime ?? asset.fileCreatedAt ?? asset.fileModifiedAt;
+  const mainAudioGates = normalizeAudioTrackGates(asset.mainAudioGates);
+  const saveMainAudioGate = async (key: keyof typeof mainAudioGates, enabled: boolean) => {
+    try {
+      const updated = await window.sourceApp.setMainAudioGates(asset.id, { ...mainAudioGates, [key]: enabled });
+      onProjectUpdated(updated);
+      const label = key === "original" ? "原音" : key === "voice" ? "配音" : key === "bgm" ? "BGM" : "SFX";
+      setRangeNotice(`${label}已${enabled ? "開啟" : "關閉"}；片段長度與字幕時間不變。`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
   const codec = [asset.mediaInfo?.videoCodec, asset.mediaInfo?.audioCodec].filter(Boolean).join(" / ");
   const fileNamePriority =
     viewMode === "GRID" ? filenameDisplayPriority(asset.fileName, [previousFileName, nextFileName]) : "START";
@@ -358,6 +377,7 @@ export function AssetCard({
             ref={videoRef}
             className="inline-video"
             src={inlinePreview.url}
+            muted={mainAudioGates.original === false}
             autoPlay
             preload="auto"
             aria-label={`網格等比例預覽 ${asset.fileName}`}
@@ -447,6 +467,15 @@ export function AssetCard({
             放大
           </button>
         )}
+        {insertionOccurrenceCount > 0 && (
+          <button
+            className="inline-expand-button insertion-mix-preview-button"
+            type="button"
+            onClick={() => onOpen(asset)}
+          >
+            插入混音 {insertionOccurrenceCount} 次
+          </button>
+        )}
       </div>
 
       {asset.kind === "VIDEO" && range && asset.mediaInfo?.durationMs && (
@@ -502,7 +531,13 @@ export function AssetCard({
               <dt>串聯後</dt>
               <dd title={outputRangeScopeLabel}>
                 {outputRanges
-                  .map((range) => `${formatDuration(range.startMs)}→${formatDuration(range.endMs)}`)
+                  .map(
+                    (range) =>
+                      `${formatDuration(range.startMs)}→${formatDuration(range.endMs)}` +
+                      (range.sourceDurationMs !== undefined
+                        ? `（素材合計 ${formatDuration(range.sourceDurationMs)}${range.insertedDurationMs ? `，含插入 ${formatDuration(range.insertedDurationMs)}` : ""}；疊化後 ${formatDuration(range.endMs - range.startMs)}）`
+                        : ""),
+                  )
                   .join("、")}
               </dd>
             </div>
@@ -521,6 +556,21 @@ export function AssetCard({
               : `正片排除 ${asset.mainExclusionRanges.length} 段 · 保留 ${formatDuration(retainedDurationMs(asset))}`}
           </p>
         ) : null}
+        <div className="main-audio-gates" aria-label={`${asset.fileName} 正片 Audio`}>
+          {(["original", "voice", "bgm", "sfx"] as const).map((key) => {
+            const label = key === "original" ? "原音" : key === "voice" ? "配音" : key === "bgm" ? "BGM" : "SFX";
+            return (
+              <label key={key} title={key === "voice" ? "目前沒有獨立配音軌；此開關不會靜音素材人聲。" : undefined}>
+                <input
+                  type="checkbox"
+                  checked={mainAudioGates[key]}
+                  onChange={(event) => void saveMainAudioGate(key, event.target.checked)}
+                />
+                {label} {mainAudioGates[key] ? "✓" : "–"}
+              </label>
+            );
+          })}
+        </div>
         {asset.kind === "VIDEO" && (
           <>
             <div className="card-tool-row">
@@ -676,7 +726,7 @@ export function AssetCard({
             ✦ 影格分析 → 字幕
           </button>
         )}
-        {asset.kind === "VIDEO" && asset.mediaInfo && !asset.mediaInfo.audioCodec && (
+        {asset.kind === "VIDEO" && (
           <label className="photo-sound-toggle">
             <input
               type="checkbox"
@@ -685,8 +735,8 @@ export function AssetCard({
               onChange={(event) => void changeDubWithBgm(event.target.checked)}
             />
             <span>
-              <strong>預設勾選：無聲自動配音</strong>
-              <small>轉出時鋪上第一首配樂 · 沿用該配樂音量</small>
+              <strong>預設勾選：偵測無聲時自動配樂</strong>
+              <small>依本片段 IN／OUT 實測 · 使用配樂頁第一首</small>
             </span>
           </label>
         )}

@@ -2,7 +2,171 @@
 
 這是剪接 App 的可驗收垂直切片。它負責選擇、排列及預覽影片／照片，並可產生串連或 Intro 預覽；不建立正式 Master、不做多軌 Timeline 剪輯，也不改寫或刪除來源檔。完成的正片或僅片頭預覽可由使用者確認後以 Chrome 拖放或 YouTube 官方 API 上傳到已核對的頻道；正片也可安全交接到 BiliBili／TikTok 官方投稿頁。只有使用者主動執行 AI 時，才會送出低解析故事板與故事背景；字幕的素材語音分析預設關閉，只有另行勾選才建立及送出短音訊。
 
-目前版本：v0.56.0。
+目前版本：v0.80.0。
+
+v0.80.0 完成一次唯讀、copy-on-write 的舊 checkpoint 恢復驗證：可讀取並重用 10 個 level-1 segments（合計約 67.547 GiB、媒體時間約 8976.718 秒），不重編這 10 段；Base Master 仍需重跑。跨 group xfade、ASS 字幕與浮水印使這 10 段不能直接以 `-c copy` 串接，最後 audio mux 則固定沿用 `-c:v copy`。舊版已刪除的 `base.partial.mkv` 不可恢復。
+
+本次驗證採 15 秒 disk monitor 與 EMERGENCY safe pause。v0.79 classifier 命中 ENOSPC，但舊 raw stderr 未保存；曾記錄的 E: 144.45 GiB free 是刪除 partial 後的過時快照，UI 另曾顯示「建議再清 20 GiB」的錯誤提示，但沒有執行該清理，因此實際 E: 最低可用空間未知。基準回到既有 QSV GQ25：30 秒 bounded 測試的 SSIM 下降，故不採用該方案；本機 NVENC runtime 不支援，實際路徑為 QSV encode／CPU filter，慢速瓶頸約 0.10–0.115x。尚未跑完整長片，不宣稱已成功加速。
+
+本版紀錄的 74 files／459 tests、typecheck、production build、audit 與 source／packaged smokes 均通過；若日後重跑，數字與結果仍以新產出的證據為準。
+Windows 可攜版位於 `release/v0.80.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.80.0.exe`，SHA-256：`2445347DC1F96D24A4B463C6CB669F0C0BEF9FA2607BA27D0E40E6BD853B93FC`。
+
+續轉空間預估不會再把舊版已完成的 67.547 GiB 片段重複算成待寫入；但此案保守估計仍需新增約 182 GiB 才能同時保存 Base Master 與最終成品，相對 E: 當時約 144.45 GiB 可用，尚缺約 38 GiB，另需考慮安全餘量。真正開始前會重新測量磁碟，不會在空間不足時清除舊片段或冒險長時間轉檔。
+
+v0.79.0 修正「產出串連預覽」選擇 Render TEMP 後沒有真正保存的問題。選擇或驗證可寫資料夾後，偏好會原子保存；重開 App、轉檔前估算與新建立的 render work root 都會讀取同一路徑。已存在的 checkpoint 仍保留原 work root，不會在切換 TEMP 時搬移或失效。
+
+v0.78.0 將「精彩片頭」左側片段清單改為 compact thumbnail rail：影片與照片沿用 v0.77 的 first-valid-frame／單張 JPEG lazy cache，片段范围改变时会按 `assetId + IN/OUT` 重新取图，拖曳排序仍以稳定 segment ID 绑定，不会让缩图或 Audio 状态串位。常用的预览、裁切、原音、BGM、SFX 与移除集中为带状态的 icon toolbar，排序、影像分析／字幕与缩图重载收进 More；详细裁切与 Audio 仅在需要时展开。每个来源最多保留 64 组 Intro 小缩图 cache，避免反复微调范围无限累积 SSD。
+
+v0.77.0 收斂 Render Resource Architecture：三種資源模式共用同一份實際專案估算，預估同時納入 render TEMP、可回收中繼、持久畫面 master、音訊暫存、最終輸出、mux overhead 與安全餘量；完成 downstream 驗證後才依依賴關係回收中繼，保留 checkpoint／resume 所需的 durable master。Intro 縮圖改為首個有效影格才建立並以來源 fingerprint／範圍／版本快取，避免開啟專案時一次解碼整批素材。v0.77 的 Windows 封裝與測試紀錄會在完成驗證後更新於本節。
+
+v0.76.0 封裝驗證已完成：73 files／447 tests、TypeScript、production build、Electron source／packaged smoke 與 npm audit（0 vulnerabilities）通過。可攜版 EXE 位於 `release/v0.76.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.76.0.exe`，SHA-256：`1FD6A1F1B3EA0158A51BA2795BD5869C3D83DC6E5E35C627DD80073177797DBC`。
+
+## v0.76 Render 效能與磁碟可靠性
+
+- 實際 v0.75 失敗為 `-28 ENOSPC`：同一 `C:` 同時承擔中繼、partial、base master 與最終輸出，舊預估又以成品碼率低估 QSV GQ18 中繼。v0.76 改成逐磁碟峰值估算，納入中繼、同時 partial、音訊 TEMP、最終輸出、mux overhead 與 `max(20 GiB, remaining × 20%)` 安全保留。
+- Render TEMP 可在轉檔頁指定其他可寫磁碟；預估、Runtime Monitor 與 checkpoint 都使用該實際路徑。執行中每 30 秒更新 TEMP／輸出磁碟，接近臨界值時停止排入新工作並在安全邊界保存 `PAUSED_DISK_SPACE`，不再等磁碟歸零才被動失敗。
+- Resume 顯示前先核對完成片段的實體檔與大小，正式重用前再做 ffprobe／SHA-256。2026-09-18 的 05:57:13 舊工作只剩 JSON、實體片段已遺失，因此不能直接沿用；v0.76 會誠實標示並重建缺失片段。
+- Normal／High Speed 從單一 FFmpeg 工作開始，只有前一波實測 throughput 提升且 CPU／GPU／RAM／Commit／SSD 有餘裕時才提高 concurrency；十輸入 1440p xfade 實測 2 jobs 只比 1 job 快約 4%，不再預先以兩個工作放大 OOM／ENOSPC 風險。
+- 相容來源在 Normal 也會嘗試 QSV hardware decode；180 秒 4K→1440p 受控長測由 `171.72 s / 31.45 fps / 1.05x` 改善到 `162.33 s / 33.35 fps / 1.11x`，wall time 降低 5.47%。CPU filter 仍是主要瓶頸，沒有宣稱達到成熟 NLE 的專有 GPU composition 效能。
+- 此機器的 NVENC runtime 因驅動 API 版本不足而不可用，實際高速路徑是 H.264 QSV。GQ22 雖節省約 38% 中繼空間，但品質指標低於 GQ18，因此正式預設維持 GQ18；沒有以降低畫質冒充效能改善。
+- 中繼容器改用 MKV 以降低缺少 MP4 trailer 時整段無法恢復的風險；完整 FFmpeg integration 與額外 A/V timebase 驗證通過。跨批次 xfade、ASS 字幕與浮水印仍需 final picture pass，所以沒有不安全地強制全片 `-c copy`；只改 Audio 時仍沿用既有 video stream copy。
+
+## v0.75 片頭／正片 Audio 分區與片段四軌開關
+
+- 正片每個網格片段新增精簡的「原音／配音／BGM／SFX」四軌開關，舊專案與新素材四項預設全開。關閉配音或 BGM 不會靜音素材人聲；目前沒有獨立配音檔時，配音開關只保存為未來 voice track gate。
+- 片頭與正片 UI、轉出摘要明確分區，但 Preview、Proxy、放大預覽與 Final 仍讀取同一份 canonical Audio Plan。片頭列改用細分隔線、留白與 compact controls，提高同畫面資訊密度。
+- 「正片即將開始」提示音歸屬正片 SFX，預設開啟 0.65 秒，可設 0.10–3.00 秒或關閉。WebAudio 試聽與 FFmpeg 使用相同雙音頻率、延遲、增益與時長規格；提示音是 deterministic synthetic cue，不依賴品牌或外部授權素材。
+- 原音 gate 只作用於該片段的 canonical timeline 範圍；Voice、BGM、SFX 各自獨立。BGM gate 關閉時採 25 ms 邊界平滑，歌曲播放頭仍繼續前進，下一片段重新開啟時不從 0 秒重播。Main-start cue 使用獨立的全域 Main gate，不會被任一片段 SFX gate 誤關。
+- Picture/base master 的 signature 排除上述 post-audio 設定；只改四軌開關、正片提示音或全域 BGM 時，沿用已驗證畫面 master，Final post pass 固定 `-c:v copy`，只更新音訊 hash，不重編影片畫面。
+- manifest 升級 schema 21；v0.74 的 per-instance SFX/BGM 設定完整保留，新增 gates 補為全開，正片提示音補為 ON／650 ms。
+
+## v0.74 每次插入素材的 SFX／BGM 連續時間線
+
+- 正片安插與片頭共用同一個「插入素材音訊」控制。每次照片出現預設啟用相機快門 SFX；每次影片預設關閉 SFX。同一來源重複使用時，每個實例可獨立設定並隨專案保存。
+- SFX 與 BGM 是獨立勾選項，可單獨開啟、同時開啟或都關閉。BGM 以穩定 track ID 指定「不使用／第 1 首／第 2 首…」，SFX 不會中斷、重啟或靜音 BGM。
+- 連續相鄰素材若使用同一首 BGM，會合併成一個連續播放範圍；照片、影片與沒有原音軌的影片都使用同一 Project Timeline。曲目改變或設為不使用時才在邊界切換／停止，並套用保守 Fade。
+- BGM 比連續範圍短時會循環。一般範圍使用有限次數的真實 audio acrossfade；極端短素材為避免 filter graph 失控，會改用有界接點平滑並顯示警告。
+- 總體預覽與片頭 proxy 預覽重用相同 Audio Plan，同一時點可同時聽到來源音、BGM 與 SFX，不重編 proxy 影片。Final 先保存不含 insertion audio 的 MKV+FLAC 畫面／基礎原音 master，再以一次 post pass 完成 mix 與 Original／Enhanced／Virtual 5.1；影片固定 `-c:v copy`。
+- 每專案保留最近 1 份可重建 master，經 size、SHA-256、duration、codec 驗證後可跨 App 重開復用。轉檔頁 SSD 預估包含這份容量，也可由使用者確認後單獨清理；只改 SFX/BGM/DSP 不再重編影片。
+- 「串接／轉出」確認區直接顯示 Final 使用的每筆插入實例與合併 BGM range：片頭／正片、照片／影片、開始、長度、原音軌、SFX 名稱、BGM 曲目／範圍／連續性／Loop／Fade。
+- 舊專案自動遷移到 manifest schema 20：照片明確關閉快門的選擇會保留；沒有 instance 音訊欄位的照片按舊快門選擇補值，BGM 不會自動憑空開啟。既有非安插靜音影片 `dubWithBgm` 保持原邏輯，安插實例只由新設定控制。
+
+## v0.73 QSV 直式模糊填边与成功后电源动作
+
+- 修正 `VID_20260718_090633.mp4` 在长片高速分段转档时，中央直式画面正常、右侧模糊背景却出现绿色色度块的问题。实际坏片确认只污染 blurred-fill 背景支路，不是播放器或来源调色。
+- 需要 Display Matrix 旋转且要产生模糊填边的输入改用稳定 CPU decode＋既有单次 orientation normalization，之后仍可使用 QSV hardware encode；其他安全素材继续使用硬体 decode。所有 hwdownload frame 在 split／boxblur 前固定转成 planar `yuv420p`。
+- Preview、Proxy、segment 与 final 仍共用逐素材 orientation resolver；没有对全部 9:16 强制旋转。orientation/cache/checkpoint signature 已更新，旧坏中继不会被 Resume。
+- 输出页新增预设关闭的成功后电源动作，可选择「转档完成后」或「YouTube 官方 API 上传成功后」，以及关机／Hibernate／Sleep。只有最终档案验证或实际上传（含已要求的缩图）成功才触发。
+- 成功后显示可取消的60秒全局倒数。转档、续转、上传或缩图重试期间继续使用 Windows 防睡眠保护；新工作会取消旧倒数。失败、取消、暂停、上传失败、缩图失败都不会触发。
+- 关闭 App 时若仍有倒数，确认视窗会明确告知；确认关闭会明确取消倒数，不会静默遗失。完整安全边界见 `docs/adr/0066-qsv-blurred-fill-and-post-success-power.md`。
+
+## v0.72 Display Matrix 方向修正
+
+- 影片方向先由 coded width/height 與 ffprobe Display Matrix 建立 canonical visual orientation，再進入 16:9／9:16 scale、crop、pad 或模糊背景。
+- QSV、CUDA 與 software decode 均關閉隱式 autorotate，再由同一 resolver 只套一次 0／90／180／270 修正；不會把所有直式影片固定旋轉 90 度。
+- Thumbnail、Proxy、Intro、Main、Shorts、Segment 與 Final 共用同一方向規則；正規化輸出不帶額外 rotation matrix，避免播放器重複旋轉。
+- v0.72 不重用舊方向演算法的 render checkpoint 或 preview cache。完整根因與命令差異見 `docs/adr/0065-canonical-display-matrix-orientation.md`。
+
+## v0.71.0 字幕單筆位置與 60 字行寬
+
+- 字幕每行手動寬度統一放寬為 6–60 字；中文 12、英文／中英混合 20 的自動預設保持不變。
+- 每筆字幕新增獨立「位置」控制，可用滑鼠／觸控的上、下、左、右按鈕，或鍵盤方向鍵微調 1%；按住 Shift 調整 5%。X／Y 會立即顯示並保存。
+- 位置以輸出畫布百分比保存，並由字幕頁 Preview 與最終 ASS 燒錄共用相同換算；橫式／直式及 1080P／1440P 不會各自使用不同座標。
+- 「恢復中央／全域高低位置」會移除單筆覆寫，讓舊字幕與全域字幕高度設定繼續照原本方式運作。SRT 本身不支援絕對位置，因此只輸出標準文字與時間。
+
+## v0.70.0 iPhone Remote Control／Proxy 即時音效預覽
+
+- Windows App 可按「iPhone 遠端」按需啟動 lightweight local server；只綁定單一私人 LAN IPv4，顯示 IP、臨時 port 與 QR Code。iPhone Safari 掃碼即可使用直式大按鍵介面，不需安裝原生 iOS App。
+- 手机显示 Project、Progress、实际 Elapsed、ETA、Current Segment、CPU、GPU Encode、RAM、SSD、Encoder、Resolution、Render Mode、Audio Mode 与最新错误。REST command + SSE snapshot 共用 Main 的 `RenderCommandState`，断线或 Safari 进入背景不会中断 FFmpeg。
+- Start 只接受 Windows 端已选择输出位置并按「准备 iPhone 远端启动」的 job；Remote 没有文件系统或 FFmpeg process 权限。Pause 是 cooperative checkpoint boundary pause，先显示 PAUSING；Cancel 需要手机确认与 server 单次 nonce。
+- QR secret 位于 URL fragment、十分钟且只能使用一次；兑换成 HttpOnly SameSite=Strict session cookie + CSRF token。另有 exact Host/Origin、私人来源 IP、rate limit、session expiry、CSP/no-store。不会默认暴露 Internet；未来外网只建议 VPN／Tailscale，不做 port forwarding。
+- Audio Processing 页面可选择任一含音轨影片，复用现有 H.264 Proxy Video，并从当前播放头建立约 20 秒高品质来源音讯 cache。调整 Stereo Width、Surround/LFE、低频／人声 EQ 后 debounce 重新产生；A/B 在同一 playhead 切换，漂移超过 120 ms 才校正。
+- Virtual 5.1 在双声道设备仍使用明确标示的 5.1→Stereo compatibility monitoring；Final 维持真正 5.1。Preview cache key 含来源 fingerprint、timeline revision、range、DSP profile/version，采用 atomic partial、latest-request-wins、七天 TTL 与 2 GiB LRU；不用于 Final Output。
+- 完整決策見 `docs/adr/0063-lan-remote-control-and-proxy-audio-monitoring.md`。
+
+## v0.69.0 Audio Processing
+
+- 輸出頁新增 `Original Stereo 2.0`、`Enhanced Stereo 2.0`、`Virtual Surround 5.1` 與受限的「保持原始多聲道」。UI 不以未授權品牌名稱包裝一般 codec 或 Upmix。
+- Enhanced Stereo 保持 2.0，Natural 預設只做保守 mid/side 寬度、輕微 EQ、LUFS 與 Peak Protection；不以強延遲製造容易相消的假寬度。
+- Virtual 5.1 明確建立 `FL FR FC LFE SL SR`：Center 使用左右共同成分，Surround 使用差異成分與短延遲／頻帶限制，LFE 使用 L+R 並以 80–120 Hz low-pass；Natural 預設避免過強後方與低頻。
+- 5.1 可選 AAC／AC-3／E-AC-3；YouTube 預設為 AAC 5.1、48 kHz、384 kbps。Virtual 5.1 是 Stereo 演算法模擬，不等同原生錄製 5.1。
+- 完整畫面先沿用既有轉場、字幕、浮水印、BGM、無聲素材自動配樂與 Resume 流程；空間音訊隨後獨立處理，並用 `-c:v copy` 重新封裝，因此不會再次 Encode 已完成的影片 frames。
+- A/B 試聽使用最多 20 秒的唯讀來源衍生 cache；Virtual 5.1 在雙聲道設備上提供明確標示的 5.1→Stereo 相容性監聽（不是 HRTF/binaural）。Meter 的 LUFS／Peak／Clipping 來自實際 FFmpeg ebur128/astats 分析，Virtual 另顯示實際 FL／FR／FC／LFE／SL／SR 六聲道 Peak。
+- 「保持原始多聲道」第一版只開放單支原生多聲道影片的時間段輸出，以 video/audio stream copy 保留。多片段、轉場或混合 BGM 無法在不改變內容的前提下 bitstream preserve，會明確阻擋而不會靜默壓成立體聲。
+
+## v0.68.0 本輪完成
+
+- 實際 FFmpeg PID 出現後才開始 monotonic 實際耗時計時；預檢與人工確認不計入，但分段 wave、記憶體等待與 final concat 間的等待都連續計入本次執行。
+- 轉檔畫面每秒本地刷新 `已耗時 HH:MM:SS`，並與既有 `預估剩餘 HH:MM:SS` 分開。完成、失敗、取消分別顯示總耗時或本次耗時；Resume 另列累積總耗時。
+- 每五分鐘以及 terminal 狀態保存 monotonic elapsed。Resume 沿用之前 finalized attempts；Crash 僅恢復到最後持久 heartbeat，不把 App 關閉或電腦關機後的時間誤算進轉檔。
+- 可續轉狀態保存在 App userData 的 `projects/render-state/<projectId>.render-state.json`；所有三種 terminal 狀態另寫 `<renderId>.timing.ndjson`，即使人工取消清除 checkpoint 仍可查閱。
+- 完整決策見 `docs/adr/0061-actual-render-elapsed-timing.md`。
+- Windows 可攜版：`release/v0.68.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.68.0.exe`；SHA-256 `DF87C3894664C0707CF97C88CAA13335600C527D8EBC0F695EEAD1AC9DBC40FD`。
+
+## v0.67.0 本輪完成
+
+- FFmpeg encoder／decoder 以短片真正啟動測試建立硬體／driver／FFmpeg fingerprint profile。不可用的 NVENC 不會被推薦或靜默改成 CPU；H.265 CPU 明示顯著較慢。
+- 本機 `h264_nvenc`、`hevc_nvenc` 均因 driver NVENC API 13.0 低於 FFmpeg 8.1.2 所需 13.1 而失敗；Intel `h264_qsv`、`hevc_qsv` 通過，因此高速預設為 H.264 QSV。
+- Normal 由兩個工作起步並依 RAM／Commit／CPU／GPU／SSD／throughput 逐波測試 3、4；高速模式可由 profile 的三個工作起步。
+- ETA 在 30 秒 warm-up 後用 FFmpeg `speed=x` EMA 平滑校正；監控新增 GPU Compute、VRAM 與 Current ETA。
+- SSD 保留 1 GiB 防毀檔硬門檻，另以 `max(20 GiB, 磁碟容量 5%)` 做可確認後繼續的建議安全餘量。
+- 完整決策見 `docs/adr/0060-runtime-probed-render-pipeline.md`；同專案短 benchmark 見 `docs/BENCHMARK_V067.json`。
+
+## v0.66.0 本輪完成
+
+- 先核對實際 command：既有 Normal 已使用 Intel QSV `hevc_qsv`／`h264_qsv` 硬體編碼；主要瓶頸是 CPU decode、CPU `fps/scale/blur/overlay/zoompan/xfade`、多層中繼與重複正規化，不是 RAM budget 沒填滿，也不是再次更換 encoder。
+- 新增高速轉檔模式：相容的 H.264／HEVC 來源可嘗試 QSV decode，再以 `hwdownload` 安全接回既有 CPU filter；硬體／driver／filter 不相容時自動回退 CPU。照片與 MJPEG 直接使用 CPU decode。
+- Adaptive concurrency 同時檢查 CPU、GPU、Available RAM、Commit 與 SSD headroom。接近門檻暫停新工作，壓力過高降低下一 wave；只有實測吞吐改善至少 3% 才由 1–2 逐步升至 3–4，無改善即回退。
+- 第一層已正規化到所選 1080P／1440P／4K；後續 reduction levels 不再重跑 fps/scale/pad/audio normalize。Final 因 xfade、字幕、浮水印、BGM 與 limiter 必須 filter/re-encode，不能在內容相同前提下改為 `-c copy`。
+- UI 新增 Encoder、Decoder、CPU、GPU Encode/Decode、RAM、FPS、`speed=x`、Current Jobs、SSD read/write 與 TEMP/working usage；ETA 依 FFmpeg 實際 speed 動態校正。
+- 完整決策見 `docs/adr/0059-bottleneck-aware-high-speed-render.md`。
+
+## v0.65.0 本輪完成
+
+- 一般轉檔不再採固定 RAM 峰值；依 Total RAM、Available RAM、CPU/GPU 即時負載建立安全預算。24 GB 機器至少保留 6 GB，32 GB 以上至少保留 8 GB；條件足夠時採 10／14／18 GB 階段，不會為了湊 18 GB 耗盡系統餘量。
+- RAM 預算用於獨立中繼片段的平行處理，不增加無效 frame buffer。單一 FFmpeg 最多 10 個視覺輸入，完成一批即結束 process 並釋放 decoder/filter/encoder 記憶體。
+- 一般模式先保守啟動 1–2 個工作；每批完成後以實際片長／耗時 benchmark 判斷吞吐量。只有改善至少 3% 且 CPU、GPU、RAM 仍有餘裕才增加一個工作；壓力升高時讓目前工作完成，再降低下一批 concurrency。
+- 轉檔畫面與持久 diagnostic log 顯示 CPU、GPU、總／可用 RAM、FFmpeg RAM、目前工作數、FPS、speed 與 SSD 讀寫吞吐；估算卡也會顯示各模式平行工作上限。
+- 只調整資源排程；時間線、字幕、配樂、轉場、構圖及最終輸出內容維持既有 pipeline。
+
+## v0.64.0 本輪完成
+
+- 依 Windows Event ID 2004 找到 `-12 Cannot allocate memory` 根因：FFmpeg 曾提交約 45.86 GiB，逼近本機 RAM＋Pagefile 約 50.44 GiB Commit Limit；C 槽約 74 GiB 可用並非主因，FFmpeg 也是 64-bit。
+- 一般模式不再無上限建立巨大 filter graph。兩種模式都依即時可用 RAM 採 bounded stages：低記憶體每批 3–6 個，一般模式較大但最高 16 個；保留 `max(4 GiB, Total RAM × 18%)`，並調整 filter／encoder threads。
+- 轉檔前顯示 RAM、App／其他程式、Pagefile、Commit、TEMP／輸出磁碟與兩模式估算；RAM／Commit 以橘紅警告並可確認繼續，SSD 低於 1 GiB 安全餘量才阻擋。執行中顯示 current segment、RAM、FFmpeg、工作檔與剩餘時間。
+- 中繼片段以 size、duration、codec 與 SHA-256 驗證後持久保存。失敗、App 關閉或 Windows 重啟可續轉；只有 final concat 失敗時，不會重新 encode 已完成片段。人工取消仍清理本次 checkpoint。
+- 新增 1080P 與 1440P（2K），新安裝預設 1080P。橫式為 1920×1080／2560×1440；Shorts 直式為 1080×1920／1440×2560。解析度同步進入 Preview Canvas、字幕、早期 normalization、RAM／SSD／檔案大小／時間估算。
+- UI 建立共用藍色 Primary、紫色模式／選取、粉色點綴、橘色警告、紅色危險與灰色 Disabled tokens；補齊 hover、pressed、focus、loading、selected、reduced-motion 與窄視窗排列，維持專業深色影音工具風格。
+
+## v0.63.0 本輪完成
+
+- 「產出串連檔案」把原本單一勾選改為兩個明確模式：預設的低記憶體分段轉檔，以及一般單次轉檔。切換只改 FFmpeg 工作方式，不改來源選擇、時間軸、轉場、字幕、配樂、浮水印、畫布或最終 codec。
+- 兩種模式的 SSD 工作空間、RAM 峰值、時間、同時載入數與分段工作數會一直並排顯示，不必先切換。估算會讀取目前選用片段的來源解析度、FPS、codec、片長、照片與插入素材數，再結合目標解析度／codec、0.3–0.7 秒轉場及實際六輸入遞迴分段策略。
+- SSD 估算依實際 partial 成品與各層 H.264 中繼檔「產生新檔、驗證、再刪舊檔」生命週期計算尖峰；RAM 依同時開啟的解碼器、來源／輸出 frame buffer 與 filter graph buffer 推估。畫面會讀取目前輸出磁碟空間及系統可用／總 RAM，接近或超出時標橘／紅色提醒，但不鎖住模式選擇。
+- 真正開始轉檔前仍會以當下磁碟狀態重算所選模式；低於既有 1 GB 安全保留才會阻擋，RAM 警告本身不會禁止使用者執行。
+
+## v0.62.0 本輪完成
+
+- 字幕頁與 ASS 成片共用 854×480 字級基準、每行字數解析、Microsoft JhengHei、外框／陰影縮放與精確垂直百分比；預覽不再把位置簡化成上／中／下三段。單筆及批次行寬上限由 40 提高為 60。
+- 片頭影片／照片的人工秒數與 IN／OUT 不再被 3–22 秒建議範圍截回；超出時只顯示橘色提醒，預覽與輸出均保留使用者選定範圍。只保留來源邊界與 0.1 秒編輯步進；極短片段若短於所選疊化需求，會在轉出時明確要求調整其中一項。
+- 網格放大預覽改用與正片輸出相同的 16:9 Canvas。橫式素材等比置中、空白補黑；直式素材等比置中並使用同來源放大模糊背景。共用判斷函式也供 Shorts 9:16 Canvas 使用，未改變既有 FFmpeg 成片構圖。
+- 網格的「串聯後」時間直接取自正式 Timeline plan，插入的影片／照片歸回主片段計算，同時顯示素材合計、插入時長及扣除疊化後的實際成品區間；總長與後續片段起點沿用同一資料來源。
+
+## v0.61.0 本輪完成
+
+- 「產出串連預覽」新增預設勾選的低記憶體分段轉檔。大量素材不再一次建立超大型 FFmpeg filter graph，而是每批最多 6 個畫面輸入、逐層合併，最後才一次套用字幕、浮水印、配樂與所選 H.265／H.264 成品格式；可降低 `Cannot allocate memory (-12)` 再發風險。
+- 分段暫存放在選定輸出旁的單次工作資料夾，成功、失敗或取消都會清除；轉檔前預估會另外列出暫存空間。這個模式比較省記憶體，但會增加暫存磁碟空間與轉檔時間，仍須遵守至少保留 1 GB 的既有阻擋規則。
+- 「片頭＋正片串接」移到設定最上方；有已確認片頭時預設勾選，仍會先顯示既有的「正片即將開始」提示頁設定，使用者可取消只輸出正片。
+- 正片新增預設勾選的「YouTube 全自動上傳」。啟用時固定使用已連線的 YouTube 官方 API，預設不是兒童內容並套用完整播放／縮圖／標題／說明／章節／頻道／觀眾／可見度檢查，60 秒倒數後自動執行既有的最終上傳動作。
+- 全自動模式不是模擬 Chrome 滑鼠點擊；若帳號／頻道不符、OAuth 未連線或發布素材驗證失敗會停止，不會猜測或繞過 YouTube。預設可見度仍為不公開，取消全自動後可改用原本 Chrome＋檔案總管拖放。
+
+## v0.60.0 本輪完成
+
+- 字幕沒有單筆覆寫時，中文預設每行 12 字，英文或中英混合預設每行 20 字。每一筆字幕旁新增「行寬」視窗，可用數字欄位的 ↑／↓ 或直接輸入 6–60；保存只影響該 cue，也可恢復語言自動預設。
+- 字幕頁預覽、SRT 匯出與 MP4 ASS 燒錄共用單筆行寬解析，避免畫面預覽與成品斷行不同。舊專案 cue 沒有新欄位時自動相容。
+- 網格卡與放大預覽對每支影片顯示預設勾選的「偵測無聲時自動配樂」。轉出前以 FFmpeg 對實際選用 IN／OUT 執行唯讀音量量測；沒有音軌或最大音量不高於 -50 dB 才視為無聲，照片完全忽略。
+- 自動配樂只使用配樂頁清單第一首，沿用該首的音量與淡入淡出，並只鋪在被判定無聲的片段輸出範圍。取消單片勾選或在產出頁停用配樂時不會自動加入。
+- Manifest schema 升級為 18；v0.59 與更舊專案讀取後安全遷移，來源影片、照片、MP3、既有輸出及 v0.59 release 不改寫。
 
 ## v0.56.0 本輪完成
 
@@ -342,7 +506,7 @@
 - 安插、排除、片段與音量區段的開始／結束使用獨立「分」「秒」輸入格；按 Enter 會由起點分鐘依序前進，manifest 內仍保存整數毫秒，維持輸出精度。
 - 照片點擊放大後依 display dimensions／rotation 維持 16:9、9:16 等原始比例，以 `contain` 完整顯示，不裁切或拉伸。
 - 依目前排序串連所有影片與照片；每個交接可選 0.3／0.5／0.7 秒影像疊化與音訊淡化，直式照片沿用中央等比＋同源模糊背景。
-- 串連預覽可選 360p（640×360）、480p（854×480）、720p（1280×720）或 4K（3840×2160），固定等比縮放、不裁切畫面。
+- 串連預覽可選 360p、480p、720p、1080p（1920×1080）、1440p／2K（2560×1440）或 4K；新安裝預設 1080p。Shorts 可選 1080×1920 或 1440×2560，皆依同一 Canvas 規格等比構圖。
 - 「AI 精彩片頭建議」先以本機亮度、色彩與幀間變化建立少量來源可追溯候選；設定具可用額度的 OpenAI API 後，再以短音訊與低解析三格故事板優先比對人物、事件、故事脈絡與地點，最後才參考本機動態／色彩分數重新排序。
 - 沒有完整故事背景或 API 憑證時，片頭會明確顯示原因並退回本機候選；AI 不以臉孔外觀猜測真實身分，也不把不確定地點當成事實。
 - 每個片頭建議均可依素材經 rotation 修正後的原始顯示比例完整預覽，不裁切或拉伸；並可調整 IN／OUT、上移、下移或排除，再輸出 360p／480p／720p／4K Intro 預覽。App 不再限制片頭總長為 3 分鐘；超過時只顯示紅色警示。最多 50 段、每段至少 3 秒且最多 22 秒，AI 建議、人工修改與輸出共用同一驗證規則。
@@ -404,7 +568,7 @@ npm run dev
 已產生可直接啟動的 Windows x64 App：
 
 ```text
-release\v0.55.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.55.0.exe
+release\v0.75.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.75.0.exe
 ```
 
 重新封裝：

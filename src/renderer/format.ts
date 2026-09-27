@@ -21,6 +21,15 @@ export function formatDuration(durationMs?: number): string {
     : `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+/** Fixed-width clock for actual elapsed and ETA status displays. */
+export function formatRenderClock(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+}
+
 /** Editable time format: total minutes:seconds, with optional hundredths. */
 export function formatMinuteSecondInput(durationMs: number): string {
   const safeMs = Math.max(0, Math.round(Number.isFinite(durationMs) ? durationMs : 0));

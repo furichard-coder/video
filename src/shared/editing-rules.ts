@@ -236,12 +236,8 @@ export function validateMediaInsertion(
   );
   if (!retainedRange)
     throw new Error("素材安插點必須位於主影片保留範圍內，並距離該段起點與終點至少 0.75 秒，以保留 0.7 秒疊化空間。");
-  for (const item of existing) {
-    if (item.id === ignoreInsertionId || item.anchorVideoAssetId !== video.id) continue;
-    if (item.insertedAssetId === inserted.id) throw new Error("這個素材已安插在此影片中。");
-  }
-  if (existing.some((item) => item.id !== ignoreInsertionId && item.insertedAssetId === inserted.id))
-    throw new Error("這個素材已安插到其他影片時段中。");
+  // One source may be used by multiple independent insertion occurrences.
+  // Their trims and audio settings are stored on the occurrence, never on the SourceAsset.
   if (existing.some((item) => item.id !== ignoreInsertionId && item.anchorVideoAssetId === inserted.id))
     throw new Error("此影片本身已有安插內容，為避免巢狀時間線，請先取消其安插內容。");
   if (inserted.kind === "IMAGE") return { atMs, sourceInMs: 0, sourceOutMs: imageDurationMs(inserted) };
@@ -366,6 +362,22 @@ export function validateSubtitleCues(cues: SubtitleCue[]): SubtitleCue[] {
       if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs < 0 || endMs <= startMs)
         throw new Error("字幕結束時間必須晚於開始時間。");
       if (typeof cue.text !== "string" || !cue.text.trim()) throw new Error("字幕文字不可空白。");
+      if (
+        cue.lineWidthChars !== undefined &&
+        (!Number.isInteger(cue.lineWidthChars) || cue.lineWidthChars < 6 || cue.lineWidthChars > 60)
+      )
+        throw new Error("單筆字幕每行字數必須是 6–60 的整數，或使用自動預設。");
+      if (
+        cue.position !== undefined &&
+        (!cue.position ||
+          !Number.isInteger(cue.position.xPercent) ||
+          !Number.isInteger(cue.position.yPercent) ||
+          cue.position.xPercent < 5 ||
+          cue.position.xPercent > 95 ||
+          cue.position.yPercent < 5 ||
+          cue.position.yPercent > 95)
+      )
+        throw new Error("單筆字幕位置 X／Y 必須是 5–95 的整數百分比，或恢復全域預設。");
       const origins = new Set(["MANUAL", "IMPORTED_SRT", "AI_SPEECH", "AI_VISUAL"]);
       const statuses = new Set(["DRAFT", "CONFIRMED", "REJECTED"]);
       if (cue.origin !== undefined && !origins.has(cue.origin)) throw new Error("字幕來源類型無效。");
@@ -390,6 +402,8 @@ export function validateSubtitleCues(cues: SubtitleCue[]): SubtitleCue[] {
         startMs,
         endMs,
         text: cue.text.replace(/\r\n?/g, "\n").trim(),
+        lineWidthChars: cue.lineWidthChars,
+        position: cue.position ? { xPercent: cue.position.xPercent, yPercent: cue.position.yPercent } : undefined,
         timelineScope,
         sourceInMs: cue.sourceInMs === undefined ? undefined : Math.max(0, Math.round(cue.sourceInMs)),
         sourceOutMs: cue.sourceOutMs === undefined ? undefined : Math.max(0, Math.round(cue.sourceOutMs)),

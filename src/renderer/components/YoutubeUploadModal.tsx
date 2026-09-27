@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AiPublishAssets,
   PreviewOutputPurpose,
@@ -30,6 +30,7 @@ interface Props {
   onOpenSettings(): void;
   onClose(): void;
   publishAssets?: AiPublishAssets;
+  automaticUpload?: boolean;
 }
 
 function fileStem(filePath: string): string {
@@ -45,7 +46,13 @@ function selectedThumbnail(assets?: AiPublishAssets) {
   return assets?.thumbnails.find((item) => item.id === assets.selectedThumbnailId);
 }
 
-export function YoutubeUploadModal({ renderResult, onOpenSettings, onClose, publishAssets }: Props) {
+export function YoutubeUploadModal({
+  renderResult,
+  onOpenSettings,
+  onClose,
+  publishAssets,
+  automaticUpload = false,
+}: Props) {
   const previewLabel =
     renderResult.purpose === "INTRO" ? "片頭預覽" : renderResult.purpose === "SHORTS" ? "Shorts 預覽" : "正片預覽";
   const [settings, setSettings] = useState<YoutubeSettingsSnapshot>();
@@ -58,13 +65,18 @@ export function YoutubeUploadModal({ renderResult, onOpenSettings, onClose, publ
   );
   const [thumbnailPath, setThumbnailPath] = useState(selectedThumbnail(publishAssets)?.outputPath);
   const [privacyStatus, setPrivacyStatus] = useState<YoutubePrivacyStatus>("unlisted");
-  const [madeForKids, setMadeForKids] = useState<"UNSET" | "NO" | "YES">("UNSET");
+  const [madeForKids, setMadeForKids] = useState<"UNSET" | "NO" | "YES">(automaticUpload ? "NO" : "UNSET");
   const [progress, setProgress] = useState<YoutubeUploadProgress>();
   const [uploading, setUploading] = useState(false);
-  const [reviewing, setReviewing] = useState(false);
-  const [reviewConfirmed, setReviewConfirmed] = useState(false);
+  const [reviewing, setReviewing] = useState(automaticUpload);
+  const [reviewConfirmed, setReviewConfirmed] = useState(automaticUpload);
   const [result, setResult] = useState<YoutubeUploadResult>();
   const [error, setError] = useState<string>();
+  const [publishAssetsReady, setPublishAssetsReady] = useState(
+    Boolean(publishAssets) || renderResult.purpose === "INTRO",
+  );
+  const [preferencesReady, setPreferencesReady] = useState(false);
+  const automaticStartedRef = useRef(false);
 
   const applyPublishAssets = (assets: AiPublishAssets) => {
     setActivePublishAssets(assets);
@@ -82,7 +94,8 @@ export function YoutubeUploadModal({ renderResult, onOpenSettings, onClose, publ
     void window.sourceApp
       .getUserPreferences()
       .then((preferences) => setPrivacyStatus(preferences.youtubeUploadDefaults.privacyStatus))
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => setPreferencesReady(true));
     // Intro previews are short-lived QA uploads. Do not silently attach the
     // main video's title, chapters, or thumbnail to an intro-only test.
     if (!publishAssets && renderResult.purpose !== "INTRO")
@@ -91,7 +104,8 @@ export function YoutubeUploadModal({ renderResult, onOpenSettings, onClose, publ
         .then((assets) => {
           if (assets) applyPublishAssets(assets);
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => setPublishAssetsReady(true));
     window.sourceApp.onYoutubeUploadProgress(setProgress);
     return () => window.sourceApp.clearYoutubeUploadProgressListeners();
   }, []);
@@ -144,6 +158,44 @@ export function YoutubeUploadModal({ renderResult, onOpenSettings, onClose, publ
       setUploading(false);
     }
   };
+
+  useEffect(() => {
+    if (
+      !automaticUpload ||
+      automaticStartedRef.current ||
+      uploading ||
+      result ||
+      !settings ||
+      !preferencesReady ||
+      !publishAssetsReady
+    )
+      return;
+    if (!channelMatches) {
+      setError("YouTube 全自動上傳已等待，但目前登入頻道與設定的目標頻道不一致；不會誤傳到其他頻道。");
+      return;
+    }
+    if (!title.trim() || titleLength > 100 || !chaptersIncluded || !chaptersValid) {
+      setError("YouTube 全自動上傳已停止：標題、說明或章節未通過最後格式檢查，請改用手動確認。");
+      return;
+    }
+    automaticStartedRef.current = true;
+    setMadeForKids("NO");
+    setReviewing(true);
+    setReviewConfirmed(true);
+    void startUpload();
+  }, [
+    automaticUpload,
+    channelMatches,
+    chaptersIncluded,
+    chaptersValid,
+    preferencesReady,
+    publishAssetsReady,
+    result,
+    settings,
+    title,
+    titleLength,
+    uploading,
+  ]);
 
   return (
     <div className="modal-backdrop nested-modal" role="presentation">

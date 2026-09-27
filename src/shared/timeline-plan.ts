@@ -21,6 +21,17 @@ export interface TimelinePlanOptions {
   transitionSeconds?: number;
 }
 
+export interface MainTimelineGroup {
+  /** Top-level grid asset that owns this rendered sequence. */
+  anchorAssetId: string;
+  outputStartMs: number;
+  outputEndMs: number;
+  /** Sum before transition overlap; includes every inserted video/photo. */
+  sourceDurationMs: number;
+  insertedDurationMs: number;
+  clipCount: number;
+}
+
 export function buildTimelinePlan(project: ProjectManifest, options: TimelinePlanOptions = {}): TimelinePlan {
   const transitionMs = Math.max(
     0,
@@ -43,6 +54,45 @@ export function buildTimelinePlan(project: ProjectManifest, options: TimelinePla
     cursor = clip.outputEndMs;
   });
   return { clips: source, durationMs: cursor, transitionMs };
+}
+
+/**
+ * Groups the canonical Main render plan back onto its top-level grid asset.
+ * Insertions remain individual render clips, but their time belongs to the
+ * anchor card so preview, Timeline and final render all read one plan.
+ */
+export function buildMainTimelineGroups(
+  project: ProjectManifest,
+  options: Pick<TimelinePlanOptions, "transitionSeconds"> = {},
+): MainTimelineGroup[] {
+  const plan = buildTimelinePlan(project, { includeIntro: false, transitionSeconds: options.transitionSeconds });
+  const anchorByInsertionId = new Map(
+    (project.mediaInsertions ?? []).map((insertion) => [insertion.id, insertion.anchorVideoAssetId]),
+  );
+  const groups: MainTimelineGroup[] = [];
+  for (const clip of plan.clips) {
+    const anchorAssetId = clip.mediaInsertionId
+      ? (anchorByInsertionId.get(clip.mediaInsertionId) ?? clip.assetId)
+      : clip.assetId;
+    const span = Math.max(0, clip.outMs - clip.inMs);
+    const current = groups.at(-1);
+    if (!current || current.anchorAssetId !== anchorAssetId) {
+      groups.push({
+        anchorAssetId,
+        outputStartMs: clip.outputStartMs,
+        outputEndMs: clip.outputEndMs,
+        sourceDurationMs: span,
+        insertedDurationMs: clip.mediaInsertionId ? span : 0,
+        clipCount: 1,
+      });
+      continue;
+    }
+    current.outputEndMs = clip.outputEndMs;
+    current.sourceDurationMs += span;
+    if (clip.mediaInsertionId) current.insertedDurationMs += span;
+    current.clipCount += 1;
+  }
+  return groups;
 }
 
 export function mapTimelineCueToPlan(cue: SubtitleCue, plan: TimelinePlan): SubtitleCue | undefined {

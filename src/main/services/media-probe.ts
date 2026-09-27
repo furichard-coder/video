@@ -1,4 +1,5 @@
 import type { BasicMediaInfo } from "../../shared/domain";
+import { resolveMediaOrientation } from "../../shared/media-orientation";
 import { runProcess } from "./process-runner";
 
 interface ProbeStream {
@@ -9,6 +10,10 @@ interface ProbeStream {
   avg_frame_rate?: string;
   r_frame_rate?: string;
   duration?: string;
+  channels?: number;
+  channel_layout?: string;
+  sample_rate?: string;
+  bit_rate?: string;
   tags?: Record<string, string>;
   side_data_list?: Array<{ rotation?: number }>;
 }
@@ -65,10 +70,11 @@ export class MediaProbe {
     const rawRotation =
       video?.side_data_list?.find((item) => Number.isFinite(item.rotation))?.rotation ??
       Number(video?.tags?.rotate ?? 0);
-    const rotationDegrees = Number.isFinite(rawRotation) ? ((Math.round(rawRotation) % 360) + 360) % 360 : 0;
-    const swapsAxes = rotationDegrees === 90 || rotationDegrees === 270;
-    const displayWidth = swapsAxes ? video?.height : video?.width;
-    const displayHeight = swapsAxes ? video?.width : video?.height;
+    const orientation = resolveMediaOrientation({
+      width: video?.width,
+      height: video?.height,
+      rotationDegrees: rawRotation,
+    });
 
     return {
       width: video?.width,
@@ -77,11 +83,15 @@ export class MediaProbe {
       frameRate: video?.avg_frame_rate || video?.r_frame_rate,
       videoCodec: video?.codec_name,
       audioCodec: audio?.codec_name,
+      audioChannels: audio?.channels,
+      audioChannelLayout: audio?.channel_layout,
+      audioSampleRate: positiveNumber(audio?.sample_rate),
+      audioBitrate: positiveNumber(audio?.bit_rate),
       captureTime: parseCaptureTime(output),
-      rotationDegrees,
-      displayWidth,
-      displayHeight,
-      isPortrait: Boolean(displayWidth && displayHeight && displayHeight > displayWidth),
+      rotationDegrees: orientation.rotationDegrees,
+      displayWidth: orientation.displayWidth,
+      displayHeight: orientation.displayHeight,
+      isPortrait: orientation.isPortrait,
     };
   }
 }

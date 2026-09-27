@@ -22,7 +22,7 @@ const account: AiAccountProfile & { apiKey: string } = {
   transcriptionModel: "gpt-4o-transcribe-diarize",
   credentialStatus: "SAVED_ENCRYPTED",
   updatedAt: "2026-09-08T00:00:00.000Z",
-  apiKey: "sk-test",
+  apiKey: "fixture-test-key",
 };
 const candidates = [1, 2, 3].map((index) => ({
   platform: "YOUTUBE" as const,

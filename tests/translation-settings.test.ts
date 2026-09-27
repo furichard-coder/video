@@ -28,7 +28,7 @@ describe("translation settings", () => {
     const dataRoot = await root();
     const first = new TranslationSettingsStore(dataRoot, protector);
     await first.initialize();
-    const apiKey = "AIza-test-中文-space-safe-1234567890";
+    const apiKey = "test-key-中文-space-safe-1234567890";
     expect((await first.update({ googleCloudApiKey: apiKey })).googleCloudConfigured).toBe(true);
     expect(await readFile(first.credentialsPath, "utf8")).not.toContain(apiKey);
     const reopened = new TranslationSettingsStore(dataRoot, protector);
@@ -44,6 +44,6 @@ describe("translation settings", () => {
       unprotect: () => "",
     });
     await store.initialize();
-    await expect(store.update({ googleCloudApiKey: "AIza-test-12345678901234567890" })).rejects.toThrow(/安全儲存/);
+    await expect(store.update({ googleCloudApiKey: "test-key-google-12345678901234" })).rejects.toThrow(/安全儲存/);
   });
 });

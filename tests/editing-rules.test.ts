@@ -64,6 +64,28 @@ describe("editing validation rules", () => {
     ).toHaveLength(2);
     expect(() => validateSubtitleCues([{ id: "a", startMs: 0, endMs: 1000, text: " " }])).toThrow(/不可空白/);
   });
+  it("accepts the 60-character line limit and safe per-cue positions", () => {
+    expect(
+      validateSubtitleCues([
+        {
+          id: "positioned",
+          startMs: 0,
+          endMs: 1_000,
+          text: "字幕",
+          lineWidthChars: 60,
+          position: { xPercent: 25, yPercent: 75 },
+        },
+      ])[0],
+    ).toMatchObject({ lineWidthChars: 60, position: { xPercent: 25, yPercent: 75 } });
+    expect(() =>
+      validateSubtitleCues([{ id: "wide", startMs: 0, endMs: 1_000, text: "字幕", lineWidthChars: 61 }]),
+    ).toThrow(/6–60/);
+    expect(() =>
+      validateSubtitleCues([
+        { id: "outside", startMs: 0, endMs: 1_000, text: "字幕", position: { xPercent: 96, yPercent: 75 } },
+      ]),
+    ).toThrow(/5–95/);
+  });
   it("sorts and merges overlapping or adjacent Main exclusion ranges and subtracts them without placeholders", () => {
     const normalized = normalizeMainExclusionRanges(
       [

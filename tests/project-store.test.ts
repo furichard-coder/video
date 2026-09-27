@@ -188,7 +188,7 @@ describe("ProjectStore", () => {
     await store.setSortMode("FILE_NAME");
     const external = JSON.parse(await readFile(projectPath, "utf8"));
     expect(external).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 21,
       name: "我的 河內專案",
       sortMode: "FILE_NAME",
       sourcePolicy: "READ_ONLY",
@@ -251,13 +251,13 @@ describe("ProjectStore", () => {
     await writeFile(manifestPath, JSON.stringify(legacy), "utf8");
     const store = new ProjectStore(root);
     const migrated = await store.initialize();
-    expect(migrated.schemaVersion).toBe(17);
+    expect(migrated.schemaVersion).toBe(21);
     expect(migrated.sources).toHaveLength(1);
     expect(migrated.timelineOrder).toEqual([legacy.sources[0].id]);
     expect(migrated.sources[0].volumeSegments).toEqual([]);
     expect(migrated.sources[0].mainExclusionRanges).toEqual([]);
     expect(migrated.excludedMainAssetIds).toEqual([]);
-    expect(JSON.parse(await readFile(manifestPath, "utf8")).schemaVersion).toBe(17);
+    expect(JSON.parse(await readFile(manifestPath, "utf8")).schemaVersion).toBe(21);
   });
 
   it("migrates schema 2 to schema 10 and preserves every existing edit field", async () => {
@@ -291,7 +291,7 @@ describe("ProjectStore", () => {
     await writeFile(manifestPath, JSON.stringify(schema2), "utf8");
     const migrated = await new ProjectStore(root).initialize();
     expect(migrated).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 21,
       timelineOrder: [source.id],
       timelineTransitionSeconds: 0.3,
       timelineRevision: 4,
@@ -344,7 +344,7 @@ describe("ProjectStore", () => {
     };
     await writeFile(manifestPath, JSON.stringify(schema3), "utf8");
     const migrated = await new ProjectStore(root).initialize();
-    expect(migrated.schemaVersion).toBe(17);
+    expect(migrated.schemaVersion).toBe(21);
     expect(migrated.sources[0].imageDurationMs).toBe(5_000);
     expect(migrated.sources[0].photoSoundEnabled).toBe(true);
     expect(migrated.mediaInsertions).toEqual([]);
@@ -388,7 +388,7 @@ describe("ProjectStore", () => {
     };
     await writeFile(manifestPath, JSON.stringify(schema5), "utf8");
     const migrated = await new ProjectStore(root).initialize();
-    expect(migrated.schemaVersion).toBe(17);
+    expect(migrated.schemaVersion).toBe(21);
     expect(migrated.aiStoryContext).toEqual({
       topic: "",
       locations: [],
@@ -400,6 +400,47 @@ describe("ProjectStore", () => {
     expect(migrated.subtitleCues).toEqual([
       expect.objectContaining({ id: "legacy-cue", text: "既有字幕", origin: "MANUAL", reviewStatus: "CONFIRMED" }),
     ]);
+  });
+
+  it("migrates schema 18 cue width and normalized position into schema 20", async () => {
+    const root = await tempRoot();
+    const store = new ProjectStore(root);
+    await store.initialize();
+    const manifestPath = path.join(root, "projects", "default", "project.source-manifest.json");
+    const raw = JSON.parse(await readFile(manifestPath, "utf8"));
+    raw.schemaVersion = 18;
+    raw.subtitleCues = [
+      {
+        id: "positioned-cue",
+        startMs: 0,
+        endMs: 1_000,
+        text: "既有字幕位置",
+        lineWidthChars: 60,
+        position: { xPercent: 24, yPercent: 73 },
+      },
+      {
+        id: "clamped-cue",
+        startMs: 1_100,
+        endMs: 2_000,
+        text: "載入時安全限制",
+        lineWidthChars: 61,
+        position: { xPercent: 96, yPercent: 4 },
+      },
+    ];
+    await writeFile(manifestPath, JSON.stringify(raw), "utf8");
+    const migrated = await new ProjectStore(root).initialize();
+    expect(migrated.schemaVersion).toBe(21);
+    expect(migrated.subtitleCues[0]).toMatchObject({
+      id: "positioned-cue",
+      lineWidthChars: 60,
+      position: { xPercent: 24, yPercent: 73 },
+    });
+    expect(migrated.subtitleCues[1]).toMatchObject({
+      id: "clamped-cue",
+      lineWidthChars: 60,
+      position: { xPercent: 95, yPercent: 5 },
+    });
+    expect(JSON.parse(await readFile(manifestPath, "utf8")).schemaVersion).toBe(21);
   });
 
   it("migrates schema 10 while preserving an existing Intro segment longer than the new 15-second default", async () => {
@@ -430,7 +471,7 @@ describe("ProjectStore", () => {
     delete raw.introSegmentMaxDurationMs;
     await writeFile(manifestPath, JSON.stringify(raw), "utf8");
     const migrated = await new ProjectStore(root).initialize();
-    expect(migrated.schemaVersion).toBe(17);
+    expect(migrated.schemaVersion).toBe(21);
     expect(migrated.introSegmentMaxDurationMs).toBe(20_000);
     expect(migrated.introSegments[0]).toMatchObject({ inMs: 5_000, outMs: 25_000 });
   });
@@ -529,7 +570,7 @@ describe("ProjectStore", () => {
     ]);
     const reopened = new ProjectStore(root);
     const restored = await reopened.initialize();
-    expect(restored.schemaVersion).toBe(17);
+    expect(restored.schemaVersion).toBe(21);
     expect(restored.sources[0].zoomSegments).toEqual(clipped.asset.zoomSegments);
   });
 
@@ -779,21 +820,24 @@ describe("ProjectStore", () => {
     };
     await store.setIntroSegments([first, second]);
     let project = await store.removeIntroSegment(first.id);
-    expect(project.introSegments).toEqual([second]);
+    expect(project.introSegments).toEqual([expect.objectContaining(second)]);
     expect(project.timelineOrder).toEqual([source.id]);
     project = await store.setIntroSegments([first, second]);
-    expect(project.introSegments).toEqual([second]);
+    expect(project.introSegments).toEqual([expect.objectContaining(second)]);
     const removedReopen = new ProjectStore(root);
     const persistedRemoval = await removedReopen.initialize();
-    expect(persistedRemoval.introSegments).toEqual([second]);
+    expect(persistedRemoval.introSegments).toEqual([expect.objectContaining(second)]);
     expect(persistedRemoval.recentIntroRemovals[0].segment.id).toBe(first.id);
     project = await store.removeMainAsset(source.id);
-    expect(project.introSegments).toEqual([second]);
+    expect(project.introSegments).toEqual([expect.objectContaining(second)]);
     project = await store.restoreIntroSegment(first.id);
-    expect(project.introSegments).toEqual([first, second]);
+    expect(project.introSegments).toEqual([expect.objectContaining(first), expect.objectContaining(second)]);
     expect(project.timelineOrder).toEqual([]);
     const reopened = new ProjectStore(root);
-    expect((await reopened.initialize()).introSegments).toEqual([first, second]);
+    expect((await reopened.initialize()).introSegments).toEqual([
+      expect.objectContaining(first),
+      expect.objectContaining(second),
+    ]);
   });
 
   it("keeps over-limit Intro review ranges while enforcing source, minimum, and count safety", async () => {
@@ -815,7 +859,9 @@ describe("ProjectStore", () => {
       score: 70,
       reasons: ["測試"],
     });
-    await expect(store.setIntroSegments([segment("short", 0, 2_999)])).rejects.toThrow(/至少需要 3 秒/);
+    await expect(store.setIntroSegments([segment("too-short", 0, 99)])).rejects.toThrow(/至少需要 0.1 秒/);
+    const shortWarningRange = await store.setIntroSegments([segment("short", 0, 2_999)]);
+    expect(shortWarningRange.introSegments[0]).toMatchObject({ inMs: 0, outMs: 2_999 });
     const longReviewRange = await store.setIntroSegments([segment("long", 5_000, 30_000)]);
     expect(longReviewRange.introSegments[0]).toMatchObject({ inMs: 5_000, outMs: 30_000 });
     expect((await new ProjectStore(root).initialize()).introSegments[0]).toMatchObject({ inMs: 5_000, outMs: 30_000 });
@@ -992,7 +1038,7 @@ describe("ProjectStore", () => {
     expect(await readFile(supplementPath, "utf8")).toBe("new-photo-source");
   });
 
-  it("rejects media insertion near a cut, inside an excluded region, or with an already inserted asset while allowing consecutive items", async () => {
+  it("rejects unsafe insertion points while allowing repeated source occurrences with independent audio", async () => {
     const root = await tempRoot();
     const store = new ProjectStore(root);
     await store.initialize();
@@ -1007,15 +1053,21 @@ describe("ProjectStore", () => {
     await expect(store.addMediaInsertion(video.id, first.id, 700)).rejects.toThrow(/0.75 秒/);
     await store.setMainExclusionRanges(video.id, [{ id: "excluded", startMs: 3_000, endMs: 4_000 }]);
     await expect(store.addMediaInsertion(video.id, first.id, 3_500)).rejects.toThrow(/素材安插點/);
-    await store.addMediaInsertion(video.id, first.id, 1_500);
-    await expect(store.addMediaInsertion(video.id, first.id, 6_000)).rejects.toThrow(/已安插/);
-    const inserted = await store.addMediaInsertion(video.id, second.id, 1_500);
-    expect(inserted.mediaInsertions).toHaveLength(2);
+    let inserted = await store.addMediaInsertion(video.id, first.id, 1_500);
+    inserted = await store.addMediaInsertion(video.id, first.id, 6_000);
+    const repeated = inserted.mediaInsertions.filter((item) => item.insertedAssetId === first.id);
+    inserted = await store.setInsertionAudio("MAIN", repeated[0].id, {
+      ...repeated[0].insertionAudio!,
+      sfxEnabled: false,
+    });
+    expect(inserted.mediaInsertions.find((item) => item.id === repeated[1].id)?.insertionAudio?.sfxEnabled).toBe(true);
+    inserted = await store.addMediaInsertion(video.id, second.id, 1_500);
+    expect(inserted.mediaInsertions).toHaveLength(3);
     expect(
       mainRenderSelections(inserted)
         .filter((clip) => clip.mediaInsertionId)
         .map((clip) => clip.assetId),
-    ).toEqual([first.id, second.id]);
+    ).toEqual([first.id, second.id, first.id]);
   });
 
   it("inserts a trimmed video and a photo at the same point, reorders the chain, and restores it on reopen", async () => {
@@ -1046,6 +1098,15 @@ describe("ProjectStore", () => {
 
     let project = await store.addMediaInsertion(host.id, insertedVideo.id, 5_000, { inMs: 1_250, outMs: 6_500 });
     project = await store.addMediaInsertion(host.id, still.id, 5_000);
+    const photoInsertion = project.mediaInsertions.find((item) => item.insertedAssetId === still.id)!;
+    const videoInsertion = project.mediaInsertions.find((item) => item.insertedAssetId === insertedVideo.id)!;
+    expect(photoInsertion.insertionAudio).toMatchObject({ sfxEnabled: true, bgmTrackId: undefined });
+    expect(videoInsertion.insertionAudio).toMatchObject({ sfxEnabled: false, bgmTrackId: undefined });
+    project = await store.setInsertionAudio("MAIN", photoInsertion.id, {
+      ...photoInsertion.insertionAudio!,
+      sfxEnabled: false,
+    });
+    expect(project.mediaInsertions.find((item) => item.id === photoInsertion.id)?.insertionAudio?.sfxEnabled).toBe(false);
     expect(project.timelineOrder).toEqual([host.id]);
     expect(mainRenderSelections(project)).toEqual([
       { assetId: host.id, inMs: 0, outMs: 5_000 },
@@ -1086,6 +1147,7 @@ describe("ProjectStore", () => {
 
     const restored = await new ProjectStore(dataRoot).initialize();
     expect(restored.mediaInsertions).toHaveLength(2);
+    expect(restored.mediaInsertions.find((item) => item.id === photoInsertion.id)?.insertionAudio?.sfxEnabled).toBe(false);
     expect(
       mainRenderSelections(restored)
         .filter((clip) => clip.mediaInsertionId)
@@ -1169,7 +1231,7 @@ describe("ProjectStore", () => {
     await writeFile(manifestPath, JSON.stringify(legacy), "utf8");
     const migrated = await new ProjectStore(root).initialize();
     expect(migrated).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 21,
       timelineOrder: [host.id],
       timelineTransitionSeconds: 0.3,
       introSegmentMaxDurationMs: 15_000,
@@ -1184,8 +1246,30 @@ describe("ProjectStore", () => {
         sourceOutMs: 7_000,
         sequenceIndex: 0,
         previousPlacement: "TIMELINE",
+        insertionAudio: expect.objectContaining({
+          sfxEnabled: true,
+          bgmTrackId: undefined,
+          sfxVolumePercent: 70,
+          bgmVolumePercent: 28,
+        }),
       }),
     ]);
     expect(mainRenderSelections(migrated).map((clip) => clip.assetId)).toEqual([host.id, still.id, host.id]);
+  });
+
+  it("migrates v0.74 audio defaults and persists independent Main gates and start cue", async () => {
+    const root = await tempRoot();
+    const sourcePath = path.join(root, "main.mp4");
+    await writeFile(sourcePath, "source");
+    const store = new ProjectStore(path.join(root, "app-data"));
+    await store.initialize();
+    const added = await store.addAssets([asset(sourcePath)]);
+    expect(added.sources[0].mainAudioGates).toEqual({ original: true, voice: true, bgm: true, sfx: true });
+    expect(added.mainStartCue).toEqual({ enabled: true, durationMs: 650 });
+    await store.setMainAudioGates(added.sources[0].id, { original: false, voice: true, bgm: false, sfx: true });
+    await store.setMainStartCue({ enabled: false, durationMs: 1_250 });
+    const reopened = await new ProjectStore(path.join(root, "app-data")).initialize();
+    expect(reopened.sources[0].mainAudioGates).toEqual({ original: false, voice: true, bgm: false, sfx: true });
+    expect(reopened.mainStartCue).toEqual({ enabled: false, durationMs: 1_250 });
   });
 });

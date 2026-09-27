@@ -11,6 +11,7 @@ import type {
   RenderVideoCodec,
 } from "../../shared/domain";
 import { MediaProbe } from "./media-probe";
+import { OUTPUT_RESOLUTIONS, outputDimensions } from "../../shared/render-profile";
 
 interface StoredOutput extends Omit<PreviewOutputRecord, "exists"> {}
 interface StoredHistory {
@@ -28,11 +29,20 @@ function validPurpose(value: unknown): value is PreviewOutputPurpose {
 }
 
 function validResolution(value: unknown): value is PreviewResolution {
-  return value === "360P" || value === "480P" || value === "720P" || value === "4K";
+  return (
+    value === "360P" || value === "480P" || value === "720P" || value === "1080P" || value === "1440P" || value === "4K"
+  );
 }
 
 function validVideoCodec(value: unknown): value is RenderVideoCodec {
-  return value === "H265_QSV" || value === "H265" || value === "H264_QSV" || value === "H264";
+  return (
+    value === "H264_NVENC" ||
+    value === "H265_NVENC" ||
+    value === "H265_QSV" ||
+    value === "H265" ||
+    value === "H264_QSV" ||
+    value === "H264"
+  );
 }
 
 function sanitizeRecord(value: unknown): StoredOutput | undefined {
@@ -74,6 +84,14 @@ function sanitizeRecord(value: unknown): StoredOutput | undefined {
         : undefined,
     aspectRatio:
       item.aspectRatio === "PORTRAIT_9_16" || item.aspectRatio === "LANDSCAPE_16_9" ? item.aspectRatio : undefined,
+    attemptElapsedMs:
+      Number.isFinite(item.attemptElapsedMs) && Number(item.attemptElapsedMs) >= 0
+        ? Math.round(Number(item.attemptElapsedMs))
+        : undefined,
+    cumulativeElapsedMs:
+      Number.isFinite(item.cumulativeElapsedMs) && Number(item.cumulativeElapsedMs) >= 0
+        ? Math.round(Number(item.cumulativeElapsedMs))
+        : undefined,
   };
 }
 
@@ -142,6 +160,8 @@ export class OutputHistoryStore {
       includedIntroSegmentCount: result.includedIntroSegmentCount,
       projectName,
       aspectRatio: result.aspectRatio,
+      attemptElapsedMs: result.attemptElapsedMs,
+      cumulativeElapsedMs: result.cumulativeElapsedMs,
     };
     await this.mutate((outputs) => {
       const key = canonicalPath(record.outputPath);
@@ -174,16 +194,11 @@ export class OutputHistoryStore {
         if (!media.videoCodec) throw new Error("檔案沒有可辨識的影片軌");
         const displayWidth = media.displayWidth ?? media.width;
         const displayHeight = media.displayHeight ?? media.height;
-        const resolution =
-          displayWidth === 640 && displayHeight === 360
-            ? "360P"
-            : displayWidth === 854 && displayHeight === 480
-              ? "480P"
-              : displayWidth === 1280 && displayHeight === 720
-                ? "720P"
-                : displayWidth === 3840 && displayHeight === 2160
-                  ? "4K"
-                  : undefined;
+        const portrait = Boolean(displayWidth && displayHeight && displayHeight > displayWidth);
+        const resolution = OUTPUT_RESOLUTIONS.find((candidate) => {
+          const dimensions = outputDimensions(candidate, portrait);
+          return displayWidth === dimensions.width && displayHeight === dimensions.height;
+        });
         const videoCodec =
           media.videoCodec?.toLowerCase() === "hevc" || media.videoCodec?.toLowerCase() === "h265"
             ? "H265"
@@ -201,8 +216,7 @@ export class OutputHistoryStore {
           durationMs: media.durationMs,
           resolution,
           videoCodec,
-          aspectRatio:
-            displayWidth && displayHeight && displayHeight > displayWidth ? "PORTRAIT_9_16" : "LANDSCAPE_16_9",
+          aspectRatio: portrait ? "PORTRAIT_9_16" : "LANDSCAPE_16_9",
         });
         known.add(key);
         addedCount += 1;

@@ -3,6 +3,7 @@ import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { SubtitleCue, SubtitleExportResult } from "../../shared/domain";
 import { validateSubtitleCues } from "../../shared/editing-rules";
+import { resolveCueSubtitleWrapLimit, wrapSubtitleText } from "../../shared/subtitle-text";
 import { finalizePartialOutput } from "./atomic-output";
 
 export function srtTimestamp(milliseconds: number): string {
@@ -18,7 +19,7 @@ export function serializeSrt(cues: SubtitleCue[]): string {
   return `${validateSubtitleCues(cues)
     .map(
       (cue, index) =>
-        `${index + 1}\r\n${srtTimestamp(cue.startMs)} --> ${srtTimestamp(cue.endMs)}\r\n${cue.text.replace(/\n/g, "\r\n")}`,
+        `${index + 1}\r\n${srtTimestamp(cue.startMs)} --> ${srtTimestamp(cue.endMs)}\r\n${wrapSubtitleText(cue.text, resolveCueSubtitleWrapLimit(cue.lineWidthChars, undefined, cue.text)).join("\r\n")}`,
     )
     .join("\r\n\r\n")}\r\n`;
 }

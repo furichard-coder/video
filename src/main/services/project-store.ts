@@ -3,15 +3,18 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   DEFAULT_BGM_VOLUME_PERCENT,
+  DEFAULT_AUDIO_TRACK_GATES,
   DEFAULT_IMAGE_DURATION_MS,
   DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS,
   DEFAULT_INTRO_TARGET_DURATION_MS,
   DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT,
+  DEFAULT_MAIN_START_CUE_SETTINGS,
   DEFAULT_ZOOM_ENHANCEMENT_PRESET,
   DUNES_SHUTTER_EFFECT_ID,
   DUNES_SHUTTER_EFFECT_SHA256,
   INTRO_MAX_SEGMENT_MS,
   INTRO_MAX_SEGMENTS,
+  INTRO_EDIT_MIN_SEGMENT_MS,
   INTRO_MIN_SEGMENT_MS,
   MANIFEST_SCHEMA_VERSION,
   MAX_IMAGE_DURATION_MS,
@@ -20,11 +23,15 @@ import {
   PREVIEWER_VERSION,
   type AiPublishAssets,
   type AiStoryContext,
+  type AudioTrackGates,
   type BgmTrack,
   type ImageDurationUpdateResult,
   type IntroAnalysisResult,
   type IntroSuggestion,
+  type InsertionAudioScope,
+  type InsertionAudioSettings,
   type MainExclusionRange,
+  type MainStartCueSettings,
   type MainExclusionRangeUpdateResult,
   type MediaInsertion,
   type MusicSuggestionResult,
@@ -73,6 +80,7 @@ import { syncSubtitlesToTimeline } from "../../shared/subtitle-timeline-sync";
 import { isValidYoutubeChapterSet, youtubeTextLength } from "../../shared/publish-rules";
 import { DEFAULT_WATERMARK_SETTINGS, normalizeWatermarkSettings } from "../../shared/watermark";
 import { finalizePartialOutput } from "./atomic-output";
+import { defaultInsertionAudioSettings, normalizeAudioTrackGates, normalizeInsertionAudioSettings } from "../../shared/insertion-audio-plan";
 
 function clone<T>(value: T): T {
   return structuredClone(value);
@@ -161,6 +169,7 @@ function createProject(): ProjectManifest {
     recentIntroRemovals: [],
     placementDecisions: [],
     mediaInsertions: [],
+    mainStartCue: structuredClone(DEFAULT_MAIN_START_CUE_SETTINGS),
     photoSoundEffect: defaultPhotoSoundEffect(),
     bgmTracks: [],
     sourceAudioVolumePercent: DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT,
@@ -196,7 +205,11 @@ function looksLikeProject(value: unknown): value is Record<string, unknown> {
       candidate.schemaVersion === 14 ||
       candidate.schemaVersion === 15 ||
       candidate.schemaVersion === 16 ||
-      candidate.schemaVersion === 17) &&
+      candidate.schemaVersion === 17 ||
+      candidate.schemaVersion === 18 ||
+      candidate.schemaVersion === 19 ||
+      candidate.schemaVersion === 20 ||
+      candidate.schemaVersion === 21) &&
     candidate.sourcePolicy === "READ_ONLY" &&
     candidate.previewPolicy === "DERIVED_CACHE_ONLY_NOT_MASTER" &&
     Array.isArray(candidate.sources)
@@ -216,6 +229,7 @@ function migrateProject(raw: Record<string, unknown>): ProjectManifest {
       : undefined;
   const sources = (raw.sources as SourceAsset[]).map((asset) => ({
     ...asset,
+    mainAudioGates: normalizeAudioTrackGates(asset.mainAudioGates),
     imageDurationMs:
       asset.kind === "IMAGE"
         ? (() => {
@@ -249,13 +263,17 @@ function migrateProject(raw: Record<string, unknown>): ProjectManifest {
   }));
   const sourceIds = new Set(sources.map((asset) => asset.id));
   const sourceById = new Map(sources.map((asset) => [asset.id, asset]));
+  const legacyBgmTrackIds = new Set(
+    Array.isArray(raw.bgmTracks)
+      ? (raw.bgmTracks as Array<{ id?: unknown }>).flatMap((track) => typeof track?.id === "string" ? [track.id] : [])
+      : [],
+  );
   type LegacyInsertion = Partial<MediaInsertion> & { photoAssetId?: string };
   const rawInsertions = Array.isArray(raw.mediaInsertions)
     ? (raw.mediaInsertions as LegacyInsertion[])
     : Array.isArray(raw.photoInsertions)
       ? (raw.photoInsertions as LegacyInsertion[])
       : [];
-  const insertedOnce = new Set<string>();
   const mediaInsertions = rawInsertions.flatMap((item, index): MediaInsertion[] => {
     const insertedAssetId = typeof item.insertedAssetId === "string" ? item.insertedAssetId : item.photoAssetId;
     const anchor = typeof item.anchorVideoAssetId === "string" ? sourceById.get(item.anchorVideoAssetId) : undefined;
@@ -267,8 +285,7 @@ function migrateProject(raw: Record<string, unknown>): ProjectManifest {
       anchor?.kind !== "VIDEO" ||
       !inserted ||
       inserted.id === anchor.id ||
-      !Number.isFinite(item.atMs) ||
-      insertedOnce.has(inserted.id)
+      !Number.isFinite(item.atMs)
     )
       return [];
     let sourceInMs = 0;
@@ -285,7 +302,6 @@ function migrateProject(raw: Record<string, unknown>): ProjectManifest {
         : (inserted.previewRange?.outMs ?? durationMs);
       if (sourceOutMs - sourceInMs < 100) return [];
     }
-    insertedOnce.add(inserted.id);
     return [
       {
         id: item.id,
@@ -299,6 +315,12 @@ function migrateProject(raw: Record<string, unknown>): ProjectManifest {
         previousTimelineIndex: Number.isInteger(item.previousTimelineIndex) ? item.previousTimelineIndex! : 0,
         previousPendingIndex: Number.isInteger(item.previousPendingIndex) ? item.previousPendingIndex : undefined,
         createdAt: typeof item.createdAt === "string" ? item.createdAt : new Date(0).toISOString(),
+        insertionAudio: normalizeInsertionAudioSettings(
+          item.insertionAudio,
+          inserted.kind,
+          legacyBgmTrackIds,
+          inserted.photoSoundEnabled !== false,
+        ),
       },
     ];
   });
@@ -342,9 +364,20 @@ function migrateProject(raw: Record<string, unknown>): ProjectManifest {
     ? [...new Set(raw.introExcludedSegmentIds.filter((id): id is string => typeof id === "string"))]
     : [];
   const introSegments = Array.isArray(raw.introSegments)
-    ? (raw.introSegments as IntroSuggestion[]).filter(
-        (item) => item && sourceIds.has(item.assetId) && !introExcludedSegmentIds.includes(item.id),
-      )
+    ? (raw.introSegments as IntroSuggestion[])
+        .filter((item) => item && sourceIds.has(item.assetId) && !introExcludedSegmentIds.includes(item.id))
+        .map((item) => {
+          const asset = sourceById.get(item.assetId)!;
+          return {
+            ...item,
+            insertionAudio: normalizeInsertionAudioSettings(
+              item.insertionAudio,
+              asset.kind,
+              legacyBgmTrackIds,
+              asset.photoSoundEnabled !== false,
+            ),
+          };
+        })
     : [];
   const recentIntroRemovals = Array.isArray(raw.recentIntroRemovals)
     ? (raw.recentIntroRemovals as RemovedIntroSegment[]).filter(
@@ -413,6 +446,18 @@ function migrateProject(raw: Record<string, unknown>): ProjectManifest {
       ? (raw.placementDecisions as ProjectManifest["placementDecisions"])
       : [],
     mediaInsertions,
+    mainStartCue: {
+      enabled: (raw.mainStartCue as Partial<MainStartCueSettings> | undefined)?.enabled !== false,
+      durationMs: Math.max(
+        100,
+        Math.min(
+          3_000,
+          Number.isFinite((raw.mainStartCue as Partial<MainStartCueSettings> | undefined)?.durationMs)
+            ? Math.round((raw.mainStartCue as MainStartCueSettings).durationMs)
+            : DEFAULT_MAIN_START_CUE_SETTINGS.durationMs,
+        ),
+      ),
+    },
     photoSoundEffect: defaultPhotoSoundEffect(),
     bgmTracks,
     sourceAudioVolumePercent,
@@ -421,6 +466,16 @@ function migrateProject(raw: Record<string, unknown>): ProjectManifest {
     subtitleCues: Array.isArray(raw.subtitleCues)
       ? (raw.subtitleCues as SubtitleCue[]).map((cue) => ({
           ...cue,
+          lineWidthChars: Number.isInteger(cue.lineWidthChars)
+            ? Math.max(6, Math.min(60, cue.lineWidthChars!))
+            : undefined,
+          position:
+            cue.position && Number.isInteger(cue.position.xPercent) && Number.isInteger(cue.position.yPercent)
+              ? {
+                  xPercent: Math.max(5, Math.min(95, cue.position.xPercent)),
+                  yPercent: Math.max(5, Math.min(95, cue.position.yPercent)),
+                }
+              : undefined,
           timelineScope: cue.timelineScope === "INTRO" ? "INTRO" : "MAIN",
           origin: cue.origin ?? "MANUAL",
           reviewStatus: cue.reviewStatus ?? "CONFIRMED",
@@ -488,6 +543,7 @@ export class ProjectStore {
         !Array.isArray(parsed.introExcludedSegmentIds) ||
         !Array.isArray(parsed.recentIntroRemovals) ||
         !Array.isArray(parsed.mediaInsertions) ||
+        !parsed.mainStartCue ||
         !parsed.photoSoundEffect ||
         !parsed.aiStoryContext ||
         !Number.isFinite(parsed.sourceAudioVolumePercent) ||
@@ -539,6 +595,9 @@ export class ProjectStore {
   }
   getProjectFileState(): ProjectFileState {
     return { filePath: this.activeProjectPath };
+  }
+  getRenderStateRoot(): string {
+    return path.join(this.dataRoot, "projects", "render-state");
   }
   getAsset(assetId: string): SourceAsset | undefined {
     const asset = this.current.sources.find((item) => item.id === assetId);
@@ -613,6 +672,7 @@ export class ProjectStore {
               ? validateImageDurationMs(input.imageDurationMs ?? DEFAULT_IMAGE_DURATION_MS)
               : undefined,
           photoSoundEnabled: input.kind === "IMAGE" ? input.photoSoundEnabled !== false : undefined,
+          mainAudioGates: normalizeAudioTrackGates(input.mainAudioGates),
           volumeSegments: input.volumeSegments ?? [],
           mainExclusionRanges: input.mainExclusionRanges ?? [],
           zoomSegments: input.zoomSegments ?? [],
@@ -640,6 +700,7 @@ export class ProjectStore {
             ? validateImageDurationMs(asset.imageDurationMs ?? DEFAULT_IMAGE_DURATION_MS)
             : undefined,
         photoSoundEnabled: asset.kind === "IMAGE" ? asset.photoSoundEnabled !== false : undefined,
+        mainAudioGates: normalizeAudioTrackGates(asset.mainAudioGates),
         volumeSegments: asset.volumeSegments ?? [],
         mainExclusionRanges: asset.mainExclusionRanges ?? [],
         zoomSegments: asset.zoomSegments ?? [],
@@ -880,6 +941,25 @@ export class ProjectStore {
     });
   }
 
+  async setMainAudioGates(assetId: string, gates: AudioTrackGates): Promise<ProjectManifest> {
+    return this.mutate((project) => {
+      const index = project.sources.findIndex((item) => item.id === assetId);
+      if (index < 0 || !project.timelineOrder.includes(assetId)) throw new Error("找不到正片片段。");
+      project.sources[index] = { ...project.sources[index], mainAudioGates: normalizeAudioTrackGates(gates) };
+    });
+  }
+
+  async setMainStartCue(settings: MainStartCueSettings): Promise<ProjectManifest> {
+    return this.mutate((project) => {
+      if (!settings || typeof settings.enabled !== "boolean" || !Number.isFinite(settings.durationMs))
+        throw new Error("正片開始提示音設定無效。");
+      project.mainStartCue = {
+        enabled: settings.enabled,
+        durationMs: Math.max(100, Math.min(3_000, Math.round(settings.durationMs))),
+      };
+    });
+  }
+
   async addMediaInsertion(
     anchorVideoAssetId: string,
     insertedAssetId: string,
@@ -891,20 +971,22 @@ export class ProjectStore {
       if (!project.timelineOrder.includes(anchorVideoAssetId)) throw new Error("素材只能安插到目前正片順序中的影片。");
       const inserted = project.sources.find((item) => item.id === insertedAssetId);
       if (!inserted) throw new Error("找不到要安插的素材。");
-      if (project.mediaInsertions.some((item) => item.insertedAssetId === insertedAssetId))
-        throw new Error("這個素材已安插到影片時段中。");
+      const existingOccurrence = project.mediaInsertions.find((item) => item.insertedAssetId === insertedAssetId);
       const currentTimelineIndex = project.timelineOrder.indexOf(insertedAssetId);
       const currentPendingIndex = project.pendingAssetIds.indexOf(insertedAssetId);
       if (
-        (currentTimelineIndex < 0 && currentPendingIndex < 0) ||
+        (!existingOccurrence && currentTimelineIndex < 0 && currentPendingIndex < 0) ||
         project.excludedMainAssetIds.includes(insertedAssetId)
       )
         throw new Error("請先把照片或影片加入正片或待決定清單，再設定影片內安插時間。");
-      const previousPlacement = currentTimelineIndex >= 0 ? ("TIMELINE" as const) : ("PENDING" as const);
+      const previousPlacement =
+        existingOccurrence?.previousPlacement ??
+        (currentTimelineIndex >= 0 ? ("TIMELINE" as const) : ("PENDING" as const));
       const previousTimelineIndex =
-        previousPlacement === "TIMELINE"
+        existingOccurrence?.previousTimelineIndex ??
+        (previousPlacement === "TIMELINE"
           ? this.virtualTimelineOrder(project).indexOf(insertedAssetId)
-          : project.timelineOrder.length;
+          : project.timelineOrder.length);
       const defaultRange =
         inserted.kind === "IMAGE"
           ? { inMs: 0, outMs: imageDurationMs(inserted) }
@@ -920,8 +1002,10 @@ export class ProjectStore {
         project.sources,
         project.mediaInsertions,
       );
-      if (previousPlacement === "TIMELINE") project.timelineOrder.splice(currentTimelineIndex, 1);
-      else project.pendingAssetIds.splice(currentPendingIndex, 1);
+      if (!existingOccurrence) {
+        if (previousPlacement === "TIMELINE") project.timelineOrder.splice(currentTimelineIndex, 1);
+        else project.pendingAssetIds.splice(currentPendingIndex, 1);
+      }
       project.mediaInsertions.push({
         id: randomUUID(),
         anchorVideoAssetId,
@@ -930,8 +1014,11 @@ export class ProjectStore {
         sequenceIndex: project.mediaInsertions.filter((item) => item.anchorVideoAssetId === anchorVideoAssetId).length,
         previousPlacement,
         previousTimelineIndex,
-        previousPendingIndex: previousPlacement === "PENDING" ? currentPendingIndex : undefined,
+        previousPendingIndex: previousPlacement === "PENDING"
+          ? (existingOccurrence?.previousPendingIndex ?? currentPendingIndex)
+          : undefined,
         createdAt: new Date().toISOString(),
+        insertionAudio: defaultInsertionAudioSettings(inserted.kind, inserted.photoSoundEnabled !== false),
       });
       project.sortMode = "MANUAL_ORDER";
       this.bumpTimeline(project);
@@ -957,6 +1044,36 @@ export class ProjectStore {
     });
   }
 
+  async setInsertionAudio(
+    scope: InsertionAudioScope,
+    instanceId: string,
+    settings: InsertionAudioSettings,
+  ): Promise<ProjectManifest> {
+    return this.mutate((project) => {
+      const validTrackIds = new Set(project.bgmTracks.map((track) => track.id));
+      if (scope === "MAIN") {
+        const index = project.mediaInsertions.findIndex((item) => item.id === instanceId);
+        if (index < 0) throw new Error("找不到正片安插素材。");
+        const asset = project.sources.find((item) => item.id === project.mediaInsertions[index].insertedAssetId);
+        if (!asset) throw new Error("找不到正片安插素材来源。");
+        project.mediaInsertions[index] = {
+          ...project.mediaInsertions[index],
+          insertionAudio: normalizeInsertionAudioSettings(settings, asset.kind, validTrackIds),
+        };
+        return;
+      }
+      if (scope !== "INTRO") throw new Error("安插素材音讯范围无效。");
+      const index = project.introSegments.findIndex((item) => item.id === instanceId);
+      if (index < 0) throw new Error("找不到片头素材。");
+      const asset = project.sources.find((item) => item.id === project.introSegments[index].assetId);
+      if (!asset) throw new Error("找不到片头素材来源。");
+      project.introSegments[index] = {
+        ...project.introSegments[index],
+        insertionAudio: normalizeInsertionAudioSettings(settings, asset.kind, validTrackIds),
+      };
+    });
+  }
+
   async removeMediaInsertion(insertionId: string): Promise<ProjectManifest> {
     return this.mutate((project) => {
       const previous = clone(project);
@@ -966,7 +1083,8 @@ export class ProjectStore {
       if (
         !project.timelineOrder.includes(insertion.insertedAssetId) &&
         !project.pendingAssetIds.includes(insertion.insertedAssetId) &&
-        !project.excludedMainAssetIds.includes(insertion.insertedAssetId)
+        !project.excludedMainAssetIds.includes(insertion.insertedAssetId) &&
+        !project.mediaInsertions.some((item) => item.insertedAssetId === insertion.insertedAssetId)
       ) {
         if (insertion.previousPlacement === "PENDING") {
           const restoreIndex = Math.max(
@@ -1504,7 +1622,7 @@ export class ProjectStore {
         ["subtitleCues", "subtitleTimelineRevision", "mainSubtitleReviewRevision", "introSubtitleReviewRevision"],
       ],
       ["AI_CONTEXT", ["aiStoryContext", "introAnalysisResult", "aiPublishAssets"]],
-      ["SETTINGS", ["colorSettings", "watermarkSettings", "audioMixPolicy"]],
+      ["SETTINGS", ["colorSettings", "watermarkSettings", "audioMixPolicy", "mainStartCue"]],
       ["OUTPUTS", []],
     ];
     const sections =
@@ -1538,26 +1656,21 @@ export class ProjectStore {
         throw new Error("片頭片段包含不存在的影片或照片來源。");
       const inMs = Math.round(segment.inMs);
       const outMs = Math.round(segment.outMs);
-      const durationMs =
-        asset.kind === "IMAGE"
-          ? Math.max(MAX_IMAGE_DURATION_MS, asset.imageDurationMs ?? DEFAULT_IMAGE_DURATION_MS)
-          : asset.mediaInfo?.durationMs;
+      const durationMs = asset.kind === "IMAGE" ? undefined : asset.mediaInfo?.durationMs;
       const clipDurationMs = outMs - inMs;
-      const invalidImageDuration =
-        asset.kind === "IMAGE" &&
-        (inMs !== 0 || clipDurationMs < MIN_IMAGE_DURATION_MS || clipDurationMs > MAX_IMAGE_DURATION_MS);
+      const invalidImageDuration = asset.kind === "IMAGE" && inMs !== 0;
       if (
         !Number.isFinite(segment.inMs) ||
         !Number.isFinite(segment.outMs) ||
         inMs < 0 ||
-        clipDurationMs < INTRO_MIN_SEGMENT_MS ||
+        clipDurationMs < INTRO_EDIT_MIN_SEGMENT_MS ||
         invalidImageDuration ||
         (durationMs !== undefined && outMs > durationMs + 50)
       ) {
         throw new Error(
           asset.kind === "IMAGE"
-            ? `「${asset.fileName}」的片頭照片必須從 0:00 開始並顯示 3 到 ${MAX_IMAGE_DURATION_MS / 1000} 秒。`
-            : `「${asset.fileName}」的片頭選取範圍至少需要 3 秒，且不可超出來源；超過每段輸出上限只會警示。`,
+            ? `「${asset.fileName}」的片頭照片必須從 0:00 開始，且至少顯示 ${INTRO_EDIT_MIN_SEGMENT_MS / 1000} 秒。`
+            : `「${asset.fileName}」的片頭選取範圍至少需要 ${INTRO_EDIT_MIN_SEGMENT_MS / 1000} 秒，且不可超出來源；3–22 秒只作建議提醒。`,
         );
       }
       return {
@@ -1570,6 +1683,12 @@ export class ProjectStore {
         reasons: Array.isArray(segment.reasons)
           ? segment.reasons.filter((reason): reason is string => typeof reason === "string")
           : [],
+        insertionAudio: normalizeInsertionAudioSettings(
+          segment.insertionAudio,
+          asset.kind,
+          new Set(project.bgmTracks.map((track) => track.id)),
+          asset.photoSoundEnabled !== false,
+        ),
       };
     });
     return normalized;

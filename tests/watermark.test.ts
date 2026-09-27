@@ -72,7 +72,7 @@ describe("project watermark settings", () => {
       chinese: { ...DEFAULT_WATERMARK_SETTINGS.chinese, text: "山海\n漫步" },
     });
     expect(saved).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 21,
       watermarkSettings: { startSeconds: 8, intervalSeconds: 120, visibleDurationSeconds: 12 },
     });
     const restored = await new ProjectStore(root).initialize();

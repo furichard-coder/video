@@ -2,25 +2,30 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   PHOTO_SOUND_PREVIEW_URL,
   type PreviewResult,
+  type ProjectManifest,
   type RenderClipSelection,
   type SourceAsset,
 } from "../../shared/domain";
 import { imageDurationMs } from "../../shared/editing-rules";
 import { formatDuration } from "../format";
+import { buildInsertionAudioPlan } from "../../shared/insertion-audio-plan";
 
 interface PlaylistModalProps {
   assets: SourceAsset[];
   clips: RenderClipSelection[];
+  project: ProjectManifest;
   onClose(): void;
   onAssetUpdated(asset: SourceAsset): void;
 }
 
-export function PlaylistModal({ assets, clips, onClose, onAssetUpdated }: PlaylistModalProps) {
+export function PlaylistModal({ assets, clips, project, onClose, onAssetUpdated }: PlaylistModalProps) {
   const [index, setIndex] = useState(0);
   const [preview, setPreview] = useState<PreviewResult>();
   const [error, setError] = useState<string>();
   const [playing, setPlaying] = useState(true);
   const photoSoundRef = useRef<HTMLAudioElement>(null);
+  const bgmRef = useRef<HTMLAudioElement>(null);
+  const previousBgmTrackRef = useRef<string | undefined>(undefined);
   const videoRef = useRef<HTMLVideoElement>(null);
   const items = useMemo(
     () =>
@@ -32,6 +37,17 @@ export function PlaylistModal({ assets, clips, onClose, onAssetUpdated }: Playli
   const currentItem = items[index];
   const current = currentItem?.asset;
   const currentClip = currentItem?.clip;
+  const insertionAudioPlan = useMemo(
+    () => buildInsertionAudioPlan(project, { purpose: "CONCAT", prependIntro: false }),
+    [project],
+  );
+  const currentAudioItem = currentClip?.mediaInsertionId
+    ? insertionAudioPlan.items.find((item) => item.instanceId === currentClip.mediaInsertionId)
+    : undefined;
+  const currentBgmTrack = currentAudioItem?.bgmTrackId
+    ? project.bgmTracks.find((track) => track.id === currentAudioItem.bgmTrackId)
+    : undefined;
+  const legacyMainPhotoSfx = current?.kind === "IMAGE" && !currentAudioItem && current.photoSoundEnabled !== false;
   const progress = useMemo(() => `${index + 1} / ${items.length}`, [index, items.length]);
 
   const goNext = () => setIndex((value) => (value + 1 < items.length ? value + 1 : 0));
@@ -83,8 +99,13 @@ export function PlaylistModal({ assets, clips, onClose, onAssetUpdated }: Playli
 
   useEffect(() => {
     const player = photoSoundRef.current;
-    if (!player || current?.kind !== "IMAGE" || current.photoSoundEnabled === false) return;
+    if (!player || current?.kind !== "IMAGE" || (!currentAudioItem?.sfxEnabled && !legacyMainPhotoSfx)) return;
     try {
+      const sfxVolume = currentAudioItem
+        ? (project.mediaInsertions.find((item) => item.id === currentAudioItem.instanceId)?.insertionAudio
+            ?.sfxVolumePercent ?? 70)
+        : 70;
+      player.volume = Math.max(0, Math.min(1, sfxVolume / 100));
       if (playing) {
         const playback = player.play();
         if (playback && typeof playback.catch === "function") void playback.catch(() => undefined);
@@ -94,7 +115,27 @@ export function PlaylistModal({ assets, clips, onClose, onAssetUpdated }: Playli
     } catch {
       // A preview sound failure must never stop the visual playlist.
     }
-  }, [current?.id, currentClip?.mediaInsertionId, current?.photoSoundEnabled, playing, preview]);
+  }, [current?.id, currentClip?.mediaInsertionId, currentAudioItem?.sfxEnabled, legacyMainPhotoSfx, playing, preview]);
+
+  useEffect(() => {
+    const player = bgmRef.current;
+    if (!player) return;
+    if (!currentBgmTrack || !currentAudioItem?.bgmEnabled) {
+      player.pause();
+      previousBgmTrackRef.current = undefined;
+      return;
+    }
+    const sameContinuous =
+      previousBgmTrackRef.current === currentBgmTrack.id && currentAudioItem.continuousWithPrevious;
+    player.volume = Math.max(0, Math.min(1, (project.mediaInsertions.find((item) => item.id === currentAudioItem.instanceId)?.insertionAudio?.bgmVolumePercent ?? 28) / 100));
+    if (!sameContinuous) {
+      const sourcePosition = currentAudioItem.bgmSourcePositionMs ?? currentBgmTrack.sourceInMs;
+      try { player.currentTime = sourcePosition / 1000; } catch { /* metadata not ready yet */ }
+    }
+    previousBgmTrackRef.current = currentBgmTrack.id;
+    if (playing) void player.play().catch(() => undefined);
+    else player.pause();
+  }, [currentAudioItem?.instanceId, currentAudioItem?.bgmEnabled, currentAudioItem?.continuousWithPrevious, currentBgmTrack?.id, playing]);
 
   useEffect(() => {
     const player = videoRef.current;
@@ -163,7 +204,7 @@ export function PlaylistModal({ assets, clips, onClose, onAssetUpdated }: Playli
               {preview && current.kind === "IMAGE" && (
                 <>
                   <img src={preview.url} alt={current.fileName} />
-                  {current.photoSoundEnabled !== false && (
+                  {(currentAudioItem?.sfxEnabled || legacyMainPhotoSfx) && (
                     <audio
                       ref={photoSoundRef}
                       key={`${current.id}:${currentClip?.mediaInsertionId ?? "main"}`}
@@ -172,6 +213,26 @@ export function PlaylistModal({ assets, clips, onClose, onAssetUpdated }: Playli
                     />
                   )}
                 </>
+              )}
+              {currentBgmTrack && currentAudioItem?.bgmEnabled && (
+                <audio
+                  ref={bgmRef}
+                  src={`preview-media://bgm/${encodeURIComponent(currentBgmTrack.id)}`}
+                  preload="auto"
+                  onLoadedMetadata={(event) => {
+                    event.currentTarget.currentTime =
+                      (currentAudioItem.bgmSourcePositionMs ?? currentBgmTrack.sourceInMs) / 1000;
+                  }}
+                  onTimeUpdate={(event) => {
+                    const endSeconds = currentBgmTrack.sourceOutMs / 1000;
+                    if (event.currentTarget.currentTime >= endSeconds - 0.03)
+                      event.currentTarget.currentTime = currentBgmTrack.sourceInMs / 1000;
+                  }}
+                  onEnded={(event) => {
+                    event.currentTarget.currentTime = currentBgmTrack.sourceInMs / 1000;
+                    if (playing) void event.currentTarget.play().catch(() => undefined);
+                  }}
+                />
               )}
               {preview && current.kind === "VIDEO" && (
                 <video

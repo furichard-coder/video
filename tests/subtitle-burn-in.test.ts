@@ -26,7 +26,7 @@ const project = {
   name: "test",
   sourcePolicy: "READ_ONLY",
   previewPolicy: "DERIVED_CACHE_ONLY_NOT_MASTER",
-  previewerVersion: "preview-v3",
+  previewerVersion: "preview-v5-orientation-planar-safe",
   sortMode: "MANUAL_ORDER",
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
@@ -122,7 +122,7 @@ describe("subtitle ASS burn-in", () => {
     expect(result.content).toContain("&H0066E0FF");
     expect(result.content).toContain(",36,&H0066E0FF");
     expect(result.content).toContain(",3,0,2,");
-    expect(result.content).toContain("\\an8\\pos");
+    expect(result.content).toContain("\\an8\\pos(427,115)");
 
     const fourK = buildSubtitleAss(
       project,
@@ -144,6 +144,43 @@ describe("subtitle ASS burn-in", () => {
       { byLanguage: { "zh-TW": ["樣式一致"] }, providers: ["ORIGINAL"] },
     );
     expect(fourK.content).toContain(",162,&H0066E0FF");
+    expect(fourK.content).toContain("\\an8\\pos(1920,518)");
+    expect(fourK.content).toContain(",90,90,20,1");
+  });
+
+  it("uses the same normalized per-cue position for landscape and portrait output", () => {
+    const positioned = {
+      ...project,
+      subtitleCues: [{ ...project.subtitleCues[0], position: { xPercent: 25, yPercent: 70 } }],
+    };
+    const options: SubtitleBurnInOptions = {
+      enabled: true,
+      tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }],
+      styleProfile: {
+        verticalPositionPercent: 82,
+        fontSizePx: 36,
+        textColor: "#FFFFFF",
+        shadowEnabled: true,
+        outlineWidthPx: 2,
+      },
+    };
+    const translation = {
+      byLanguage: { "zh-TW": [positioned.subtitleCues[0].text] },
+      providers: ["ORIGINAL"],
+    } as never;
+    const clips = [{ assetId: asset.id, inMs: 0, outMs: 10_000 }] as never;
+    expect(buildSubtitleAss(positioned, clips, 0, 0.3, "1080P", options, translation).content).toContain(
+      "\\an2\\pos(480,756)",
+    );
+    expect(buildSubtitleAss(positioned, clips, 0, 0.3, "1440P", options, translation).content).toContain(
+      "\\an2\\pos(640,1008)",
+    );
+    expect(
+      buildSubtitleAss(positioned, clips, 0, 0.3, "1080P", options, translation, undefined, "MAIN", true).content,
+    ).toContain("\\an2\\pos(270,1344)");
+    expect(
+      buildSubtitleAss(positioned, clips, 0, 0.3, "1440P", options, translation, undefined, "MAIN", true).content,
+    ).toContain("\\an2\\pos(360,1792)");
   });
 
   it("uses the 480p preview size only for the primary track and preserves translated-track sizing", () => {
@@ -200,6 +237,24 @@ describe("subtitle ASS burn-in", () => {
     const narrow = buildSubtitleAss(project, clips, 0, 0.3, "480P", options(6), translations);
     expect(countBreaks(auto.content)).toBe(1);
     expect(countBreaks(narrow.content)).toBeGreaterThanOrEqual(3);
+  });
+
+  it("lets one cue override the Chinese 12 / English-mixed 20 defaults", () => {
+    const longText = "一二三四五六七八九十十一十二十三十四十五十六";
+    const cueProject = {
+      ...project,
+      subtitleCues: [{ ...project.subtitleCues[0], text: longText, lineWidthChars: 6 }],
+    };
+    const result = buildSubtitleAss(
+      cueProject,
+      [{ assetId: asset.id, inMs: 0, outMs: 10_000 }],
+      0,
+      0.3,
+      "480P",
+      { enabled: true, tracks: [{ language: "zh-TW", position: "BOTTOM", fontSize1080p: 48 }] },
+      { byLanguage: { "zh-TW": [longText] }, providers: ["ORIGINAL"] },
+    );
+    expect(result.content).toContain("一二三四五六\\N七八九十十一\\N十二十三十四\\N十五十六");
   });
 
   it("breaks lines identically across output resolutions", () => {

@@ -31,7 +31,7 @@ function project(order: string[], cues: SubtitleCue[] = [], introSegments: Intro
     name: "字幕同步",
     sourcePolicy: "READ_ONLY",
     previewPolicy: "DERIVED_CACHE_ONLY_NOT_MASTER",
-    previewerVersion: "preview-v3",
+    previewerVersion: "preview-v5-orientation-planar-safe",
     sortMode: "MANUAL_ORDER",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -84,7 +84,15 @@ describe("subtitle timeline synchronization", () => {
     const previous = project(
       ["a", "b"],
       [
-        { id: "a-cue", startMs: 1_000, endMs: 2_000, text: "照片 A", timelineScope: "MAIN", reviewStatus: "CONFIRMED" },
+        {
+          id: "a-cue",
+          startMs: 1_000,
+          endMs: 2_000,
+          text: "照片 A",
+          timelineScope: "MAIN",
+          reviewStatus: "CONFIRMED",
+          position: { xPercent: 31, yPercent: 73 },
+        },
         { id: "b-cue", startMs: 5_200, endMs: 6_200, text: "照片 B", timelineScope: "MAIN", reviewStatus: "CONFIRMED" },
       ],
     );
@@ -106,6 +114,7 @@ describe("subtitle timeline synchronization", () => {
         sourceAssetId: "a",
         sourceInMs: 1_000,
         sourceOutMs: 2_000,
+        position: { xPercent: 31, yPercent: 73 },
       }),
     ]);
     expect(result.fullyMapped.MAIN).toBe(true);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import type {
   AiAnalysisProgress,
   ConcatRenderProgress,
@@ -16,10 +16,13 @@ import { buildTimelinePlan } from "../../shared/timeline-plan";
 import {
   SUBTITLE_WRAP_MANUAL_MAX,
   SUBTITLE_WRAP_MANUAL_MIN,
-  SUBTITLE_WRAP_REFERENCE_WIDTH,
-  isCjkText,
-  overlayAnchorForPosition,
-  resolveSubtitleWrapLimit,
+  defaultSubtitleLineWidth,
+  nudgeSubtitleCuePosition,
+  resolveCueSubtitleWrapLimit,
+  resolveSubtitleCuePosition,
+  subtitleFrameFontSize,
+  subtitleFrameOutlineWidth,
+  subtitleFrameShadowSize,
   wrapSubtitleText,
 } from "../../shared/subtitle-text";
 import { formatDuration } from "../format";
@@ -156,10 +159,14 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   const [localDirty, setLocalDirty] = useState(false);
   const [closePrompt, setClosePrompt] = useState(false);
   const [forceReviewPrompt, setForceReviewPrompt] = useState(false);
+  const [lineWidthCueId, setLineWidthCueId] = useState<string>();
+  const [lineWidthDraft, setLineWidthDraft] = useState("");
+  const [positionCueId, setPositionCueId] = useState<string>();
   const [reviewQueueIds, setReviewQueueIds] = useState<string[]>([]);
   const [previewHistoryRevision, setPreviewHistoryRevision] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const selectedTextEditorRef = useRef<HTMLTextAreaElement>(null);
+  const positionNudgeRef = useRef<HTMLDivElement>(null);
   const skipNextProjectSyncRef = useRef(false);
   const selectedScopes = useMemo(
     () => [...(scope.intro ? ["INTRO" as const] : []), ...(scope.main ? ["MAIN" as const] : [])],
@@ -366,6 +373,89 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
           : cue,
       ),
     );
+  };
+
+  const openLineWidthEditor = (cue: SubtitleCue) => {
+    setLineWidthCueId(cue.id);
+    setLineWidthDraft(String(cue.lineWidthChars ?? defaultSubtitleLineWidth(cue.text)));
+    setError(undefined);
+  };
+
+  const saveLineWidth = async (automatic = false) => {
+    const cue = cues.find((item) => item.id === lineWidthCueId);
+    if (!cue) return;
+    const parsed = Math.floor(Number(lineWidthDraft));
+    if (
+      !automatic &&
+      (!Number.isInteger(parsed) || parsed < SUBTITLE_WRAP_MANUAL_MIN || parsed > SUBTITLE_WRAP_MANUAL_MAX)
+    ) {
+      setError(`單筆字幕每行字數必須是 ${SUBTITLE_WRAP_MANUAL_MIN}–${SUBTITLE_WRAP_MANUAL_MAX} 的整數。`);
+      return;
+    }
+    const next = cues.map((item) =>
+      item.id === cue.id ? { ...item, lineWidthChars: automatic ? undefined : parsed, userEdited: true } : item,
+    );
+    if (
+      await persistCueList(
+        next,
+        automatic
+          ? `這筆字幕已恢復自動行寬（目前 ${defaultSubtitleLineWidth(cue.text)} 字／行）並立即保存。`
+          : `這筆字幕已改為每行 ${parsed} 字並立即保存。`,
+      )
+    )
+      setLineWidthCueId(undefined);
+  };
+
+  const openPositionEditor = (cue: SubtitleCue) => {
+    setSelectedId(cue.id);
+    setSelectedIds(new Set([cue.id]));
+    selectionAnchorId.current = cue.id;
+    setPositionCueId(cue.id);
+    setError(undefined);
+  };
+
+  useEffect(() => {
+    if (!positionCueId) return;
+    const frame = window.requestAnimationFrame(() => positionNudgeRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [positionCueId]);
+
+  const nudgePositionAndSave = async (id: string, direction: "UP" | "DOWN" | "LEFT" | "RIGHT", largeStep = false) => {
+    if (busy || generating || buildingPreview) return;
+    const cue = cues.find((item) => item.id === id);
+    if (!cue) return;
+    const position = nudgeSubtitleCuePosition(
+      cue.position,
+      subtitleStyle.verticalPositionPercent,
+      direction,
+      largeStep,
+    );
+    const next = cues.map((item) => (item.id === id ? { ...item, position, userEdited: true } : item));
+    await persistCueList(next, `這筆字幕位置已調整為 X ${position.xPercent}%／Y ${position.yPercent}% 並立即保存。`);
+  };
+
+  const resetPositionAndSave = async (id: string) => {
+    if (busy || generating || buildingPreview) return;
+    const next = cues.map((item) => (item.id === id ? { ...item, position: undefined, userEdited: true } : item));
+    await persistCueList(next, "這筆字幕已恢復畫面中央／全域高低位置並立即保存。");
+  };
+
+  const handlePositionKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>, id: string) => {
+    const target = event.target;
+    if (target instanceof Element && target.matches("input, textarea, select, [contenteditable='true']")) return;
+    const direction =
+      event.key === "ArrowUp"
+        ? "UP"
+        : event.key === "ArrowDown"
+          ? "DOWN"
+          : event.key === "ArrowLeft"
+            ? "LEFT"
+            : event.key === "ArrowRight"
+              ? "RIGHT"
+              : undefined;
+    if (!direction) return;
+    event.preventDefault();
+    void nudgePositionAndSave(id, direction, event.shiftKey);
   };
 
   const persistCueList = async (
@@ -576,7 +666,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     try {
       const saved = await window.sourceApp.updateUserPreferences({ subtitlePreviewStyle: subtitleStyle });
       setSubtitleStyle(saved.subtitlePreviewStyle);
-      setNotice("字幕位置、大小、顏色、陰影、外框與每行字數已保存為下次預設。");
+      setNotice("字幕位置、大小、顏色、陰影、外框與選填的批次行寬已保存為下次預設。");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -835,9 +925,16 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   const scrubberMinimumMs = useIntroTimelinePreview ? 0 : (selected?.startMs ?? 0);
   const scrubberMaximumMs = useIntroTimelinePreview ? displayedDurationMs : (selected?.endMs ?? displayedDurationMs);
   const previewCanvasUnit = 100 / 480;
-  const overlayAnchor = overlayAnchorForPosition(subtitleStyle.verticalPositionPercent);
+  const resolvedOverlayPosition = resolveSubtitleCuePosition(
+    activeOverlayCue?.position,
+    subtitleStyle.verticalPositionPercent,
+    854,
+    480,
+  );
+  const overlayAnchor = resolvedOverlayPosition.anchor;
   const overlayStyle = {
-    top: `${subtitleStyle.verticalPositionPercent}%`,
+    left: `${resolvedOverlayPosition.xPercent}%`,
+    top: `${resolvedOverlayPosition.yPercent}%`,
     // Grow the block the same way the burned ASS anchor does (top-down for
     // TOP, bottom-up for BOTTOM), otherwise multi-line previews drift.
     transform:
@@ -847,10 +944,10 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
           ? "translate(-50%, 0)"
           : "translate(-50%, -50%)",
     color: subtitleStyle.textColor,
-    fontSize: `${subtitleStyle.fontSizePx * previewCanvasUnit}cqh`,
-    WebkitTextStroke: `${subtitleStyle.outlineWidthPx * previewCanvasUnit}cqh #000000`,
+    fontSize: `${subtitleFrameFontSize(subtitleStyle.fontSizePx, 480) * previewCanvasUnit}cqh`,
+    WebkitTextStroke: `${subtitleFrameOutlineWidth(subtitleStyle.outlineWidthPx, 480) * previewCanvasUnit}cqh #000000`,
     textShadow: subtitleStyle.shadowEnabled
-      ? `0 ${2 * previewCanvasUnit}cqh ${4 * previewCanvasUnit}cqh #000, 0 0 ${8 * previewCanvasUnit}cqh #000`
+      ? `${subtitleFrameShadowSize(subtitleStyle.fontSizePx, 480) * previewCanvasUnit}cqh ${subtitleFrameShadowSize(subtitleStyle.fontSizePx, 480) * previewCanvasUnit}cqh 0 #000`
       : "none",
   };
   const canGenerate = selectedScopes.some((item) => (item === "INTRO" ? introDurationMs > 0 : timelineDurationMs > 0));
@@ -1168,7 +1265,11 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                     <em>{overlappingIds.has(cue.id) ? "時間重疊" : statusLabel(cue.reviewStatus)}</em>
                     <small>
                       {cueScope(cue) === "INTRO" ? "片頭" : "正片"} · {formatDuration(cue.startMs)} →{" "}
-                      {formatDuration(cue.endMs)} · <span>{cueOrigin(cue)}</span>
+                      {formatDuration(cue.endMs)} · <span>{cueOrigin(cue)}</span> · 每行{" "}
+                      {cue.lineWidthChars ?? defaultSubtitleLineWidth(cue.text)} 字
+                      {cue.lineWidthChars === undefined ? "（自動）" : "（單筆）"} · 位置 X{" "}
+                      {cue.position?.xPercent ?? 50}%／Y{" "}
+                      {cue.position?.yPercent ?? subtitleStyle.verticalPositionPercent}%
                     </small>
                   </div>
                   <div className="subtitle-cue-row-actions" role="group" aria-label={`第 ${index + 1} 筆字幕操作`}>
@@ -1198,6 +1299,24 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                       onClick={() => void moveCueAndSave(cue.id, 1)}
                     >
                       ↓ 下移
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`調整第 ${index + 1} 筆字幕每行字數`}
+                      title={`可用鍵盤上下鍵或直接輸入 ${SUBTITLE_WRAP_MANUAL_MIN}–${SUBTITLE_WRAP_MANUAL_MAX}；只改這一筆。`}
+                      disabled={disabled}
+                      onClick={() => openLineWidthEditor(cue)}
+                    >
+                      ↔ 行寬
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`調整第 ${index + 1} 筆字幕畫面位置`}
+                      title="用方向鍵微調 1%；Shift＋方向鍵調整 5%。"
+                      disabled={disabled}
+                      onClick={() => openPositionEditor(cue)}
+                    >
+                      ✥ 位置
                     </button>
                     <button
                       type="button"
@@ -1302,11 +1421,10 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                 <div className="subtitle-overlay-preview" style={overlayStyle}>
                   {wrapSubtitleText(
                     activeOverlayCue.text,
-                    resolveSubtitleWrapLimit(
+                    resolveCueSubtitleWrapLimit(
+                      activeOverlayCue.lineWidthChars,
                       subtitleStyle.maxCharactersPerLine,
-                      SUBTITLE_WRAP_REFERENCE_WIDTH,
-                      subtitleStyle.fontSizePx,
-                      isCjkText(activeOverlayCue.text),
+                      activeOverlayCue.text,
                     ),
                   ).map((line, index, lines) => (
                     <span key={index}>
@@ -1443,25 +1561,25 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                 <span>px</span>
               </label>
               <label>
-                每行字數{" "}
+                批次行寬{" "}
                 <input
-                  aria-label="字幕每行最多字數"
+                  aria-label="字幕批次每行最多字數"
                   type="number"
                   min={SUBTITLE_WRAP_MANUAL_MIN}
                   max={SUBTITLE_WRAP_MANUAL_MAX}
-                  placeholder="自動"
+                  placeholder="自動 12/20"
                   value={subtitleStyle.maxCharactersPerLine ?? ""}
                   onChange={(event) => {
                     const raw = event.target.value.trim();
                     setSubtitleStyle((current) => ({
                       ...current,
                       // Commit the raw integer while typing; Main clamps to
-                      // 6–40 on save, so partial input never snaps around.
+                      // The Main process clamps 6–60 on save, so partial input never snaps around.
                       maxCharactersPerLine: raw === "" ? undefined : Math.floor(Number(raw) || 0),
                     }));
                   }}
                 />
-                <span>字{subtitleStyle.maxCharactersPerLine === undefined ? "（自動）" : ""}</span>
+                <span>字{subtitleStyle.maxCharactersPerLine === undefined ? "（中文 12／英文或混合 20）" : ""}</span>
               </label>
               <button type="button" className="secondary-button" disabled={busy} onClick={() => void saveStyle()}>
                 儲存顯示格式
@@ -1654,6 +1772,97 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
             </button>
           </div>
         </footer>
+        {lineWidthCueId && (
+          <div className="inline-close-guard subtitle-line-width-dialog" role="dialog" aria-label="調整單筆字幕行寬">
+            <strong>調整這一筆字幕的每行字數</strong>
+            <p>中文預設 12；英文或中英混合預設 20。可直接輸入，或用鍵盤 ↑／↓ 微調。</p>
+            <label>
+              每行字數
+              <input
+                autoFocus
+                aria-label="單筆字幕每行字數"
+                type="number"
+                min={SUBTITLE_WRAP_MANUAL_MIN}
+                max={SUBTITLE_WRAP_MANUAL_MAX}
+                step="1"
+                value={lineWidthDraft}
+                onChange={(event) => setLineWidthDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void saveLineWidth(false);
+                }}
+              />
+              字
+            </label>
+            <button className="primary-button" disabled={busy} onClick={() => void saveLineWidth(false)}>
+              儲存這一筆
+            </button>
+            <button className="secondary-button" disabled={busy} onClick={() => void saveLineWidth(true)}>
+              恢復中文 12／英文或混合 20 自動預設
+            </button>
+            <SafeDefaultButton
+              className="secondary-button"
+              disabled={busy}
+              onClick={() => setLineWidthCueId(undefined)}
+            >
+              取消，不修改
+            </SafeDefaultButton>
+          </div>
+        )}
+        {positionCueId &&
+          (() => {
+            const cue = cues.find((item) => item.id === positionCueId);
+            if (!cue) return null;
+            const position = resolveSubtitleCuePosition(cue.position, subtitleStyle.verticalPositionPercent, 100, 100);
+            const positionButton = (label: string, direction: "UP" | "DOWN" | "LEFT" | "RIGHT", symbol: string) => (
+              <button
+                type="button"
+                aria-label={`${label}第 ${visibleCues.findIndex((item) => item.id === cue.id) + 1} 筆字幕`}
+                disabled={busy || generating || buildingPreview}
+                onClick={(event) => void nudgePositionAndSave(cue.id, direction, event.shiftKey)}
+              >
+                {symbol} {label}
+              </button>
+            );
+            return (
+              <div
+                ref={positionNudgeRef}
+                className="inline-close-guard subtitle-position-dialog"
+                role="dialog"
+                aria-label="調整單筆字幕畫面位置"
+                aria-describedby="subtitle-position-help"
+                tabIndex={0}
+                onKeyDown={(event) => handlePositionKeyDown(event, cue.id)}
+              >
+                <strong>調整這一筆字幕的位置</strong>
+                <p id="subtitle-position-help">方向鍵微調 1%；Shift＋方向鍵移動 5%。每次調整都會立即保存。</p>
+                <output aria-live="polite">
+                  X {position.xPercent}%　Y {position.yPercent}%
+                </output>
+                <div className="subtitle-position-pad" role="group" aria-label="字幕位置方向控制">
+                  <span />
+                  {positionButton("上移", "UP", "↑")}
+                  <span />
+                  {positionButton("左移", "LEFT", "←")}
+                  {positionButton("下移", "DOWN", "↓")}
+                  {positionButton("右移", "RIGHT", "→")}
+                </div>
+                <button
+                  className="secondary-button"
+                  disabled={busy || generating || buildingPreview}
+                  onClick={() => void resetPositionAndSave(cue.id)}
+                >
+                  恢復中央／全域高低位置
+                </button>
+                <SafeDefaultButton
+                  className="secondary-button"
+                  disabled={busy || generating || buildingPreview}
+                  onClick={() => setPositionCueId(undefined)}
+                >
+                  完成
+                </SafeDefaultButton>
+              </div>
+            );
+          })()}
         {forceReviewPrompt && (
           <div className="inline-close-guard" role="alertdialog" aria-label="強制重新校對字幕">
             <strong>依目前片頭／正片主軸逐筆重新校對？</strong>

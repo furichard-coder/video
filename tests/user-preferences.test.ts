@@ -15,11 +15,11 @@ afterEach(async () => {
 });
 
 describe("user preferences", () => {
-  it("defaults new renders to H.265, watermark on and Chrome drag-and-drop handoff", async () => {
+  it("defaults new renders to high-speed H.264 QSV, watermark on and Chrome drag-and-drop handoff", async () => {
     const store = new UserPreferencesStore(await root());
     await store.initialize();
     expect(store.snapshot().renderDefaults).toMatchObject({
-      videoCodec: "H265_QSV",
+      videoCodec: "H264_QSV",
       includeWatermark: true,
       mainBgmScopes: { intro: true, main: true },
       audioProtection: {
@@ -33,6 +33,9 @@ describe("user preferences", () => {
         peakCeilingDb: -1,
       },
       youtubeHandoffMode: "CHROME_DRAG_DROP",
+      prependIntro: true,
+      lowMemorySegmented: true,
+      youtubeFullAutoUpload: true,
     });
     const changed = await store.update({
       renderDefaults: {
@@ -69,6 +72,7 @@ describe("user preferences", () => {
       renderDefaults: {
         transitionSeconds: 0.7,
         resolution: "4K",
+        renderTemporaryFolder: path.join(dataRoot, "Render TEMP"),
         prependIntro: false,
         autoUpload: false,
         introPreviewIncludeBgm: true,
@@ -103,6 +107,7 @@ describe("user preferences", () => {
       renderDefaults: {
         transitionSeconds: 0.7,
         resolution: "4K",
+        renderTemporaryFolder: path.join(dataRoot, "Render TEMP"),
         prependIntro: false,
         autoUpload: false,
         introPreviewIncludeBgm: true,
@@ -154,7 +159,33 @@ describe("user preferences", () => {
     await store.initialize();
     await store.update({ viewMode: "LIST" });
     await expect(store.update({ renderDefaults: { transitionSeconds: 1 as 0.3 } })).rejects.toThrow(/疊化秒數/);
+    await expect(store.update({ renderDefaults: { renderTemporaryFolder: "relative-temp" } })).rejects.toThrow(
+      /絕對路徑/,
+    );
     expect(store.snapshot().viewMode).toBe("LIST");
+  });
+
+  it("keeps post-success power actions explicit opt-in and persists a deliberate choice", async () => {
+    const dataRoot = await root();
+    const store = new UserPreferencesStore(dataRoot);
+    await store.initialize();
+    expect(store.snapshot().renderDefaults.postSuccessPower).toEqual({
+      enabled: false,
+      trigger: "RENDER_SUCCESS",
+      action: "SHUTDOWN",
+    });
+    await store.update({
+      renderDefaults: {
+        postSuccessPower: { enabled: true, trigger: "YOUTUBE_UPLOAD_SUCCESS", action: "HIBERNATE" },
+      },
+    });
+    const reopened = new UserPreferencesStore(dataRoot);
+    await reopened.initialize();
+    expect(reopened.snapshot().renderDefaults.postSuccessPower).toEqual({
+      enabled: true,
+      trigger: "YOUTUBE_UPLOAD_SUCCESS",
+      action: "HIBERNATE",
+    });
   });
 
   it("limits burn-in defaults to two unique supported languages and clamps readable sizes", async () => {
@@ -224,7 +255,7 @@ describe("user preferences", () => {
     await store.update({ subtitlePreviewStyle: { ...base, maxCharactersPerLine: 3 } });
     expect(store.snapshot().subtitlePreviewStyle.maxCharactersPerLine).toBe(6);
     await store.update({ subtitlePreviewStyle: { ...base, maxCharactersPerLine: 100 } });
-    expect(store.snapshot().subtitlePreviewStyle.maxCharactersPerLine).toBe(40);
+    expect(store.snapshot().subtitlePreviewStyle.maxCharactersPerLine).toBe(60);
     await store.update({ subtitlePreviewStyle: { ...base, maxCharactersPerLine: 12 } });
     expect(store.snapshot().subtitlePreviewStyle.maxCharactersPerLine).toBe(12);
     await store.update({ subtitlePreviewStyle: { ...base, maxCharactersPerLine: Number.NaN } });

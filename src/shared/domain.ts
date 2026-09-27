@@ -1,6 +1,6 @@
-export const MANIFEST_SCHEMA_VERSION = 17 as const;
-export const PREVIEWER_VERSION = "preview-v3" as const;
-export const CLIP_PREVIEWER_VERSION = "clip-preview-v1" as const;
+export const MANIFEST_SCHEMA_VERSION = 21 as const;
+export const PREVIEWER_VERSION = "preview-v5-orientation-planar-safe" as const;
+export const CLIP_PREVIEWER_VERSION = "clip-preview-v3-orientation-planar-safe" as const;
 export const DEFAULT_IMAGE_DURATION_MS = 5_000 as const;
 export const MIN_IMAGE_DURATION_MS = 3_000 as const;
 export const MAX_IMAGE_DURATION_MS = 7_000 as const;
@@ -10,6 +10,12 @@ export const DUNES_SHUTTER_EFFECT_SHA256 = "0AC71ECABF302784F5FFB9483C2939C46B17
 export const PHOTO_SOUND_PREVIEW_URL = "preview-media://asset/dunes-shutter.mp3" as const;
 export const DEFAULT_SOURCE_AUDIO_VOLUME_PERCENT = 100 as const;
 export const DEFAULT_BGM_VOLUME_PERCENT = 35 as const;
+export const DEFAULT_INSERTION_BGM_VOLUME_PERCENT = 28 as const;
+export const DEFAULT_INSERTION_SFX_VOLUME_PERCENT = 70 as const;
+export const DEFAULT_INSERTION_AUDIO_FADE_MS = 180 as const;
+export const DEFAULT_INSERTION_BGM_LOOP_CROSSFADE_MS = 120 as const;
+export const MAIN_START_CUE_SFX_ID = "SCENERYWALKER_MAIN_START_CHIME_V1" as const;
+export const DEFAULT_MAIN_START_CUE_DURATION_MS = 650 as const;
 export const MAX_MIX_VOLUME_PERCENT = 300 as const;
 export const DEFAULT_INTRO_TARGET_DURATION_MS = 90_000 as const;
 export const DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS = 15_000 as const;
@@ -17,6 +23,8 @@ export const INTRO_DURATION_WARNING_MS = 180_000 as const;
 export const INTRO_MAX_SEGMENTS = 50 as const;
 export const INTRO_MIN_SEGMENT_MS = 3_000 as const;
 export const INTRO_MAX_SEGMENT_MS = 22_000 as const;
+/** Smallest UI step for a freely adjusted Intro clip; 3–22s remains guidance only. */
+export const INTRO_EDIT_MIN_SEGMENT_MS = 100 as const;
 /** Internal scale percentage. 100 means the user-facing 0% enlargement. */
 export const DEFAULT_ZOOM_PERCENT = 100 as const;
 export const MIN_ZOOM_PERCENT = 100 as const;
@@ -34,14 +42,178 @@ export type PreviewVariant = "THUMBNAIL" | "IMAGE_PREVIEW" | "VIDEO_PROXY" | "VI
 export type CacheStatus = "HIT" | "CREATED" | "INVALIDATED";
 export type TransitionDurationSec = 0.3 | 0.5 | 0.7;
 export type MainStartCardTransition = "DISSOLVE" | "FADE_BLACK" | "HARD_CUT";
-export type PreviewResolution = "360P" | "480P" | "720P" | "4K";
+export type PreviewResolution = "360P" | "480P" | "720P" | "1080P" | "1440P" | "4K";
 /**
  * Render encoder selection.  The QSV variants use Intel Quick Sync when the
  * local FFmpeg build/driver exposes it; the non-QSV variants remain explicit
  * CPU fallbacks for machines that cannot use hardware encoding.
  */
-export type RenderVideoCodec = "H265_QSV" | "H265" | "H264_QSV" | "H264";
-export type ConcatRenderPhase = "PREPARING" | "TRANSLATING_SUBTITLES" | "RENDERING" | "FINALIZING";
+export type RenderVideoCodec = "H264_NVENC" | "H265_NVENC" | "H265_QSV" | "H265" | "H264_QSV" | "H264";
+export type AudioProcessingMode =
+  "ORIGINAL_STEREO" | "ENHANCED_STEREO" | "VIRTUAL_SURROUND_5_1" | "PRESERVE_MULTICHANNEL";
+export type SurroundAudioCodec = "AAC" | "AC3" | "EAC3";
+export type AudioSpatialPreset = "NATURAL" | "CINEMA" | "WIDE";
+
+export interface AudioProcessingOptions {
+  mode: AudioProcessingMode;
+  preset: AudioSpatialPreset;
+  codec: SurroundAudioCodec;
+  bitrateKbps: number;
+  sampleRate: 48_000;
+  /** Conservative user controls; 100 is the Natural reference level. */
+  surroundStrengthPercent: number;
+  lfeStrengthPercent: number;
+  lfeCutoffHz: number;
+  loudnessTargetLufs: number;
+  truePeakCeilingDb: number;
+  /** 100 keeps the Natural reference width; higher values widen only the side component. */
+  stereoWidthPercent?: number;
+  /** Conservative broad tone control for preview/final parity. */
+  eqLowDb?: number;
+  eqPresenceDb?: number;
+}
+
+export const DEFAULT_AUDIO_PROCESSING_OPTIONS: AudioProcessingOptions = {
+  mode: "ORIGINAL_STEREO",
+  preset: "NATURAL",
+  codec: "AAC",
+  bitrateKbps: 384,
+  sampleRate: 48_000,
+  surroundStrengthPercent: 65,
+  lfeStrengthPercent: 45,
+  lfeCutoffHz: 100,
+  loudnessTargetLufs: -16,
+  truePeakCeilingDb: -1.5,
+  stereoWidthPercent: 100,
+  eqLowDb: 0,
+  eqPresenceDb: 0,
+};
+
+export type RemoteRenderControlState =
+  "IDLE" | "PREPARED" | "RUNNING" | "PAUSING" | "PAUSED" | "COMPLETED" | "FAILED" | "CANCELLED";
+
+export interface RemoteRenderSnapshot {
+  revision: number;
+  capturedAt: string;
+  projectName: string;
+  state: RemoteRenderControlState;
+  prepared: boolean;
+  progressPercent: number;
+  attemptElapsedMs?: number;
+  cumulativeElapsedMs?: number;
+  estimatedRemainingMs?: number;
+  currentSegment?: string;
+  encoder?: string;
+  resolution?: PreviewResolution;
+  renderMode?: RenderRuntimePolicy["mode"];
+  audioMode?: AudioProcessingMode;
+  cpuUsagePercent?: number;
+  gpuEncodeUsagePercent?: number;
+  ramUsedBytes?: number;
+  ramAvailableBytes?: number;
+  ssdFreeBytes?: number;
+  latestError?: string;
+  pauseDetail?: string;
+}
+
+export interface RemoteControlStatus {
+  enabled: boolean;
+  port?: number;
+  addresses: string[];
+  pairingUrl?: string;
+  qrDataUrl?: string;
+  pairingExpiresAt?: string;
+  render: RemoteRenderSnapshot;
+}
+
+export interface RemotePreparedRender {
+  preparedAt: string;
+  outputDisplayPath: string;
+  resolution: PreviewResolution;
+  renderMode: RenderRuntimePolicy["mode"];
+  audioMode: AudioProcessingMode;
+}
+
+export interface RenderEncoderCapability {
+  videoCodec: RenderVideoCodec;
+  ffmpegEncoder: "h264_nvenc" | "hevc_nvenc" | "h264_qsv" | "hevc_qsv" | "libx264" | "libx265";
+  backend: "NVIDIA_NVENC" | "INTEL_QSV" | "CPU_SOFTWARE";
+  codec: "H264" | "H265";
+  listed: boolean;
+  runtimeVerified: boolean;
+  available: boolean;
+  failureReason?: string;
+}
+
+export interface RenderDecoderCapability {
+  backend: "NVIDIA_CUDA" | "INTEL_QSV" | "CPU_SOFTWARE";
+  codec: "H264" | "H265";
+  ffmpegDecoder: string;
+  listed: boolean;
+  runtimeVerified: boolean;
+  available: boolean;
+  failureReason?: string;
+}
+
+export interface RenderHardwareCapabilities {
+  schemaVersion: 1;
+  fingerprint: string;
+  capturedAt: string;
+  ffmpegExecutable: string;
+  ffmpegVersion: string;
+  gpuAdapters: Array<{ name: string; driverVersion?: string }>;
+  encoders: RenderEncoderCapability[];
+  decoders: RenderDecoderCapability[];
+  gpuFilters: string[];
+  recommendedVideoCodec: RenderVideoCodec;
+  recommendationReason: string;
+  probeDeferredReason?: string;
+}
+
+export interface RenderBenchmarkResult {
+  mode: "ORIGINAL_NORMAL_2" | "NORMAL_2" | "NORMAL_3" | "NORMAL_4" | "HIGH_SPEED_H264" | "H265";
+  jobs: number;
+  encoder: string;
+  decoder: string;
+  processingSeconds?: number;
+  fps?: number;
+  speed?: number;
+  cpuAveragePercent?: number;
+  cpuPeakPercent?: number;
+  gpuEncodeAveragePercent?: number;
+  gpuEncodePeakPercent?: number;
+  gpuDecodeAveragePercent?: number;
+  gpuDecodePeakPercent?: number;
+  gpuComputeAveragePercent?: number;
+  gpuComputePeakPercent?: number;
+  ramPeakBytes?: number;
+  vramPeakBytes?: number;
+  ssdTemporaryPeakBytes?: number;
+  finalFileSizeBytes?: number;
+  oom: boolean;
+  status: "PASS" | "FAILED_SAFE" | "SKIPPED_UNAVAILABLE";
+  failureReason?: string;
+}
+
+export interface RenderPerformanceProfile {
+  schemaVersion: 1;
+  fingerprint: string;
+  capturedAt: string;
+  sampleDurationSeconds: number;
+  sourceAssetIds: string[];
+  results: RenderBenchmarkResult[];
+  recommendedMode: "LOW_MEMORY" | "NORMAL" | "HIGH_SPEED";
+  recommendedVideoCodec: RenderVideoCodec;
+  recommendedParallelJobs: number;
+  recommendationReason: string;
+}
+export type ConcatRenderPhase =
+  | "PREPARING"
+  | "TRANSLATING_SUBTITLES"
+  | "WAITING_FOR_MEMORY"
+  | "PAUSED_DISK_SPACE"
+  | "RENDERING"
+  | "FINALIZING";
 export type PreviewRenderPurpose = "CONCAT" | "INTRO" | "CLIP" | "SHORTS";
 export type IntroAnalysisPhase = "PREPARING" | "ANALYZING" | "RANKING";
 export type KnownExternalPlayerId = "SYSTEM_DEFAULT" | "VLC" | "WINDOWS_MEDIA_PLAYER" | "MPC_HC";
@@ -60,6 +232,25 @@ export type YoutubeBrowser = "CHROME" | "EDGE";
 export type YoutubePrivacyStatus = "unlisted" | "private";
 export type YoutubeHandoffMode = "CHROME_DRAG_DROP" | "OFFICIAL_API";
 export type YoutubeUploadPhase = "AUTHORIZING" | "STARTING" | "UPLOADING" | "FINALIZING";
+export type PostSuccessPowerTrigger = "RENDER_SUCCESS" | "YOUTUBE_UPLOAD_SUCCESS";
+export type PostSuccessPowerAction = "SHUTDOWN" | "HIBERNATE" | "SLEEP";
+
+export interface PostSuccessPowerPreference {
+  /** Explicit opt-in. Legacy or malformed preference data always becomes false. */
+  enabled: boolean;
+  trigger: PostSuccessPowerTrigger;
+  action: PostSuccessPowerAction;
+}
+
+export interface PostSuccessPowerStatus {
+  state: "IDLE" | "SCHEDULED" | "EXECUTING" | "CANCELLED" | "FAILED";
+  action?: PostSuccessPowerAction;
+  trigger?: PostSuccessPowerTrigger;
+  scheduledAt?: string;
+  executeAt?: string;
+  secondsRemaining?: number;
+  message?: string;
+}
 export type BrowserUploadPlatform = "BILIBILI" | "TIKTOK";
 export type PreviewOutputOrigin = "APP_RENDERED" | "IMPORTED_EXISTING";
 export type PreviewOutputPurpose = PreviewRenderPurpose | "UNKNOWN";
@@ -133,6 +324,31 @@ export interface MainStartCardOptions {
   backgroundIntroSegmentId?: string;
 }
 
+export interface MainStartCueSettings {
+  enabled: boolean;
+  durationMs: number;
+}
+
+export const DEFAULT_MAIN_START_CUE_SETTINGS: MainStartCueSettings = {
+  enabled: true,
+  durationMs: DEFAULT_MAIN_START_CUE_DURATION_MS,
+};
+
+/** Canonical per-occurrence track gates shared by Intro, Main, preview and final render. */
+export interface AudioTrackGates {
+  original: boolean;
+  voice: boolean;
+  bgm: boolean;
+  sfx: boolean;
+}
+
+export const DEFAULT_AUDIO_TRACK_GATES: AudioTrackGates = {
+  original: true,
+  voice: true,
+  bgm: true,
+  sfx: true,
+};
+
 export const DEFAULT_MAIN_START_CARD_OPTIONS: MainStartCardOptions = {
   durationSeconds: DEFAULT_MAIN_START_CARD_DURATION_SEC,
   line1: "漫步風光",
@@ -155,11 +371,29 @@ export interface UserPreferences {
     includeWatermark?: boolean;
     /** Optional only for preferences written before v0.54; the store fills defaults. */
     audioProtection?: AudioProtectionOptions;
+    /** Neutral, non-licensed spatial-audio output profile. */
+    audioProcessing?: AudioProcessingOptions;
     /** Optional only for preferences written before v0.54; the store fills defaults. */
     mainBgmScopes?: BgmScopeSelection;
     youtubeHandoffMode?: YoutubeHandoffMode;
     prependIntro: boolean;
     autoUpload: boolean;
+    /** Default-on bounded FFmpeg graph mode for long or high-resolution timelines. */
+    lowMemorySegmented?: boolean;
+    /** Opt-in throughput mode; still obeys Main-process RAM/Commit/SSD safety gates. */
+    highSpeedMode?: boolean;
+    /** v0.77 explicit resource architecture profile. Legacy booleans remain readable. */
+    resourceProfile?: "LOW_DISK" | "BALANCED" | "HIGH_SPEED";
+    /** User budget for FFmpeg working RAM. */
+    maximumRenderRamGiB?: number;
+    /** AUTO or an explicit cap for app-owned render TEMP. */
+    maximumRenderTempGiB?: number | "AUTO";
+    /** Uses the official YouTube API and applies the explicit automatic review choices after render. */
+    youtubeFullAutoUpload?: boolean;
+    /** Explicit post-success power action. Defaults disabled and never migrates as enabled. */
+    postSuccessPower?: PostSuccessPowerPreference;
+    /** Optional app-owned root for large resumable FFmpeg intermediates. */
+    renderTemporaryFolder?: string;
     introPreviewIncludeBgm: boolean;
     mainPreviewIncludeBgm: boolean;
     mainStartCard: MainStartCardOptions;
@@ -301,6 +535,10 @@ export interface BasicMediaInfo {
   frameRate?: string;
   videoCodec?: string;
   audioCodec?: string;
+  audioChannels?: number;
+  audioChannelLayout?: string;
+  audioSampleRate?: number;
+  audioBitrate?: number;
   captureTime?: string;
   rotationDegrees?: number;
   displayWidth?: number;
@@ -357,10 +595,12 @@ export interface SourceAsset {
   imageDurationMs?: number;
   photoSoundEnabled?: boolean;
   /**
-   * Silent VIDEO clips are auto-dubbed with the first READY BGM track unless
-   * explicitly false. Undefined keeps the default (dub when no audio track).
+   * VIDEO clips acoustically detected as silent use the first BGM-page track
+   * unless explicitly false. Undefined keeps the default-on behavior.
    */
   dubWithBgm?: boolean;
+  /** Main-grid clip track gates. Source speech remains part of Original, never Voice. */
+  mainAudioGates?: AudioTrackGates;
   previewRange?: PreviewRange;
   volumeSegments?: VolumeSegment[];
   mainExclusionRanges?: MainExclusionRange[];
@@ -379,6 +619,95 @@ export interface MediaInsertion {
   previousTimelineIndex: number;
   previousPendingIndex?: number;
   createdAt: string;
+  /** Per occurrence; never inferred from another use of the same SourceAsset. */
+  insertionAudio?: InsertionAudioSettings;
+}
+
+export interface InsertionAudioSettings {
+  trackGates?: AudioTrackGates;
+  /** Camera shutter is an independent SFX event. Only PHOTO occurrences may enable it. */
+  sfxEnabled: boolean;
+  sfxId?: typeof DUNES_SHUTTER_EFFECT_ID;
+  sfxVolumePercent: number;
+  /** BGM is independent from SFX. Undefined track means no insertion BGM. */
+  bgmTrackId?: string;
+  bgmVolumePercent: number;
+  fadeMs: number;
+  loopCrossfadeMs: number;
+}
+
+export type InsertionAudioScope = "INTRO" | "MAIN";
+
+export interface InsertionAudioPlanItem {
+  instanceId: string;
+  scope: InsertionAudioScope;
+  assetId: string;
+  fileName: string;
+  kind: SourceKind;
+  timelineStartMs: number;
+  timelineEndMs: number;
+  durationMs: number;
+  hasSourceAudio: boolean;
+  sourceInMs: number;
+  sourceOutMs: number;
+  gates: AudioTrackGates;
+  sfxEnabled: boolean;
+  sfxName?: string;
+  sfxVolumePercent?: number;
+  bgmEnabled: boolean;
+  bgmTrackId?: string;
+  bgmTrackIndex?: number;
+  bgmTrackName?: string;
+  bgmTimelineStartMs?: number;
+  bgmTimelineEndMs?: number;
+  bgmPlayDurationMs?: number;
+  bgmSourcePositionMs?: number;
+  bgmVolumePercent?: number;
+  continuousWithPrevious: boolean;
+  usesLoop: boolean;
+  fadeMs: number;
+}
+
+export interface InsertionBgmRange {
+  id: string;
+  scope: InsertionAudioScope;
+  bgmTrackId: string;
+  bgmTrackIndex: number;
+  bgmTrackName: string;
+  timelineStartMs: number;
+  timelineEndMs: number;
+  durationMs: number;
+  sourceInMs: number;
+  sourceSpanMs: number;
+  volumePercent: number;
+  fadeInMs: number;
+  fadeOutMs: number;
+  loopCrossfadeMs: number;
+  usesLoop: boolean;
+  /** CROSSFADE is exact; the bounded fallback uses a short seam envelope to avoid unbounded graphs. */
+  loopStrategy: "NONE" | "CROSSFADE" | "BOUNDED_DECLICK_FALLBACK";
+  memberInstanceIds: string[];
+}
+
+export interface InsertionSfxEvent {
+  instanceId: string;
+  scope: InsertionAudioScope;
+  timelineStartMs: number;
+  sfxId: typeof DUNES_SHUTTER_EFFECT_ID | typeof MAIN_START_CUE_SFX_ID;
+  displayName: string;
+  volumePercent: number;
+  durationMs?: number;
+  source: "PACKAGED_SHUTTER" | "SYNTHETIC_MAIN_CUE";
+}
+
+export interface InsertionAudioPlan {
+  version: "insertion-audio-plan-v1";
+  timelineDurationMs: number;
+  transitionMs: number;
+  items: InsertionAudioPlanItem[];
+  bgmRanges: InsertionBgmRange[];
+  sfxEvents: InsertionSfxEvent[];
+  warnings: string[];
 }
 
 export interface PhotoSoundEffectConfig {
@@ -431,6 +760,17 @@ export interface SubtitleCue {
   startMs: number;
   endMs: number;
   text: string;
+  /**
+   * Optional per-cue line-width override. Undefined uses the v0.60 language
+   * default: Chinese-only 12; English or mixed Chinese/English 20.
+   */
+  lineWidthChars?: number;
+  /**
+   * Optional cue-specific position on the canonical output canvas. Percentages
+   * are resolution-independent, so preview and ASS burn-in resolve identically.
+   * Omitted positions preserve the legacy centered/global-height placement.
+   */
+  position?: SubtitleCuePosition;
   /** Older manifests omit this field and are treated as MAIN. */
   timelineScope?: SubtitleTimelineScope;
   origin?: SubtitleCueOrigin;
@@ -452,6 +792,11 @@ export interface SubtitleCue {
   aiConfidence?: number;
   aiWarnings?: string[];
   aiAnalysisVersion?: string;
+}
+
+export interface SubtitleCuePosition {
+  xPercent: number;
+  yPercent: number;
 }
 
 export interface AiStoryContext {
@@ -676,6 +1021,7 @@ export interface ProjectManifest {
   recentIntroRemovals: RemovedIntroSegment[];
   placementDecisions: PlacementDecision[];
   mediaInsertions: MediaInsertion[];
+  mainStartCue: MainStartCueSettings;
   photoSoundEffect: PhotoSoundEffectConfig;
   bgmTracks: BgmTrack[];
   sourceAudioVolumePercent?: number;
@@ -790,6 +1136,7 @@ export interface ConcatRenderRequest {
   includeWatermark?: boolean;
   /** Local privacy/loudness protection; omitted legacy callers receive safe defaults. */
   audioProtection?: AudioProtectionOptions;
+  audioProcessing?: AudioProcessingOptions;
   purpose?: PreviewRenderPurpose;
   prependIntro?: boolean;
   subtitleBurnIn?: SubtitleBurnInOptions;
@@ -804,6 +1151,147 @@ export interface ConcatRenderRequest {
   shortsSource?: "INTRO" | "MAIN";
   /** Renderer estimate used only for the preflight disk-reserve check. */
   estimatedDurationMs?: number;
+  /** Bounds each FFmpeg filter graph and uses removable staged intermediates. */
+  lowMemorySegmented?: boolean;
+  /** Allows 3–4 adaptive workers and guarded QSV decode attempts when supported. */
+  highSpeedMode?: boolean;
+  resourceProfile?: "LOW_DISK" | "BALANCED" | "HIGH_SPEED";
+  maximumRenderRamGiB?: number;
+  maximumRenderTempGiB?: number | "AUTO";
+  /** User explicitly accepted the current advisory RAM/commit warning. */
+  resourceWarningAcknowledged?: boolean;
+  /** Main-process validated app-owned render work root. Renderer input is ignored. */
+  renderTemporaryFolder?: string;
+  /** Main-process-only peak additional-write estimate used by the runtime disk gate. */
+  estimatedPeakDiskBytes?: number;
+  /** Main-process-only final output estimate used by per-volume runtime diagnostics. */
+  estimatedFinalOutputBytes?: number;
+  /** Main-process-only policy; Renderer values are ignored and replaced before execution. */
+  runtimePolicy?: RenderRuntimePolicy;
+  /** Main-process-only persisted checkpoint identifier. */
+  resumeCheckpointId?: string;
+}
+
+export interface RenderRuntimePolicy {
+  mode: "LOW_MEMORY" | "NORMAL" | "HIGH_SPEED";
+  resourceProfile?: "LOW_DISK" | "BALANCED" | "HIGH_SPEED";
+  maxVisualInputsPerStage: number;
+  /** Number of independent segment encodes allowed to start together. */
+  initialParallelJobs: number;
+  /** Hard ceiling; the runtime controller may remain below this value. */
+  maximumParallelJobs: number;
+  filterComplexThreads: number;
+  encoderThreads: number;
+  systemSafetyReserveBytes: number;
+  renderRamBudgetBytes: number;
+  pauseNewStageBelowAvailableBytes: number;
+  /** Conservative scheduler estimates. Live observations replace them after a wave. */
+  estimatedRamPerJobBytes?: number;
+  estimatedWorkingBytesPerJob?: number;
+  minimumCommitHeadroomBytes?: number;
+  minimumOutputFreeBytes?: number;
+  maximumRenderTempBytes?: number;
+}
+
+export interface SystemResourceSnapshot {
+  capturedAt: string;
+  totalRamBytes: number;
+  availableRamBytes: number;
+  appWorkingSetBytes: number;
+  otherProgramsRamBytes: number;
+  committedBytes?: number;
+  commitLimitBytes?: number;
+  pagefileEnabled?: boolean;
+  pagefileTotalBytes?: number;
+  pagefileUsedBytes?: number;
+  pagefilePeakUsedBytes?: number;
+  tempPath: string;
+  tempDriveFreeBytes: number;
+  tempDriveCapacityBytes?: number;
+  outputDriveFreeBytes: number;
+  outputDriveCapacityBytes?: number;
+  renderWorkingBytes?: number;
+  ffmpegWorkingSetBytes?: number;
+  ffmpegPrivateBytes?: number;
+  cpuUsagePercent?: number;
+  gpuUsagePercent?: number;
+  gpuComputeUsagePercent?: number;
+  gpuEncodeUsagePercent?: number;
+  gpuDecodeUsagePercent?: number;
+  vramUsedBytes?: number;
+  vramTotalBytes?: number;
+  diskReadBytesPerSecond?: number;
+  diskWriteBytesPerSecond?: number;
+  currentJobs?: number;
+  ffmpegFps?: number;
+  ffmpegSpeed?: number;
+  encoderName?: string;
+  decoderName?: string;
+  diskUsage?: RenderDiskRuntimeSnapshot;
+}
+
+export type RenderDiskPressureLevel = "OK" | "WARNING" | "CRITICAL" | "EMERGENCY";
+
+export interface RenderDiskPathUsage {
+  label: "SOURCE_LOCAL" | "PROXY_CACHE" | "EXISTING_TEMP" | "INTERMEDIATE" | "AUDIO_TEMP" | "FINAL_OUTPUT" | "CHECKPOINT";
+  path: string;
+  volume: string;
+  bytes: number;
+}
+
+export interface RenderDiskRuntimeSnapshot {
+  capturedAt: string;
+  tempPath: string;
+  tempVolume: string;
+  outputPath: string;
+  outputVolume: string;
+  tempFreeBytes: number;
+  outputFreeBytes: number;
+  tempCapacityBytes: number;
+  outputCapacityBytes: number;
+  renderTempBytes: number;
+  intermediateBytes: number;
+  finalOutputBytes: number;
+  proxyCacheBytes: number;
+  estimatedRemainingWriteBytes: number;
+  safetyReserveBytes: number;
+  requiredAdditionalBytes: number;
+  pressureLevel: RenderDiskPressureLevel;
+}
+
+export interface RenderResumeOffer {
+  checkpointId: string;
+  projectId: string;
+  outputPath: string;
+  mode: "LOW_MEMORY" | "NORMAL" | "HIGH_SPEED";
+  completedSegmentCount: number;
+  /** Completed records in JSON before checking that their media still exists. */
+  recordedCompletedSegmentCount?: number;
+  /** Recorded completed segment files that are missing or have the wrong size. */
+  missingCompletedSegmentCount?: number;
+  physicalState?: "READY" | "PARTIAL" | "SEGMENT_CACHE_MISSING";
+  totalSegmentCount: number;
+  concatStatus: "PENDING" | "FAILED" | "PAUSED_DISK_SPACE";
+  lastError?: string;
+  updatedAt: string;
+  lastAttemptElapsedMs?: number;
+  cumulativeElapsedMs?: number;
+  /** Bytes of physically present completed media that can be reused after validation. */
+  reusableBytes?: number;
+  /** Timeline duration represented by physically present completed media. */
+  reusableDurationMs?: number;
+  /** Original checkpoint when v0.80 imported an older job copy-on-write. */
+  migratedFromCheckpointId?: string;
+  recoverySourcePreserved?: boolean;
+  /** Older recovery data is read-only until copy-on-write migration succeeds. */
+  legacyRecoveryProtected?: boolean;
+  /** Last persisted disk snapshot; UI labels it historical until preflight refreshes it. */
+  currentTempFreeBytes?: number;
+  currentOutputFreeBytes?: number;
+  estimatedRemainingWriteBytes?: number;
+  requiredAdditionalBytes?: number;
+  tempVolume?: string;
+  outputVolume?: string;
 }
 
 export interface ConcatRenderEstimateRequest {
@@ -811,6 +1299,89 @@ export interface ConcatRenderEstimateRequest {
   expectedDurationMs: number;
   resolution: PreviewResolution;
   videoCodec: RenderVideoCodec;
+  lowMemorySegmented?: boolean;
+  highSpeedMode?: boolean;
+  resourceProfile?: "LOW_DISK" | "BALANCED" | "HIGH_SPEED";
+  maximumRenderRamGiB?: number;
+  maximumRenderTempGiB?: number | "AUTO";
+  /** Exact visual inputs selected for this render; Main resolves metadata from the project store. */
+  orderedAssetIds?: string[];
+  clipSelections?: RenderClipSelection[];
+  transitionSeconds?: TransitionDurationSec;
+  /** Generated title/start cards have output cost but no SourceAsset record. */
+  generatedInputCount?: number;
+}
+
+export type RenderEstimateWarningLevel = "NONE" | "WARNING" | "DANGER";
+
+export interface RenderModeResourceEstimate {
+  resourceProfile?: "LOW_DISK" | "BALANCED" | "HIGH_SPEED";
+  lowMemorySegmented: boolean;
+  /** True only when the input count is large enough to activate staged intermediates. */
+  usesSegmentedPipeline: boolean;
+  estimatedOutputBytes: number;
+  /** Peak working SSD footprint: partial output plus any live staged intermediates. */
+  estimatedTemporaryBytes: number;
+  /** Rebuildable per-project picture/base-audio master retained for audio-only revisions. */
+  estimatedReusableMasterBytes?: number;
+  estimatedPeakRamBytes: number;
+  estimatedRenderTimeMs: number;
+  estimatedFreeAfterBytes: number;
+  maximumSimultaneousInputs: number;
+  maximumParallelJobs?: number;
+  intermediateJobCount: number;
+  warningLevel: RenderEstimateWarningLevel;
+  warnings: string[];
+  canRender: boolean;
+  diskBreakdown?: RenderDiskEstimateBreakdown;
+}
+
+export interface RenderDiskEstimateBreakdown {
+  sourceLogicalBytes: number;
+  sourceLocalBytes: number;
+  existingProxyBytes: number;
+  existingTemporaryBytes: number;
+  reusableCompletedSegmentBytes: number;
+  remainingIntermediatePeakBytes: number;
+  concurrentPartialPeakBytes: number;
+  /** Peak while a wave writes validated replacements before consumed inputs are collected. */
+  segmentBuildPeakBytes?: number;
+  /** Final-ready segments plus the picture/base-audio master being built. */
+  baseMasterBuildPeakBytes?: number;
+  /** Persistent master plus audio/final mux branch after segment GC. */
+  postAudioMuxPeakBytes?: number;
+  reusableBaseMasterBytes?: number;
+  audioTemporaryBytes: number;
+  estimatedFinalOutputBytes: number;
+  muxOverheadBytes: number;
+  peakWorkingBytes: number;
+  safetyReserveBytes: number;
+  requiredPeakFreeBytes: number;
+  predictedMinimumFreeBytes: number;
+  /** Per-volume peaks are authoritative when TEMP and final output differ. */
+  tempPeakBytes?: number;
+  outputPeakBytes?: number;
+  tempRequiredFreeBytes?: number;
+  outputRequiredFreeBytes?: number;
+  currentTempFreeBytes?: number;
+  currentOutputFreeBytes?: number;
+  predictedTempMinimumFreeBytes?: number;
+  predictedOutputMinimumFreeBytes?: number;
+  tempPath?: string;
+  tempVolume: string;
+  outputVolume: string;
+}
+
+export interface RenderEstimateWorkloadSummary {
+  visualInputCount: number;
+  insertedInputCount: number;
+  photoInputCount: number;
+  videoInputCount: number;
+  sourceDurationMs: number;
+  weightedSourceFps: number;
+  weightedSourceWidth: number;
+  weightedSourceHeight: number;
+  transitionSeconds: number;
 }
 
 export interface ConcatRenderEstimate {
@@ -818,11 +1389,30 @@ export interface ConcatRenderEstimate {
   driveRoot: string;
   currentFreeBytes: number;
   estimatedOutputBytes: number;
+  /** Peak removable work files required only by low-memory segmented rendering. */
+  estimatedTemporaryBytes?: number;
   estimatedRenderTimeMs: number;
   estimatedFreeAfterBytes: number;
   minimumReserveBytes: number;
+  /** Advisory free-space reserve. Unlike minimumReserveBytes, this does not by itself block render. */
+  safetyMarginBytes?: number;
+  requiredFreeBytes?: number;
   canRender: boolean;
   warning?: string;
+  currentAvailableRamBytes: number;
+  totalRamBytes: number;
+  modeEstimates: {
+    lowMemory: RenderModeResourceEstimate;
+    normal: RenderModeResourceEstimate;
+    lowDisk?: RenderModeResourceEstimate;
+    balanced?: RenderModeResourceEstimate;
+    highSpeed?: RenderModeResourceEstimate;
+  };
+  workload: RenderEstimateWorkloadSummary;
+  systemResources?: SystemResourceSnapshot;
+  runtimePolicy?: RenderRuntimePolicy;
+  hardwareCapabilities?: RenderHardwareCapabilities;
+  diskPaths?: RenderDiskPathUsage[];
 }
 
 export interface RenderClipSelection extends PreviewRange {
@@ -835,6 +1425,19 @@ export interface ConcatRenderProgress {
   percent: number;
   outTimeMs: number;
   expectedDurationMs: number;
+  currentSegment?: string;
+  segmentIndex?: number;
+  segmentCount?: number;
+  estimatedRemainingMs?: number;
+  resourceUsage?: SystemResourceSnapshot;
+  /** Actual wall time since the first FFmpeg child of this invocation spawned. */
+  attemptElapsedMs?: number;
+  /** Previous persisted attempts plus the current invocation. This is not ETA. */
+  cumulativeElapsedMs?: number;
+  /** Wall timestamp for audit; Renderer advances from its local monotonic receipt time. */
+  timingCapturedAt?: string;
+  timingStatus?: "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED" | "INTERRUPTED" | "PAUSED_DISK_SPACE";
+  diskStatus?: RenderDiskRuntimeSnapshot;
 }
 
 export interface ConcatRenderResult {
@@ -848,12 +1451,23 @@ export interface ConcatRenderResult {
   purpose: PreviewRenderPurpose;
   bgmAppliedCount?: number;
   bgmScopesApplied?: BgmScopeSelection;
-  /** Silent clips auto-dubbed with the first READY BGM track in this render. */
+  /** Silent clips auto-dubbed with the first BGM-page track in this render. */
   autoDubClipCount?: number;
   photoShutterAppliedCount?: number;
   mixPolicy?: "ORIGINAL_PLUS_BGM_LIMITED_0_95" | "VOICE_DUCK_EQ_COMPRESS_LIMIT";
   audioProtectionApplied?: boolean;
   audioPeakCeilingDb?: -1 | -2;
+  audioProcessing?: AudioProcessingOptions;
+  audioCodec?: string;
+  audioChannels?: number;
+  audioChannelLayout?: string;
+  audioSampleRate?: number;
+  audioBitrate?: number;
+  audioRemuxedWithoutVideoEncode?: boolean;
+  /** True when the timeline-correct picture/base-audio master was reused and no video encoder ran. */
+  videoBaseMasterReused?: boolean;
+  pictureBaseSignature?: string;
+  finalAudioSignature?: string;
   cancelled?: boolean;
   plannedDurationMs?: number;
   includedIntroSegmentCount?: number;
@@ -865,6 +1479,44 @@ export interface ConcatRenderResult {
   mainStartCardDurationSeconds?: number;
   shortsPortrait?: boolean;
   aspectRatio?: "PORTRAIT_9_16" | "LANDSCAPE_16_9";
+  lowMemorySegmented?: boolean;
+  highSpeedMode?: boolean;
+  lowMemoryStageCount?: number;
+  segmentedRender?: boolean;
+  segmentInputLimit?: number;
+  resumedSegmentCount?: number;
+  attemptElapsedMs?: number;
+  cumulativeElapsedMs?: number;
+  insertionAudioPlan?: InsertionAudioPlan;
+}
+
+export interface AudioPreviewRequest {
+  assetId: string;
+  startMs?: number;
+  durationMs?: number;
+  timelineRevision?: number;
+  options: AudioProcessingOptions;
+}
+
+export interface AudioMeterReading {
+  integratedLufs?: number;
+  truePeakDb?: number;
+  channelPeaksDb: number[];
+  clipping: boolean;
+  warnings: string[];
+}
+
+export interface AudioPreviewResult {
+  cacheKey: string;
+  url: string;
+  mode: AudioProcessingMode;
+  monitoring: "STEREO" | "DOWNMIXED_5_1";
+  durationMs: number;
+  startMs?: number;
+  cacheStatus?: CacheStatus;
+  sourceChannels?: number;
+  sourceChannelLayout?: string;
+  meter: AudioMeterReading;
 }
 
 export interface PreviewOutputRecord {
@@ -883,6 +1535,8 @@ export interface PreviewOutputRecord {
   projectName?: string;
   exists: boolean;
   aspectRatio?: "PORTRAIT_9_16" | "LANDSCAPE_16_9";
+  attemptElapsedMs?: number;
+  cumulativeElapsedMs?: number;
 }
 
 export interface PreviewOutputHistorySnapshot {
@@ -913,6 +1567,8 @@ export interface IntroSuggestion extends RenderClipSelection {
   spokenSummary?: string;
   aiConfidence?: number;
   aiWarnings?: string[];
+  /** Same persisted per-occurrence audio model used by Main media insertions. */
+  insertionAudio?: InsertionAudioSettings;
 }
 
 export interface RemovedMainAsset {
@@ -970,6 +1626,8 @@ export interface BackgroundJobSnapshot {
   projectId?: string;
   projectName?: string;
   projectRevision?: number;
+  attemptElapsedMs?: number;
+  cumulativeElapsedMs?: number;
 }
 
 export type ProjectChangeSection =
@@ -1193,6 +1851,8 @@ export interface AppApi {
   setImageDuration(assetId: string, durationMs: number): Promise<ImageDurationUpdateResult>;
   setPhotoSoundEnabled(assetId: string, enabled: boolean): Promise<ProjectManifest>;
   setDubWithBgm(assetId: string, enabled: boolean): Promise<ProjectManifest>;
+  setMainAudioGates(assetId: string, gates: AudioTrackGates): Promise<ProjectManifest>;
+  setMainStartCue(settings: MainStartCueSettings): Promise<ProjectManifest>;
   addMediaInsertion(
     anchorVideoAssetId: string,
     insertedAssetId: string,
@@ -1200,6 +1860,11 @@ export interface AppApi {
     sourceRange?: PreviewRange,
   ): Promise<ProjectManifest>;
   updateMediaInsertion(insertionId: string, atMs: number, sourceRange: PreviewRange): Promise<ProjectManifest>;
+  setInsertionAudio(
+    scope: InsertionAudioScope,
+    instanceId: string,
+    settings: InsertionAudioSettings,
+  ): Promise<ProjectManifest>;
   removeMediaInsertion(insertionId: string): Promise<ProjectManifest>;
   moveMediaInsertion(insertionId: string, toIndex: number): Promise<ProjectManifest>;
   setVolumeSegments(assetId: string, segments: VolumeSegment[]): Promise<SourceAsset>;
@@ -1213,12 +1878,37 @@ export interface AppApi {
   ensureMetadata(assetId: string): Promise<SourceAsset>;
   ensurePreview(assetId: string, variant: PreviewVariant): Promise<PreviewResult>;
   ensureClipPreview(assetId: string, inMs: number, outMs: number): Promise<PreviewResult>;
+  ensureIntroThumbnail?(assetId: string, inMs: number, outMs: number): Promise<{ url: string; cacheStatus: "HIT" | "CREATED" }>;
   cancelPreview(assetId: string, variant: PreviewVariant): Promise<void>;
   cancelClipPreview(assetId: string, inMs: number, outMs: number): Promise<void>;
   chooseConcatOutput(suggestedName: string): Promise<OutputSelection | null>;
   prepareConcatOutput(suggestedName: string): Promise<OutputSelection>;
+  chooseRenderTemporaryFolder?(): Promise<{ path: string; volume: string; freeBytes: number; capacityBytes: number } | null>;
+  validateRenderTemporaryFolder?(targetPath: string): Promise<{ path: string; volume: string; freeBytes: number; capacityBytes: number }>;
+  revealRenderTemporaryFolder?(): Promise<void>;
+  cleanupRenderTemporaryFolder?(): Promise<{ reclaimedBytes: number }>;
   estimateConcatRender?(request: ConcatRenderEstimateRequest): Promise<ConcatRenderEstimate>;
+  getRenderHardwareCapabilities?(force?: boolean): Promise<RenderHardwareCapabilities>;
+  runRenderPerformanceBenchmark?(): Promise<RenderPerformanceProfile>;
   startConcatRender(request: ConcatRenderRequest): Promise<ConcatRenderResult>;
+  createAudioPreview?(request: AudioPreviewRequest): Promise<AudioPreviewResult>;
+  cancelAudioPreview?(): Promise<void>;
+  getRemoteControlStatus?(): Promise<RemoteControlStatus>;
+  enableRemoteControl?(): Promise<RemoteControlStatus>;
+  disableRemoteControl?(): Promise<RemoteControlStatus>;
+  rotateRemotePairing?(): Promise<RemoteControlStatus>;
+  getPostSuccessPowerStatus?(): Promise<PostSuccessPowerStatus>;
+  cancelPostSuccessPower?(): Promise<PostSuccessPowerStatus>;
+  onPostSuccessPowerStatus?(callback: (status: PostSuccessPowerStatus) => void): void;
+  clearPostSuccessPowerStatusListeners?(): void;
+  prepareRemoteRender?(request: ConcatRenderRequest): Promise<RemotePreparedRender>;
+  clearRemotePreparedRender?(): Promise<void>;
+  onRemoteControlStatus?(callback: (status: RemoteControlStatus) => void): void;
+  clearRemoteControlStatusListeners?(): void;
+  getConcatRenderResumeOffer?(): Promise<RenderResumeOffer | undefined>;
+  resumeConcatRender?(checkpointId: string): Promise<ConcatRenderResult>;
+  discardConcatRenderResume?(checkpointId: string): Promise<void>;
+  discardConcatVideoMaster?(): Promise<void>;
   cancelConcatRender(): Promise<void>;
   revealConcatOutput(jobId: string): Promise<void>;
   playConcatOutput(jobId: string): Promise<ExternalOpenResult>;

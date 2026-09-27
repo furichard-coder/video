@@ -1,14 +1,20 @@
 import { useState } from "react";
-import type { IntroSuggestion, MainStartCardOptions, MainStartCardTransition, SourceAsset } from "../../shared/domain";
+import type { IntroSuggestion, MainStartCardOptions, MainStartCardTransition, MainStartCueSettings, SourceAsset } from "../../shared/domain";
 import { formatDuration } from "../format";
+import {
+  MAIN_START_CUE_BASE_GAINS,
+  MAIN_START_CUE_FREQUENCIES_HZ,
+  mainStartCueSpec,
+} from "../../shared/main-start-cue";
 
 interface MainStartCardModalProps {
   value: MainStartCardOptions;
+  cue: MainStartCueSettings;
   backgroundFileName?: string;
   introClips: IntroSuggestion[];
   assets: SourceAsset[];
   onCancel: () => void;
-  onSave: (value: MainStartCardOptions) => void;
+  onSave: (value: MainStartCardOptions, cue: MainStartCueSettings) => void;
 }
 
 const TRANSITIONS: Array<{ value: MainStartCardTransition; label: string; detail: string }> = [
@@ -24,6 +30,7 @@ function clamp(value: string, minimum: number, maximum: number, fallback: number
 
 export function MainStartCardModal({
   value,
+  cue,
   backgroundFileName,
   introClips,
   assets,
@@ -36,12 +43,35 @@ export function MainStartCardModal({
       ? value.backgroundIntroSegmentId
       : undefined,
   }));
+  const [cueDraft, setCueDraft] = useState(cue);
   const ready = Boolean(draft.line1.trim() && draft.line2.trim());
   const patch = (update: Partial<MainStartCardOptions>) => setDraft((current) => ({ ...current, ...update }));
   const selectedIntroIndex = introClips.findIndex((clip) => clip.id === draft.backgroundIntroSegmentId);
   const selectedIntro = selectedIntroIndex >= 0 ? introClips[selectedIntroIndex] : undefined;
   const selectedAsset = selectedIntro ? assets.find((asset) => asset.id === selectedIntro.assetId) : undefined;
   const selectedBackgroundName = selectedIntro?.fileName ?? backgroundFileName ?? "正片第一個素材";
+  const previewCue = () => {
+    const AudioContextCtor = window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor || !cueDraft.enabled) return;
+    const context = new AudioContextCtor();
+    const cue = mainStartCueSpec(cueDraft.durationMs);
+    MAIN_START_CUE_FREQUENCIES_HZ.forEach((frequency, index) => {
+      const tone = context.createOscillator();
+      const gain = context.createGain();
+      tone.type = "sine";
+      tone.frequency.value = frequency;
+      tone.connect(gain);
+      gain.connect(context.destination);
+      const start = context.currentTime + (index === 0 ? 0 : cue.secondDelaySeconds);
+      const end = context.currentTime + cue.durationSeconds;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(MAIN_START_CUE_BASE_GAINS[index] * 0.7, start + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, end);
+      tone.start(start);
+      tone.stop(end);
+    });
+    window.setTimeout(() => void context.close(), cue.durationSeconds * 1_000 + 120);
+  };
 
   return (
     <div className="modal-backdrop nested-modal" role="presentation">
@@ -200,6 +230,38 @@ export function MainStartCardModal({
                 ))}
               </div>
             </fieldset>
+            <fieldset className="main-start-cue-settings">
+              <legend>正片 Audio</legend>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={cueDraft.enabled}
+                  onChange={(event) => setCueDraft((current) => ({ ...current, enabled: event.target.checked }))}
+                />
+                SFX · 正片開始提示音
+              </label>
+              <label>
+                <span>長度</span>
+                <input
+                  aria-label="正片開始提示音長度（秒）"
+                  type="number"
+                  min="0.1"
+                  max="3"
+                  step="0.05"
+                  value={(cueDraft.durationMs / 1000).toFixed(2)}
+                  disabled={!cueDraft.enabled}
+                  onChange={(event) => setCueDraft((current) => ({
+                    ...current,
+                    durationMs: Math.max(100, Math.min(3_000, Math.round(Number(event.target.value) * 1000))),
+                  }))}
+                />
+                秒
+              </label>
+              <small>这是正片 SFX，不归类为片头。以合成双音提示，不使用品牌音效或外部授权素材。</small>
+              <button type="button" className="secondary-button" disabled={!cueDraft.enabled} onClick={previewCue}>
+                ▶ 試聽 SFX
+              </button>
+            </fieldset>
           </div>
           {!ready && (
             <p className="inline-error" role="alert">
@@ -215,7 +277,7 @@ export function MainStartCardModal({
             className="primary-button"
             type="button"
             disabled={!ready}
-            onClick={() => onSave({ ...draft, line1: draft.line1.trim(), line2: draft.line2.trim() })}
+            onClick={() => onSave({ ...draft, line1: draft.line1.trim(), line2: draft.line2.trim() }, cueDraft)}
           >
             儲存提示頁設定
           </button>

@@ -168,7 +168,8 @@ export class SourceService {
       asset.mediaInfo?.displayHeight &&
       Number.isFinite(asset.mediaInfo?.rotationDegrees),
     );
-    if (asset.metadataState === "READY" && hasDisplayMetadata) return asset;
+    const hasAudioMetadata = !asset.mediaInfo?.audioCodec || Boolean(asset.mediaInfo.audioChannels);
+    if (asset.metadataState === "READY" && hasDisplayMetadata && hasAudioMetadata) return asset;
 
     try {
       const mediaInfo = await this.probe.probe(asset.sourcePath, signal);

@@ -5,6 +5,7 @@ import type {
   ImportProgress,
   ProjectHistoryState,
   ProjectManifest,
+  PostSuccessPowerStatus,
   SortMode,
   SourceAsset,
   SubtitleTimelineScope,
@@ -12,8 +13,8 @@ import type {
   ViewMode,
 } from "../shared/domain";
 import { mainRenderSelections } from "../shared/editing-rules";
-import { introSegmentsForOutput } from "../shared/intro-duration";
-import { buildTimelinePlan } from "../shared/timeline-plan";
+import { buildMainTimelineGroups, buildTimelinePlan } from "../shared/timeline-plan";
+import { formatRenderClock } from "./format";
 import { AssetCard } from "./components/AssetCard";
 import { ConcatRenderModal } from "./components/ConcatRenderModal";
 import { IntroStudio } from "./components/IntroStudio";
@@ -36,6 +37,7 @@ import { MaterialEditorModal, type MaterialEditorSection } from "./components/Ma
 import { WatermarkSettingsModal } from "./components/WatermarkSettingsModal";
 import { MaterialSubtitleAnalysisModal } from "./components/MaterialSubtitleAnalysisModal";
 import { SafeDefaultButton } from "./components/SafeDefaultButton";
+import { RemoteControlModal } from "./components/RemoteControlModal";
 import { formatBytes } from "./format";
 import {
   applyGridOutputIncludeIntro,
@@ -123,6 +125,7 @@ export function App() {
   const [showDisplaySettings, setShowDisplaySettings] = useState(false);
   const [showYoutubeSettings, setShowYoutubeSettings] = useState(false);
   const [showOutputHistory, setShowOutputHistory] = useState(false);
+  const [showRemoteControl, setShowRemoteControl] = useState(false);
   const [showAiPublish, setShowAiPublish] = useState(false);
   const [showWatermarkSettings, setShowWatermarkSettings] = useState(false);
   const [uiTextSize, setUiTextSize] = useState<UiTextSize>(() => readUiTextSize());
@@ -147,6 +150,7 @@ export function App() {
   const [saveState, setSaveState] = useState<"SAVED" | "SAVING" | "ERROR">("SAVED");
   const [savedAt, setSavedAt] = useState<string>();
   const [backgroundJobs, setBackgroundJobs] = useState<BackgroundJobSnapshot[]>([]);
+  const [powerActionStatus, setPowerActionStatus] = useState<PostSuccessPowerStatus>({ state: "IDLE" });
   const [mediaInsertionVideo, setMediaInsertionVideoState] = useState<SourceAsset>();
   const [draggingAssetId, setDraggingAssetId] = useState<string>();
   const [dragTargetAssetId, setDragTargetAssetId] = useState<string>();
@@ -206,6 +210,15 @@ export function App() {
       });
     window.sourceApp.onImportProgress(setProgress);
     return () => window.sourceApp.clearImportProgressListeners();
+  }, []);
+
+  useEffect(() => {
+    void window.sourceApp
+      .getPostSuccessPowerStatus?.()
+      .then(setPowerActionStatus)
+      .catch(() => undefined);
+    window.sourceApp.onPostSuccessPowerStatus?.(setPowerActionStatus);
+    return () => window.sourceApp.clearPostSuccessPowerStatusListeners?.();
   }, []);
 
   useEffect(() => {
@@ -331,29 +344,42 @@ export function App() {
   const gridOutputOffsetMs = useMemo(() => {
     if (!project || !renderDefaults?.prependIntro) return 0;
     try {
-      const introMs = introSegmentsForOutput(project.introSegments, project.introSegmentMaxDurationMs).reduce(
-        (sum, segment) => sum + Math.max(0, segment.outMs - segment.inMs),
-        0,
-      );
+      const plan = buildTimelinePlan(project, {
+        includeIntro: true,
+        transitionSeconds: renderDefaults.transitionSeconds,
+      });
+      const firstMainStartMs = plan.clips.find((clip) => clip.scope === "MAIN")?.outputStartMs ?? 0;
       const cardMs = Math.max(0, Math.round((renderDefaults.mainStartCard?.durationSeconds ?? 0) * 1000));
-      return introMs + cardMs;
+      const transitionMs = Math.round(renderDefaults.transitionSeconds * 1000);
+      const cardAdjustmentMs =
+        renderDefaults.mainStartCard?.transitionStyle === "HARD_CUT"
+          ? cardMs + transitionMs
+          : Math.max(0, cardMs - transitionMs);
+      return firstMainStartMs + cardAdjustmentMs;
     } catch {
       return 0;
     }
   }, [project, renderDefaults]);
-  /** Per-asset output ranges on the Main timeline, shifted by the lead time when enabled. */
+  /** Per-anchor output groups from the canonical Main plan, including inserted media. */
   const assetOutputRanges = useMemo(() => {
-    const ranges = new Map<string, Array<{ startMs: number; endMs: number }>>();
+    const ranges = new Map<
+      string,
+      Array<{ startMs: number; endMs: number; sourceDurationMs: number; insertedDurationMs: number }>
+    >();
     if (!project || !showGridOutputTimes) return ranges;
-    const plan = buildTimelinePlan(project, {
-      includeIntro: false,
+    const groups = buildMainTimelineGroups(project, {
       transitionSeconds: renderDefaults?.transitionSeconds,
     });
     const offset = gridOutputIncludeIntro ? gridOutputOffsetMs : 0;
-    for (const clip of plan.clips) {
-      const list = ranges.get(clip.assetId) ?? [];
-      list.push({ startMs: clip.outputStartMs + offset, endMs: clip.outputEndMs + offset });
-      ranges.set(clip.assetId, list);
+    for (const group of groups) {
+      ranges.set(group.anchorAssetId, [
+        {
+          startMs: group.outputStartMs + offset,
+          endMs: group.outputEndMs + offset,
+          sourceDurationMs: group.sourceDurationMs,
+          insertedDurationMs: group.insertedDurationMs,
+        },
+      ]);
     }
     return ranges;
   }, [project, showGridOutputTimes, gridOutputIncludeIntro, gridOutputOffsetMs, renderDefaults?.transitionSeconds]);
@@ -659,6 +685,35 @@ export function App() {
 
   return (
     <main className="app-shell">
+      {powerActionStatus.state !== "IDLE" && (
+        <section
+          className={`power-action-banner is-${powerActionStatus.state.toLowerCase()}`}
+          role={powerActionStatus.state === "FAILED" ? "alert" : "status"}
+          aria-live="polite"
+        >
+          <div>
+            <strong>
+              {powerActionStatus.state === "SCHEDULED"
+                ? `${powerActionStatus.secondsRemaining ?? 0} 秒后${powerActionStatus.action === "HIBERNATE" ? "自动休眠" : powerActionStatus.action === "SLEEP" ? "自动睡眠" : "自动关机"}`
+                : powerActionStatus.state === "EXECUTING"
+                  ? "正在执行自动电源动作"
+                  : powerActionStatus.state === "FAILED"
+                    ? "自动电源动作失败"
+                    : "自动电源动作已取消"}
+            </strong>
+            <small>{powerActionStatus.message}</small>
+          </div>
+          {powerActionStatus.state === "SCHEDULED" && (
+            <button
+              className="cancel-button"
+              type="button"
+              onClick={() => void window.sourceApp.cancelPostSuccessPower?.()}
+            >
+              取消自动电源动作
+            </button>
+          )}
+        </section>
+      )}
       <header className="topbar">
         <div className="topbar-left">
           <div className="brand-lockup">
@@ -753,6 +808,13 @@ export function App() {
           </button>
           <button className="settings-button" type="button" onClick={() => setShowPlayerSettings(true)}>
             ⚙ 播放設定
+          </button>
+          <button
+            className="settings-button remote-control-button"
+            type="button"
+            onClick={() => setShowRemoteControl(true)}
+          >
+            ◉ iPhone 遠端
           </button>
           <div className="protection-pill">
             <span>●</span>
@@ -856,6 +918,9 @@ export function App() {
                     : job.status === "FAILED"
                       ? " 失敗"
                       : " 已取消"}
+                {job.kind === "CONCAT_RENDER" && job.attemptElapsedMs !== undefined
+                  ? ` · 已耗時 ${formatRenderClock(job.attemptElapsedMs)}`
+                  : ""}
               </span>
             ))}
           </div>
@@ -1043,6 +1108,10 @@ export function App() {
                     };
                   })}
                 availableMediaCount={Math.max(0, project.timelineOrder.length + project.pendingAssetIds.length - 1)}
+                insertionOccurrenceCount={
+                  project.mediaInsertions.filter((item) => item.insertedAssetId === asset.id).length +
+                  project.introSegments.filter((item) => item.assetId === asset.id).length
+                }
                 onRemove={setConfirmRemoveAsset}
                 onAssetUpdated={updateAsset}
                 onProjectUpdated={replaceProject}
@@ -1145,6 +1214,8 @@ export function App() {
             setSelectedAsset(undefined);
             setShowIntroStudio(true);
           }}
+          outputAspect="LANDSCAPE_16_9"
+          outputResolution={renderDefaults?.resolution ?? "1080P"}
         />
       )}
       {materialEditorAsset && (
@@ -1171,6 +1242,7 @@ export function App() {
         <PlaylistModal
           assets={project.sources}
           clips={mainClips}
+          project={project}
           onClose={() => setShowPlaylist(false)}
           onAssetUpdated={updateAsset}
         />
@@ -1178,6 +1250,7 @@ export function App() {
       {showConcatRender && mainClips.length > 0 && (
         <ConcatRenderModal
           key={concatRenderPurpose}
+          project={project}
           purpose={concatRenderPurpose}
           assets={project.sources}
           mainClips={mainClips}
@@ -1196,6 +1269,7 @@ export function App() {
             ) && projectScopeNeedsReview(project, concatRenderPurpose === "INTRO" ? "INTRO" : "MAIN")
           }
           projectName={project.name}
+          timelineRevision={project.timelineRevision}
           onPurposeChange={setConcatRenderPurpose}
           onClose={() => {
             setShowConcatRender(false);
@@ -1216,6 +1290,7 @@ export function App() {
         />
       )}
       {showPlayerSettings && <PlayerSettingsModal onClose={() => setShowPlayerSettings(false)} />}
+      {showRemoteControl && <RemoteControlModal onClose={() => setShowRemoteControl(false)} />}
       {showDisplaySettings && (
         <DisplaySettingsModal
           textSize={uiTextSize}
@@ -1329,11 +1404,19 @@ export function App() {
               🎬<span>✨</span>
             </div>
             <span className="eyebrow">ONE MORE CHECK</span>
-            <h2>{renderInProgress ? "轉檔完成前不能關閉" : "今天的剪輯先保存到這裡嗎？"}</h2>
+            <h2>
+              {renderInProgress
+                ? "轉檔完成前不能關閉"
+                : powerActionStatus.state === "SCHEDULED"
+                  ? "关闭会取消自动电源倒数"
+                  : "今天的剪輯先保存到這裡嗎？"}
+            </h2>
             <p>
               {renderInProgress
                 ? "目前仍在產出影片，Windows 防睡眠保護已開啟。請等待完成，或先回到轉檔頁取消並等候不完整檔清理完畢。"
-                : "專案會保留目前設定，來源影片與照片不會被修改。真的要關閉 SceneryWalker 嗎？"}
+                : powerActionStatus.state === "SCHEDULED"
+                  ? `目前仍有 ${powerActionStatus.secondsRemaining ?? 0} 秒电源动作倒数。若确认关闭 App，会明确取消这次倒数，不会静默消失。`
+                  : "專案會保留目前設定，來源影片與照片不會被修改。真的要關閉 SceneryWalker 嗎？"}
             </p>
             <div>
               <SafeDefaultButton

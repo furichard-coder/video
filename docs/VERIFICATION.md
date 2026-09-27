@@ -1,5 +1,345 @@
 # 第一階段驗證紀錄
 
+## v0.80.0 Checkpoint Recovery／Boundaries（2026-09-27）
+
+| 檢查 | 結果 |
+| --- | --- |
+| v0.79 checkpoint／E resume | PASS（唯讀檢查）；10 個 level-1 segments 全部可讀，合計約 67.547 GiB、媒體時間約 8976.718 秒 |
+| Copy-on-write migration | PASS；可重用上述 10 段，不重編 10 段；Base Master 必須重跑 |
+| `base.partial.mkv` | NOT RECOVERABLE；已被舊版刪除，沒有可用副本 |
+| 10 段直接 `-c copy` | BLOCKED BY CONTENT GRAPH；跨 group xfade、ASS 字幕與浮水印仍需 picture pass |
+| 最後 audio mux | PASS；video stream 使用 `-c:v copy` |
+| ENOSPC evidence | LIMITED；v0.79 classifier 命中 ENOSPC，但原始 stderr 未保存 |
+| E: free-space evidence | UNKNOWN minimum；144.45 GiB 是刪除 partial 後的過時快照，UI 曾顯示「建議再清 20 GiB」的錯誤提示，但沒有執行該清理 |
+| 續轉新增空間估算 | PASS；舊 67.547 GiB 片段已反映在 free，不重複計費；Base 約 86.46 GiB＋Final mux 約 95.9 GiB，新增峰值約 182 GiB。對比當時 E: 144.45 GiB free，約差 38 GiB，另有建議安全餘量；正式開始前以即時磁碟資料重算 |
+| Runtime protection | PASS；15 秒 monitor、EMERGENCY safe pause |
+| Quality baseline | PASS；回到既有 QSV GQ25；30 秒 bounded 方案 SSIM 下降，未採用 |
+| Hardware／performance boundary | NVENC runtime 不支援；實際 QSV encode／CPU filter 約 0.10–0.115x。未跑完整長片，不宣稱加速成功 |
+| Regression／package checks | PASS；74 files／459 tests、typecheck、production build、audit、source／packaged smokes。日後重跑可能修正數字 |
+| v0.80 portable EXE | `release/v0.80.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.80.0.exe`；244,441,088 bytes；SHA-256 `2445347DC1F96D24A4B463C6CB669F0C0BEF9FA2607BA27D0E40E6BD853B93FC`；v0.79 執行中的視窗未關閉 |
+
+本節只記錄本次 recovery run 的可觀測結果；不把過時 free-space 快照、未保存的 raw stderr 或未完成的長片 render 推論成成功證據。
+
+## v0.76.0 Render Performance／Disk Reliability（2026-09-22）
+
+| 檢查 | 結果 |
+| --- | --- |
+| v0.75 ENOSPC forensic | PASS；start free 87.4 GiB、failure free 0、work root 約 92.2 GiB、觀測 peak 約 118.4 GiB、6 completed 約 74.63 GiB；segment 7/8 寫入 `-28` |
+| 舊成果可續轉性 | 不可直接沿用；checkpoint JSON 尚在，但 workRoot 與 6 個 completed media 已不存在。v0.76 offer 只宣告實體存在的 segment，缺失者重建 |
+| Per-volume estimator | PASS；同卷計算 intermediates + partials + audio TEMP + final + mux + base master 生命週期峰值；分卷各自計算 TEMP/output peak/free/required/minimum；reserve `max(20 GiB, 20%)` |
+| Runtime disk monitor | PASS；30 秒 snapshot、disk NDJSON、TEMP/output volume 雙閘、safe-boundary `PAUSED_DISK_SPACE`、ENOSPC failedPath/required/resumable checkpoint |
+| Adaptive concurrency | PASS；Normal/High Speed initial 1，completed wave 依 CPU/GPU/RAM/Commit/SSD/throughput 再探測上調；memory/disk pressure 不排新 job |
+| 30 秒 quick benchmark | CPU decode `0.967x`；QSV decode→hwdownload→CPU scale→QSV encode `1.10x`，約 +12.4% |
+| 180 秒 confirmation | baseline `171.72 s / 31.45 fps / 1.05x`；QSV decode `162.33 s / 33.35 fps / 1.11x`；wall time -5.47% |
+| Parallel benchmark | 10-input 1440p xfade 1 job `0.647x`；2 jobs aggregate `0.673x`，約 +4%，不足以支持固定雙 job |
+| NVENC／QSV | NVENC runtime FAIL（driver API 13.0 < required 13.1）；H.264/H.265 QSV runtime PASS。UI/diagnostics 必須依 runtime probe，不依 encoder list 猜測 |
+| Quality gate | GQ18 `VMAF 99.9638 / PSNR 42.28 / SSIM 0.9863`；GQ22 `99.2268 / 38.05 / 0.9702`。GQ22 非等價，正式保留 GQ18／CQ18／CRF16 |
+| MKV intermediate | PASS；H.264 QSV + AAC 5.021 s，video/audio timebase 1/1000，尾差約 42 ms（AAC delay 範圍），rotation tag 清除；concat integration 46/46 PASS |
+| Final concat copy | 未強制；跨 batch xfade + ASS subtitle/watermark 仍需 picture pass。既有 audio-only final mux 持續 `-c:v copy` |
+| 完整回歸 | PASS；TypeScript、73 files／447 tests、production build、Electron source smoke／Windows packaged smoke、npm audit 0 vulnerabilities |
+
+Windows x64 可攜版：`release\v0.76.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.76.0.exe`；EXE `244441088` bytes，可攜資料夾 `409591443` bytes，SHA-256 `1FD6A1F1B3EA0158A51BA2795BD5869C3D83DC6E5E35C627DD80073177797DBC`。封裝與 smoke 使用獨立 v0.76 路徑，未覆蓋 v0.75、來源、既有成品、userData、cache 或舊 checkpoint；測試完成後沒有 v0.76／FFmpeg／ffprobe 程序殘留，也未執行電源動作。
+
+## v0.74.0 插入素材 SFX／BGM 時間線（2026-09-15）
+
+驗證項目：
+
+- canonical plan：四種 SFX／BGM 組合、Main／Intro 同 sanitizer、重複來源 instance 獨立、轉場時間、track change／none 邊界。
+- 連續範圍：A 3 秒＋B 4 秒＋C 6 秒＋D 3 秒，在 0 秒轉場時為單一 16 秒 BGM range；0.3 秒時為 15.1 秒，播放 position 不在素材交界重設。
+- 實際短 synthetic FFmpeg：0.45 秒 BGM 循環至 1.7 秒，使用真實 acrossfade；source＋BGM＋SFX 同時存在，無 silence gap，快門 impulse 可量測，master limiter 未 clipping。
+- schema 20 persistence/reload/migration；舊照片明確關閉保留，新照片 instance 預設 SFX ON，影片 OFF。
+- Preview／Final／Review 同一 pure plan；BGM／shutter protocol 只接受目前專案 track ID 與固定資產 URL。
+- Enhanced／Virtual post-audio 仍 `-c:v copy`；來源與內建 shutter hash 在隔離驗證中複核。
+- 首次 render 建立 MKV+FLAC picture/base master；只把同一 photo occurrence 的 SFX ON 改為 OFF 後，第二次 render 的 video encode invocation 為 0、post `-c:v copy` 為 1、video packet SHA-256 相同而 audio packet SHA-256 改變。
+- 模擬 post-audio 失敗後保留 active checkpoint 與獨立 base master；App 級 Resume 只重跑 1 次 post command。base master 跨成功後 checkpoint discard／App Store 重建仍可復用。
+- 可重建 master 每專案只保留最近 1 份；load 驗證 absolute path、size、SHA-256、duration 與 video stream。SSD 預估納入 final＋master＋intermediate，清理按鈕只刪此 cache。
+
+| 檢查 | 結果 |
+| --- | --- |
+| 完整回歸 | PASS；69 files／433 tests |
+| TypeScript／production build | PASS |
+| Electron source smoke／Windows packaged smoke | PASS／PASS；使用隔離 App Data，未碰執行中的舊版狀態 |
+| npm audit | 0 vulnerabilities |
+| 實際短媒體 | PASS；BGM loop acrossfade、source＋BGM＋SFX、無聲素材 BGM、peak limiter、快門頻帶 impulse |
+| 內建快門 | PASS；package asset SHA-256 `0AC71ECABF302784F5FFB9483C2939C46B1784AA0D016A322CB6D1A0ECA07B93` |
+
+v0.74.0 Windows x64 可攜版：`release/v0.74.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.74.0.exe`；EXE SHA-256 `56C10076E45D2FFB4BE2559B1D781FE67C47EA3D91A23C6FE7EDE762009CC016`，檔案大小 `244441088` bytes，可攜資料夾共 `409528900` bytes。最終重新封裝後已使用隔離 App Data 完成 packaged smoke，未覆寫舊版 release 或執行中的 userData／cache／checkpoint／輸出。
+
+## v0.73.0 QSV 綠色填邊修正／成功後電源動作（2026-09-15）
+
+| 檢查                | 結果                                                                                                                                                                                                                   |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 實際綠塊證據        | PASS；唯讀抽取 `SceneryWalker_preview_20260915_0022.mp4` 8910 秒附近影格，中央 upright、左側 blur 正常，右側 `SATAVG 72.48–74.00` 且 U/V 色度異常，證實綠塊已寫入舊輸出而非播放器顯示問題                              |
+| Root cause boundary | PASS；問題集中在 QSV hardware-decoded NV12 經 Display Matrix 旋轉後進入 split／boxblur 的色度分支；FFmpeg 成功退出，故舊版只依錯誤碼 fallback 無法攔截視覺損壞                                                         |
+| 實際 tunnel 修正    | PASS；`VID_20260718_090633.mp4` 採 CPU decode＋`-noautorotate`＋一次 `transpose=clock`＋planar yuv420p＋blurred-fill，再由 H.264 QSV encode；640x360、SAR 1:1、DAR 16:9、無 rotation side data，左右背景均完整且無綠塊 |
+| 其他方向回歸        | PASS；normal portrait、landscape、0／90／180／270 與負角度方向映射、16:9 blurred-fill、9:16 canvas、Preview cache／Final orientation regression 均通過；沒有對所有 9:16 強制 rotate                                    |
+| 衍生檔失效          | PASS；orientation normalizer、thumbnail/video proxy/clip preview cache 版本與 render request signature 均更新，舊錯誤衍生檔與 checkpoint 不會誤命中                                                                    |
+| 電源預設與成功矩陣  | PASS；新安裝與既有偏好缺值均为关闭。只有未取消的 Render 成功，或官方 YouTube API 上傳且要求的 thumbnail 也成功，才符合各自 trigger；失败、取消、暂停、未完成 thumbnail 与浏览器拖放均不触发                            |
+| 60 秒倒數安全性     | PASS；Main process 倒數與 Renderer 全域狀態同步；可取消。新 render／resume／upload、倒數到期仍 busy、或明確關閉 App 都安全取消，不會在工作未完成時執行                                                                 |
+| 固定 Windows 動作   | PASS；Shutdown 固定 `shutdown.exe /s /t 0 ...`、Hibernate 固定 `shutdown.exe /h`、Sleep 固定 PowerShell `SetSuspendState(Suspend)`；全部 `shell:false`，Renderer／Remote 不可傳任意命令                                |
+| 權限／能力錯誤      | PASS；以注入 executor 模擬 Windows policy／capability failure，UI status 进入 `FAILED` 并显示原因，不重试、不改执行其他动作；自动测试未执行真实电源动作                                                                |
+| Source integrity    | PASS；tunnel source SHA-256 前後均為 `0CCB6ABA1DB42E2900039B59474BC017B391360ACCD97DA7073403EAA0C4EC39`                                                                                                                |
+| 完整回歸            | PASS；66 files／422 tests、TypeScript、production build、Electron smoke、Windows packaged smoke、npm audit 0 vulnerabilities                                                                                           |
+
+實際調查影格、修正短片與量測位於 `artifacts\v073-investigation`；機器可讀證據位於 `docs\GREEN_FILL_V073_ANALYSIS.json`。全程未修改來源、既有輸出、v0.72 release、正在執行的 v0.72 userData/cache/TEMP/checkpoint，也未執行、安排或測試真實關機／休眠／睡眠。
+
+v0.73.0 可攜版位於 `release\v0.73.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.73.0.exe`；EXE 大小 `244441088` bytes，資料夾大小 `409463615` bytes，SHA-256 `6D0178F5721DABB98BC98FDD57E4F07FA4AE91DC3F6C32B6088B5CF4AE456BFD`。
+
+## v0.72.0 Display Matrix／QSV 方向正規化（2026-09-14）
+
+| 檢查                    | 結果                                                                                                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 實際異常引用            | PASS；`VID_20260718_090633.mp4` asset `741a…a9e` 是 Intro index 23 與 Main 最後一支影片（timeline index 49）的共同來源                                                         |
+| 異常 metadata           | coded 3840x2160、H.264 High Level 5.1、yuv420p、30 fps、time base 1/90000、Display Matrix -90；visual 2160x3840                                                                |
+| 正常直式比較            | `VID_20260718_113747.mp4` 同為 coded 3840x2160／matrix -90，差異為 H.264 Level 5.2、60 fps；證實不能依 9:16 或單純寬高硬轉                                                     |
+| Root cause reproduction | PASS；software decode 自動插入 transpose 並輸出 2160x3840；QSV decode 成功時交給 graph 的 frame 是 raw 3840x2160，舊 graph 未補 orientation filter                             |
+| 實際 tunnel QSV fix     | PASS；`-noautorotate`＋`hwdownload,format=nv12,transpose=clock` 後為 upright；修正 QSV 與 software autorotate reference PNG SHA-256 完全相同，未修正 QSV frame 不同且側轉      |
+| 輸出 metadata           | PASS；實際 H.264 QSV 640x360 驗證輸出為 SAR 1:1／DAR 16:9，rotation/displaymatrix side data absent                                                                             |
+| 正負 rotation mapping   | PASS；0／90／180／270 與 -90／-180／-270 均映射到唯一方向 filter，且順序固定在 hwdownload 後、fps/scale/layout 前                                                              |
+| Preview／Final          | PASS；Preview cache synthetic rotated H.264／Apple-style HEVC MOV 與 Final synthetic 90° media tests；中繼層不重複旋轉                                                         |
+| Source integrity        | PASS；異常 tunnel SHA-256 前後 `0CCB6ABA1DB42E2900039B59474BC017B391360ACCD97DA7073403EAA0C4EC39`；正常直式 `BAA1DE6037A56EC321699A9845A017CBF229F3A87BDCBAAB6DE05A36754A352C` |
+| 完整回歸                | PASS；65 files／413 tests、TypeScript、production build、Electron smoke、Windows packaged smoke、npm audit 0 vulnerabilities                                                   |
+
+舊 combined output 的 Intro tunnel frame 與 Main near-end tunnel frame 都可重現側轉；同日較早的 CPU-only Intro output 為 upright，與 QSV／software 分流根因一致。隔離驗證只讀來源及既有輸出，沒有修改 userData、cache、TEMP、checkpoint、既有 release 或正在執行的程式。
+
+v0.72.0 可攜版位於 `release\v0.72.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.72.0.exe`；EXE 大小 `244441088` bytes，資料夾大小 `409442957` bytes，SHA-256 `58FFFD159BB2BC41F4BEF996B043899DE1AC89F553B481BBBCB55D7D4F255FA0`。封裝 smoke 後沒有 v0.72、FFmpeg 或 ffprobe 程序殘留，未安排關機或睡眠。
+
+## v0.71.0 字幕單筆位置／60 字行寬（2026-09-14）
+
+| 檢查                             | 結果                                                                                                                                                      |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 行寬單一規則                     | PASS；Renderer、偏好 sanitizer、Main cue validation、manifest migration、Preview、SRT、ASS 全部採 6–60；60 接受、61 拒絕，中文 12／英文或混合 20 預設不變 |
+| 舊專案相容                       | PASS；manifest schema 18→19；沒有 `position` 的 cue 仍為 X=50%／全域 Y，既有畫面與輸出不變                                                                |
+| 單筆位置與保存                   | PASS；每筆獨立 X／Y，方向鍵 1%、Shift＋方向鍵 5%、方向按鈕、5–95% clamp、恢復預設均立即走既有 Main atomic manifest save                                   |
+| 鍵盤／文字游標                   | PASS；位置 dialog 明確取得 focus；textarea、input、select、contenteditable 的方向鍵不攔截，字幕文字游標保持可用                                           |
+| Preview／Final parity            | PASS；共享 normalized resolver 測試覆蓋 16:9／9:16、1080P／1440P；ASS deterministic command 檢查得到對應像素座標與相同 anchor                             |
+| Timeline／SRT                    | PASS；timeline 重排／重新對位保留 cue identity 與 position；SRT 有無 position metadata 的輸出 bytes 相同                                                  |
+| Focused tests                    | PASS；7 files／155 tests                                                                                                                                  |
+| 完整 Vitest                      | PASS；64 files／392 tests                                                                                                                                 |
+| TypeScript／production build     | PASS                                                                                                                                                      |
+| Electron／Windows packaged smoke | PASS；使用隔離 userData，結束後沒有 v0.71／FFmpeg／ffprobe 程序殘留                                                                                       |
+| npm audit                        | PASS；0 vulnerabilities                                                                                                                                   |
+
+v0.71.0 可攜版位於 `release\v0.71.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.71.0.exe`；EXE 大小 `244441088` bytes，資料夾大小 `409435768` bytes，SHA-256 `01296C42EC237BB4AE9D4EBF96361F80DE7715F2A6D01CEA4BE58BE90C8D2F47`。
+
+限制：標準 SRT 不保存畫面座標；單筆位置是 SceneryWalker manifest／Preview／ASS 燒錄 metadata。Primary 字幕軌使用單筆位置；可選的第二翻譯軌繼續使用既有獨立 track position，避免雙語字幕重疊。本輪沒有修改來源媒體、既有 release、userData、cache、TEMP、checkpoint 或輸出；偵測到使用者既有 v0.70 程序時沒有關閉或干擾它。
+
+## v0.70.0 LAN iPhone Remote Control／Proxy 即時音效試聽（2026-09-14）
+
+| 檢查                                                     | 結果                                                                                                                                                                                                                                        |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Remote command／state authority                          | PASS；Windows IPC 與 LAN server 共用 Main-owned `RenderCommandState`，遠端不取得 FFmpeg handle，也不回傳來源／輸出絕對路徑                                                                                                                  |
+| LAN bind／暴露範圍                                       | PASS；只綁定一個選定 private LAN IPv4；無可用 LAN 時僅 loopback，不使用 `0.0.0.0`，UI 明示同 Wi-Fi／Windows 私人網路與不做 Internet port forwarding                                                                                         |
+| Actual HTTP unauth／auth                                 | PASS；未帶 session/CSRF 的 state 與 SSE 回 401；有效 HttpOnly、SameSite=Strict session + CSRF 可取得 snapshot                                                                                                                               |
+| QR pairing／replay／rotation                             | PASS；256-bit secret 只放 URL fragment，POST 單次兌換；同 token replay 回 401。Server stop/restart 清 session 並旋轉 pairing，舊 cookie、CSRF 與 pairing token 全部失效                                                                     |
+| Host／Origin／CSRF／body／rate policy                    | PASS；exact Host/Origin allowlist、private remote address gate、4 KiB body limit、global/pair rate limit、CSP／no-store／no-referrer headers                                                                                                |
+| Cancel 二階段確認                                        | PASS；先由 server 發 30 秒 nonce，再送 `CANCEL`；缺少 nonce 與 nonce replay 回 409，實際 handler 僅呼叫一次                                                                                                                                 |
+| SSE reconnect／render independence                       | PASS；actual HTTP event-stream 帶 revision id；斷線後重連立即取得較新 fresh snapshot，disconnect/stop 只關連線，不取消 render                                                                                                               |
+| Remote Start                                             | PASS；只允許啟動 Windows 已完成 output/preflight/warning 確認後 prepared 的 request；未 prepared 時拒絕，遠端無檔案瀏覽能力                                                                                                                 |
+| Cooperative Pause／Resume                                | PASS；先進 `PAUSING`，在 staged wave／final／audio-remux 安全邊界才進 `PAUSED`；不 OS-suspend、kill 或中斷正在跑的 FFmpeg。已完成 segment 先 atomic 寫入 `render_state.json`，新 store instance 可讀回並供 Resume；繼續後同一工作回 RUNNING |
+| Proxy video reuse                                        | PASS；Renderer 只呼叫既有 `ensurePreview(VIDEO_PROXY)` 一次，muted proxy 作 master clock，Audio Preview API 不接收／重編 proxy video                                                                                                        |
+| Actual short audio preview                               | PASS；真實 FFmpeg 由原始音軌產生 1 秒 Enhanced Stereo preview，起點 500 ms，ffprobe 時長誤差 ≤75 ms；Virtual 5.1 實際先產六聲道再明確 stereo downmix monitoring                                                                             |
+| A/B／sync                                                | PASS；Original／Processed 切換維持 proxy playhead；偏移 >120 ms 才校正，550 ms debounce + abort + latest-request-wins 避免舊請求覆蓋                                                                                                        |
+| Cache identity／cleanup                                  | PASS；key 包含 source path/size/mtime、timeline revision、range、全部 DSP 參數及 previewer version；相同請求 HIT、revision 改變即失效。unique partial 成功後 atomic finalize；1 小時 stale partial、7 天 TTL、2 GiB LRU cleanup 通過        |
+| Final render separation                                  | PASS；Final 仍從原始高品質音軌走既有 audio processing/remux；preview cache 不可作 final input，改音效不重編已完成的 video frames                                                                                                            |
+| TypeScript／完整 Vitest                                  | PASS；64 files／386 tests                                                                                                                                                                                                                   |
+| Production build／Electron smoke／Windows packaged smoke | PASS；皆使用隔離 userData／validation path；封裝後沒有 v0.70 或 FFmpeg 程序殘留                                                                                                                                                             |
+| npm audit                                                | PASS；0 vulnerabilities                                                                                                                                                                                                                     |
+
+v0.70.0 可攜版位於 `release\v0.70.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.70.0.exe`；EXE 大小 `244441088` bytes，資料夾大小 `409426915` bytes，SHA-256 `63602C0120F32A3A0BB78D120F78FF14B6580C7F1D5EA2AAEDB4B1089E32F7EE`。
+
+限制：本輪未以實體 iPhone／Safari／不同 Wi-Fi AP 驗收，也未建立 Windows Firewall 自動規則；需在同一私人 LAN 以真機掃碼做一次人工 UX／連線驗收。SSE 是 REST 之外採用的等效單向即時狀態通道，控制命令仍為 REST。Pause 只能在安全分段邊界生效；若目前正處於單一 monolithic FFmpeg 階段，UI 會保持 `PAUSING` 直到該階段結束，不會假裝已暫停。第一版未提供完整手機 Timeline 編輯、外網暴露、VPN 自動配置或真 HRTF binaural renderer。
+
+驗證全程未停止或覆寫仍開啟的 v0.67 執行檔、userData、cache、TEMP、checkpoint 或 output；最終盤點 v0.67 仍有其既有程序，無 `ffmpeg.exe`／`ffprobe.exe`，且沒有 v0.70 程序。未安排關機或睡眠。
+
+## v0.69.0 Audio Processing（2026-09-14）
+
+| 檢查                                           | 結果                                                                                                                                              |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sanitization／Neutral naming／Natural defaults | PASS；參數與 codec 有邊界，UI 不使用未授權品牌功能名稱                                                                                            |
+| Enhanced Stereo 2.0                            | PASS；實際 AAC stereo、48 kHz、時長誤差 ≤100 ms；Natural 無 delay widening                                                                        |
+| Virtual AAC／AC-3／E-AC-3 5.1                  | PASS；實際 synthetic MP4 均為 6 channels、5.1(side)、48 kHz，video H.264 stream copy                                                              |
+| FL FR FC LFE SL SR                             | PASS；filter graph 使用顯式 join map，共同／差異成分與 100 Hz Natural LFE                                                                         |
+| Mono → Stereo                                  | PASS；實際 mono 輸入輸出 stereo，時長誤差 ≤100 ms                                                                                                 |
+| 原生 5.1 preserve                              | PASS；實際 5.1(side) AAC source 以 audio/video copy 重新封裝，codec/layout 保持                                                                   |
+| Preview／Meter                                 | PASS；實際 Virtual 5.1→stereo compatibility preview 可播放；LUFS／true peak 與 FL／FR／FC／LFE／SL／SR 六聲道 Peak 來自實際 5.1 的 ebur128/astats |
+| Video duration／sync                           | PASS；2 秒 fixture 各 codec 時長誤差 ≤100 ms；完整成品另有 750 ms fail-safe gate                                                                  |
+| 無音軌片段＋預設 BGM                           | PASS；第一首 BGM 先進入 timeline mix，再套用 Virtual 5.1；實際輸出 6 channels／5.1(side)                                                          |
+| Audio-only remux                               | PASS；Enhanced／Virtual 後處理以 `-c:v copy` 保留已完成視訊 stream，不重新編碼影片 frame                                                          |
+| Resume／Checkpoint                             | PASS；audio profile 包含在 request signature；模擬 post-audio 失敗後只執行 1 次音訊處理／remux，不重做完成的影片段                                |
+| TypeScript／完整 Vitest                        | PASS；61 files／375 tests                                                                                                                         |
+| Build／Electron smoke／Windows packaged smoke  | PASS；全部使用隔離 userData，未啟動第三方播放器                                                                                                   |
+| npm 高風險弱點掃描                             | PASS；0 vulnerabilities                                                                                                                           |
+
+v0.69.0 可攜版位於 `release\v0.69.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.69.0.exe`；EXE 大小 `244441088` bytes，資料夾大小 `407594060` bytes，SHA-256 `D6A115592E0E572937D0044365FFF26D60C77456B2B7684D5DB75E593401E58A`。
+
+封裝後再次核對 v0.67 執行檔 SHA-256 仍為 `04A3A3A8BC978BB7610DFEA8033FAC65ECAC1D245AE3CD9C90A46045CCC3680C`，LastWriteTimeUtc 仍為 `2026-09-13T14:37:01.4753978Z`；v0.67 視窗與其 userData／cache／TEMP／checkpoint／output 均未停止、覆寫或清理。
+
+限制：多片段、轉場、不同 layout 或 BGM 混合後無法 bitstream-preserve 原生 5.1。第一版會明確阻擋「保持原始多聲道」而不是靜默 downmix。真正 HRTF/binaural monitoring、逐聲道即時播放裝置校準與雙階段 loudnorm measurement 尚未宣稱完成。為避免與仍開啟的 v0.67 競爭，本輪只使用短 synthetic fixture，未執行使用者長片或長時間效能／音質主觀測試。
+
+## v0.68.0 實際轉檔耗時計時（2026-09-14）
+
+| 驗證項目                        | 結果                                                                                                          |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| FFmpeg 正式起點                 | PASS；只有 child spawn 且取得 PID 的 callback 啟動 tracker，預檢／確認／字幕前置不計入                        |
+| Monotonic 計算                  | PASS；`performance.now()` 計算本次 elapsed，UI tick 與五分鐘 heartbeat 都不累加固定值                         |
+| 跨階段連續時間                  | PASS；同一 tracker 橫跨 segmented waves、memory wait、final concat 與 terminal cleanup                        |
+| 五分鐘保存                      | PASS；Main 每五分鐘以當下 monotonic snapshot 更新 active attempt 與 append-only timing history                |
+| Schema migration                | PASS；schema 1 載入為 schema 2 且不虛構歷史 elapsed                                                           |
+| Crash／Resume                   | PASS；八小時 downtime 測試只承接最後 120 秒 heartbeat，新 attempt 80 秒後 cumulative 為 200 秒，不計 downtime |
+| 完成                            | PASS；顯示 `轉檔完成／總耗時`；Resume 顯示本次與累積總耗時；terminal history 保留                             |
+| 失敗                            | PASS；顯示 `轉檔失敗／本次耗時`，checkpoint 保存 finalized cumulative 供 Resume                               |
+| 人工取消                        | PASS；顯示 `轉檔已取消／本次耗時`；沿用既有 discard 後 `<renderId>.timing.ndjson` 仍存在                      |
+| ETA 分流                        | PASS；UI 同列但分開標示 `已耗時` 與 `預估剩餘`，皆固定 `HH:MM:SS`                                             |
+| TypeScript                      | PASS                                                                                                          |
+| Focused tests                   | PASS；3 files／16 tests                                                                                       |
+| 非媒體完整 tests                | PASS；53 files／292 tests                                                                                     |
+| 真實媒體 integration／benchmark | 本輪未執行；v0.67 PID 17124／FFmpeg PID 6604 正在正式轉檔，依安全要求不啟動競爭 FFmpeg 工作                   |
+| Build／smoke／audit             | PASS；production build、Electron smoke、packaged smoke、0 vulnerabilities                                     |
+
+所有測試 TEMP 指向獨立的本機驗證資料夾；Electron 與 packaged smoke 使用隔離 userData。封裝期間 v0.67 EXE 的 SHA-256 前後皆為 `04A3A3A8BC978BB7610DFEA8033FAC65ECAC1D245AE3CD9C90A46045CCC3680C`，LastWriteTimeUtc 前後皆為 `2026-09-13T14:37:01.4753978Z`；v0.67 App 與 FFmpeg 程序仍在執行，未停止、重啟或寫入真實 checkpoint／output／resume／cache／temp。
+
+v0.68.0 可攜版位於 `release\v0.68.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.68.0.exe`，EXE 大小 `244441088` bytes，資料夾大小 `407552790` bytes，SHA-256 `DF87C3894664C0707CF97C88CAA13335600C527D8EBC0F695EEAD1AC9DBC40FD`。
+
+## v0.66.0 瓶頸感知高速轉檔（2026-09-13）
+
+### Pipeline／安全驗證
+
+| 驗證項目                   | 結果                                                                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 實際 encoder               | PASS；Normal 的 QSV 選項建立 `hevc_qsv`／`h264_qsv`；CPU fallback 為 `libx265`／`libx264`                                      |
+| Decode／filter 根因        | PASS；v0.65 command 無 `-hwaccel`，decode、fps、scale、blur、overlay、zoompan、xfade 主要在 CPU                                |
+| QSV decode bridge/fallback | PASS；只有 H.264／HEVC 嘗試 QSV，graph 插入 `hwdownload,format=nv12`；硬體錯誤重建相同 CPU graph retry                         |
+| Early normalization        | PASS；leaf stage 依選定 1080P／1440P／4K 正規化；reduction level 不再重複 fps/scale/pad/color/zoom/audio resample              |
+| Final `-c copy`            | 不適用；xfade/acrossfade、字幕、浮水印、BGM/master dynamics 會產生新 frames/audio，stream copy 無法保持內容一致                |
+| Adaptive concurrency       | PASS；Available RAM、Commit、CPU/GPU、SSD gate 在 wave 邊界增／停／降；在途工作不被中止；未改善 3% 回到 best job count         |
+| ETA                        | PASS；stage 剩餘媒體時間除以即時 FFmpeg `speed=x`                                                                              |
+| Runtime UI                 | PASS；Encoder、Decoder、CPU、GPU Encode/Decode、RAM、FPS、speed、Current Jobs、SSD read/write、output/TEMP/working usage       |
+| TypeScript                 | PASS                                                                                                                           |
+| Focused Vitest             | PASS；4 UI/政策檔 94 tests；3 pipeline/安全檔 48 tests（含新增 RAM/SSD pause、壓力降級、3% 回退與 normalized/QSV graph tests） |
+| Full Vitest                | PASS；58 files／347 tests                                                                                                      |
+| Build／smoke／audit        | PASS；production build、Electron smoke、packaged smoke；0 vulnerabilities                                                      |
+
+### 同專案四模式代表性 benchmark
+
+先等待使用者 v0.65.0 正式工作結束，確認沒有 `ffmpeg.exe` 後才執行。四組皆讀取同一專案的四支 3840×2160 H.264／HEVC 來源，每個 job 各讀兩支 3 秒片段，提前正規化為 1920×1080、套 0.3 秒 xfade，以 `h264_qsv` 編碼；四個 job 的總輸出媒體時間為 22.8 秒。第四組只多啟用 QSV decode，用來隔離既有硬體編碼之後的 decode 收益。輸出僅存在 unique Windows TEMP，測試後已驗證路徑並清除；正式 output、checkpoint、userData 與來源未改。
+
+| 模式                                        |   FPS | speed=x | CPU % | GPU % | GPU Enc / Dec % | RAM Peak | SSD throughput | Processing Time |
+| ------------------------------------------- | ----: | ------: | ----: | ----: | --------------: | -------: | -------------: | --------------: |
+| 原 Normal（2 jobs，CPU decode＋QSV encode） | 13.61 |   0.454 | 40.89 |  9.52 |     0.00 / 2.85 | 1.92 GiB |     5.94 MiB/s |        50.194 s |
+| Normal + 3 Jobs（CPU decode＋QSV encode）   | 12.31 |   0.411 | 41.90 | 12.45 |     0.00 / 2.10 | 2.43 GiB |     2.51 MiB/s |        55.528 s |
+| Normal + 4 Jobs（CPU decode＋QSV encode）   | 15.73 |   0.525 | 87.38 | 14.24 |     0.00 / 2.95 | 3.68 GiB |     1.25 MiB/s |        43.453 s |
+| Hardware Encode Mode＋QSV decode（3 jobs）  | 20.16 |   0.673 | 29.63 | 77.79 |    0.00 / 37.00 | 3.14 GiB |     6.15 MiB/s |        33.896 s |
+
+Windows 此驅動的 `engtype_VideoEncode` counter 回報 0%，但每列實際 FFmpeg command 都明確為 `h264_qsv`，所以不能把 0% 誤判成 software encode；GPU total 與第四列 VideoDecode counter 可用。SSD 是全系統 `_Total` counter，適合相對比較，不等於單檔精密 I/O trace。
+
+同一 workload 下，3 個 CPU-decode jobs 反而比 2 個慢，證明固定增加 job 不保證更快；4 jobs 雖比原始 2 jobs 縮短約 13.4%，CPU 已達 87.38%，不宜固定鎖死。QSV decode＋encode 的 3 jobs 最快，處理時間比原始 2 jobs 縮短約 32.5%，CPU 也降至 29.63%。因此本機最快且穩定的起點是高速模式 3 jobs；實際長專案仍由 adaptive gate 從 ≤2 起跑，只有完成 wave 證明提升 ≥3% 才升至 3／4，不相容就回退 CPU/best jobs。
+
+原始機器可讀結果保存於 `docs/BENCHMARK_V066.json`；可重跑工具為 `scripts/benchmark-render-modes.ps1`。
+
+v0.66.0 可攜版位於 `release\v0.66.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.66.0.exe`，EXE 大小 `244441088` bytes，資料夾大小 `407493149` bytes，SHA-256 `22A4A6F12B15A1FD8E0D8CFAED61ED507BF9B8D2D47401037235BD9F3AA2B34C`。封裝後 packaged smoke PASS，沒有 v0.66.0 或 benchmark FFmpeg 程序殘留；未停止使用者正式轉檔，未安排關機或睡眠。
+
+## v0.65.0 Normal Mode 自適應 RAM 與平行轉檔（2026-09-13）
+
+| 驗證項目                     | 結果                                                                                          |
+| ---------------------------- | --------------------------------------------------------------------------------------------- |
+| 24／32+ GiB 系統安全保留     | PASS；24 GiB 至少 6 GiB，32 GiB 以上至少 8 GiB                                                |
+| 10／14／18 GiB budget tiers  | PASS；依 Total/Available RAM 取安全上限，不強迫耗滿                                           |
+| 單一 FFmpeg input bound      | PASS；Normal 每 process 最多 10，Low Memory 最多 3–6                                          |
+| Adaptive concurrency         | PASS；1–4 jobs，wave 完成後依 RAM/Commit/CPU/GPU 與 throughput 升降                           |
+| 無效 RAM buffer 擴張         | PASS；新增預算只用於獨立 intermediate jobs                                                    |
+| Benchmark gate               | PASS；完成片長／wall time 未改善至少 3% 時不再升級                                            |
+| Memory pressure              | PASS；目前 wave 完成後降低下一 wave，不新增工作、不直接 crash                                 |
+| Runtime telemetry            | PASS；CPU、GPU、RAM、Available、FFmpeg aggregate RAM、Jobs、FPS、speed、SSD throughput        |
+| Parallel checkpoint writes   | PASS；project 級序列化 atomic JSON，不覆寫來源或已完成片段                                    |
+| TypeScript                   | PASS                                                                                          |
+| Vitest                       | PASS；58 files／343 tests；另在最終 nominal-RAM threshold 修正後重跑 2 files／8 focused tests |
+| Production build             | PASS                                                                                          |
+| Electron hidden-window smoke | PASS                                                                                          |
+| Windows packaged smoke       | PASS                                                                                          |
+| npm audit                    | PASS；0 vulnerabilities                                                                       |
+
+本機實際資源讀取 PASS：Windows 名目 24 GB（實際 25,643,589,632 bytes），可取得 CPU、GPU、SSD throughput、Commit 與 Pagefile。驗證時使用者既有 FFmpeg PID 18808 正在執行 v0.64.0 工作，約使用 3.40 GiB Private RAM；v0.65.0 因此保守算出約 7.6 GiB 當下 budget／1 job。既有工作結束釋放約 3.4 GiB 後，同一台機器可進入 10 GiB／2 jobs 階段。這證明策略會讀即時 Available RAM，不會為了達到目標值干擾正在執行的轉檔。
+
+v0.65.0 可攜版位於 `release\v0.65.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.65.0.exe`，EXE 大小 `244441088` bytes，資料夾大小 `407475208` bytes，SHA-256 `942A7A326515935ACDD721B59A193DBED28BC6AEC766E353AB07803DF39360BA`。既有 FFmpeg 工作未被停止、重啟或修改；未安排關機或睡眠。
+
+## v0.64.0 Commit-safe 續轉、1080P／1440P 與 UI hierarchy（2026-09-13）
+
+| 驗證項目               | 結果                                                                                                                                                                                                                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-12` 根因             | PASS；Windows Resource-Exhaustion Event ID 2004 記錄 FFmpeg commit 49,243,484,160 bytes（45.86 GiB），另有 39.91／35.02 GiB；本機 RAM 約 23.88 GiB、Pagefile 約 26.55 GiB、Commit Limit 約 50.44 GiB。FFmpeg 為 64-bit；C 槽約 74 GiB 可用，因此證據指向巨大 filter graph 的 Commit exhaustion，不是磁碟或 32-bit。 |
+| Preflight／budget      | PASS；讀取 RAM、App／其他程式、Pagefile、Commit、TEMP／output disk；reserve=`max(4 GiB,total×18%)`，低記憶體 3–6 inputs、一般最高 16，threads 隨 budget 調整。RAM／Commit warning 可確認繼續；只有 SSD 1 GiB reserve gate 阻擋。                                                                                    |
+| Runtime monitor        | PASS；FFmpeg 每 15 秒回報 available RAM、working/private bytes、App RAM、SSD free、checkpoint bytes、current segment 與 ETA；新 stage 在 available <2 GiB 時等待，沒有把執行中的 FFmpeg 強制 suspend。                                                                                                              |
+| Checkpoint／Resume     | PASS；JSON 可跨 store instance 重讀且可重複覆寫；中繼檔以 file/size/codec/duration/SHA-256 驗證。真實 7 段測試分別模擬第 2 個 stage 失敗及 3 個中繼完成後 final `-12`：前者重開後重用第 1 段並只跑其餘 2 段＋final，後者只呼叫一次 final FFmpeg；成功後 checkpoint 清除。                                           |
+| App close／取消        | PASS；Renderer/App close 以 `APP_CLOSED` reason 保留工作；人工取消以 `USER_CANCEL` 清理。Power guard 在每次 start/resume 期間維持並於完成／失敗釋放，不安排關機或睡眠。                                                                                                                                             |
+| 解析度矩陣             | PASS；測試 1080P／1440P × 16:9／9:16 × Low／Normal 八組 profile：1920×1080、2560×1440、1080×1920、1440×2560；filter 於每個來源早期 scale/pad 或 scale/blur/overlay，expected duration 不變。                                                                                                                        |
+| Preview／字幕一致性    | PASS；Preview Canvas 從同一 profile 取得 aspect/dimensions，瀏覽器仍可用低解析 proxy；ASS PlayRes 與相對字級讀取同 profile。既有 timeline、crop/scale policy、subtitle wrap tests 全部回歸。                                                                                                                        |
+| 資源估算               | PASS；1440P 相較同工作負載 1080P 的 output、SSD intermediates、RAM frame buffers 與時間估算均提高；兩種模式並排顯示且 resolution 切換即時重算。                                                                                                                                                                     |
+| UI/UX                  | PASS；共享 tokens 定義藍色 Primary、紫色 mode/selected、粉色點綴、橘色 Warning、紅色 Destructive、灰色 Disabled；補齊 hover/pressed/focus/loading/selected/reduced-motion 與 2-column responsive resolution。空專案 1792×1002 screenshot 人工檢查無 overflow。                                                      |
+| TypeScript／Vitest     | PASS；`npm run typecheck`；57 files／338 tests；A–E 使用 16／20 GiB、20／70 GiB disk 與低 Available RAM 的可重現資源快照，F／G 使用真實 FFmpeg 中繼檔模擬中段／final 失敗續轉。                                                                                                                                     |
+| Production／啟動／依賴 | PASS；production build、Electron smoke、Windows packaged smoke；`npm audit --audit-level=high` 為 0 vulnerabilities。                                                                                                                                                                                               |
+
+v0.64.0 可攜版位於 `release\v0.64.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.64.0.exe`，EXE 大小 `244441088` bytes，資料夾大小 `407459578` bytes，SHA-256 `FD09802B53D53FD622C12E9AEF939E7A079590EAA82D6CD8B5AB8C654ACB5914`。驗證後 C 槽可用 `77976600576` bytes（約 72.62 GiB）。封裝／測試沒有 v0.64.0 程序殘留；使用者在 v0.62.0 啟動的既有大雪山 FFmpeg 轉檔仍在執行，未被停止、重啟或修改。來源媒體、根目錄 SOP 與舊 release 未修改，未安排關機或睡眠。
+
+## v0.63.0 雙轉檔模式與動態資源預估（2026-09-12）
+
+| 驗證項目                   | 結果                                                                                                                                                                                                                                                           |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 實際流程盤點               | PASS；一般模式為單一 filter graph＋partial；低記憶體在 visual input > 6 時遞迴產生 H.264 normalized intermediates，逐檔驗證後刪除 consumed 上層，final stage 才套字幕／BGM／浮水印／指定 codec；outer finally 清 temp root。                                   |
+| 兩模式選擇與預設           | PASS；互斥 radio 可切換，未設定 preference 時低記憶體預設開啟；切換會保存既有 `lowMemorySegmented` preference，開始時傳入同一 `ConcatRenderRequest` 的唯一 strategy Boolean。                                                                                  |
+| 兩模式固定並排顯示         | PASS；UI test 驗證低記憶體／一般兩欄同時呈現 SSD、RAM、時間、差異、concurrency 與 intermediate jobs；改選一般模式後重新估算但另一欄仍保留。                                                                                                                    |
+| Workload 動態輸入          | PASS；Main 依 asset ID 解析 exact clip duration、display resolution、fraction FPS、source codec、照片、insertion ID、transition、generated card 與 target resolution/codec；測試確認 4K59.94 HEVC、照片與插入素材被納入。                                      |
+| SSD／RAM／時間公式         | PASS；SSD 模擬 partial 及各層中繼檔 live peak；RAM 使用 source/output pixel buffers、FPS、decode codec、concurrent inputs；時間使用 target realtime factor、duration-weighted decode、graph/insertion 與 simulated stage jobs。高解析高 FPS 測試值高於低負載。 |
+| 資源警告與安全邊界         | PASS；75% RAM／80% SSD 為橘色、100% 為紅色，radio 不禁用；RAM 不阻擋。只有所選模式 peak working SSD 無法保留 1 GiB 時，正式 start gate 阻擋。                                                                                                                  |
+| 雙 pipeline 成片一致性     | PASS；7 支真實來源分別以 staged 與 normal H.264 360p 轉出，兩者 canonical expected duration 相同、probe 解析度／codec 相同、實際 duration 差 ≤ 100 ms、逐幀 SSIM `All` > 0.98；分段 temp 完整清除。                                                            |
+| TypeScript／Vitest         | PASS；`npm run typecheck`；55 files／330 tests。                                                                                                                                                                                                               |
+| Production／啟動／依賴安全 | PASS；production build、Electron hidden-window smoke、Windows packaged smoke；`npm audit` 0 vulnerabilities。                                                                                                                                                  |
+
+v0.63.0 可攜版位於 `release\v0.63.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.63.0.exe`，EXE 大小 `244441088` bytes，資料夾大小 `407403502` bytes，SHA-256 `195219C2281D913F3536881F327164E1AA8E636ADA51AFF19B873BAF66BF2B72`。驗證完成時 C 槽約剩 76.47 GiB；沒有 v0.63.0、FFmpeg 或 ffprobe 程序殘留。使用者原先開啟的 v0.62.0 視窗未被關閉，來源媒體、根目錄 SOP 與既有 release 未修改，未安排關機或睡眠。
+
+## v0.62.0 Preview／Render 一致性與插入素材時間（2026-09-12）
+
+| 驗證項目                             | 結果                                                                                                                                                                           |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Preview → Timeline → Render 根因追蹤 | PASS；字幕原為 Browser 480p 百分比與 ASS 三段位置、原始素材比例 Preview 與固定輸出 Canvas、插入 clip 與 anchor 卡片歸屬三組差異。                                              |
+| 字幕 WYSIWYG 契約                    | PASS；Preview／ASS 共用行寬 resolver、480p 字級／外框／陰影縮放、Microsoft JhengHei、精確垂直百分比與等比例水平 margin；480p／4K ASS 位置與換行測試通過。                      |
+| 字幕每行最大 60                      | PASS；單筆與批次 UI `max=60`，Main sanitize 100→60，Preview／SRT／ASS 共用 resolver。                                                                                          |
+| 片頭自由時間調整                     | PASS；3–22 秒僅橘色建議，人工 IN／OUT 不回彈、不截短；2.999 秒與 25 秒可保存，輸出使用完整範圍。編輯僅保留 0.1 秒步進與來源邊界；極短段落由既有疊化預檢提示。                  |
+| 網格放大預覽畫布                     | PASS；Main 固定 16:9，Shorts contract 為 9:16；直式素材 Preview／FFmpeg 共用模糊背景判斷，前景 `contain`、背景 `cover/blur`，橫式補黑。未變更既有 FFmpeg crop/scale/pad 輸出。 |
+| 插入素材 Duration                    | PASS；5 秒 anchor＋3 秒插入影片＋2 秒插入照片在 transition=0 時為 10 秒，下一段從 10 秒開始；啟用疊化時同一 canonical plan 計算實際區間與總長。                                |
+| TypeScript                           | PASS；`npm run typecheck`。                                                                                                                                                    |
+| Vitest                               | PASS；55 files／328 tests；包含真實直式模糊背景、插入照片／影片、雙語字幕燒錄 integration。                                                                                    |
+| Production／啟動                     | PASS；production build、Electron hidden-window smoke、Windows packaged smoke。                                                                                                 |
+| 依賴安全                             | PASS；`npm audit` 0 vulnerabilities。                                                                                                                                          |
+
+v0.62.0 可攜版位於 `release\v0.62.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.62.0.exe`，EXE 大小 `244441088` bytes，資料夾大小 `407383727` bytes，SHA-256 `47D4B638490BA8E224B3A4F160E2D7E723200B98EC3EBF438A3774F32837178E`。封裝 smoke 結束後沒有 v0.62.0、FFmpeg 或 ffprobe 程序殘留；C 槽約剩 65.33 GB。未修改來源媒體、根目錄 SOP 或既有 release，未安排關機或睡眠。
+
+## v0.61.0 低記憶體分段轉檔與 YouTube 全自動上傳（2026-09-12）
+
+| 項目                 | 結果                                                                                                                                                                         |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 分段上限與順序       | PASS；單元測試鎖定每個 filter group 最多 6 個 visual inputs，Main-start-card 與 Intro／Main 邊界保持鄰接，遞迴分組順序不變。                                                 |
+| 真實 FFmpeg 分段輸出 | PASS；以 7 支真實測試片執行 3 個分段工作，成品可 probe／播放、時長符合 canonical transition plan，來源保持不變；成功後 low-memory temp root 無殘留。                         |
+| 取消／磁碟安全       | PASS；唯一工作暫存目錄由同一 abort/finally 清理；容量預估分列約 2× 成品的暫存 allowance，總需求及較保守的時間估算進入既有 1 GB preflight gate。                              |
+| 輸出頁 UI            | PASS；片頭＋正片串接位於最上方且有片頭時預設勾選；低記憶體及 YouTube 全自動皆為預設勾選並持久化，人工 Chrome／API 模式仍可在停用全自動後選擇。                               |
+| YouTube 自動流程     | PASS（mock API，未對真實頻道上傳）；等待帳號／頻道與 AI 發布資料完成，預設不是兒童內容、review gate 已確認，倒數後呼叫既有 official upload API；資料不安全時停止。           |
+| 完整回歸             | PASS；TypeScript、54 個 Vitest 測試檔／325 個測試、production build、Electron smoke、Windows packaged smoke 與 `npm audit --audit-level=high`（0 vulnerabilities）全數通過。 |
+
+v0.61.0 可攜版位於 `release\v0.61.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.61.0.exe`，EXE 大小 `244441088` bytes，資料夾大小 `407375055` bytes，SHA-256 `11936932A2BFCD03C161A4D1906AC7DF3D108822F70871FE575FAD2391272450`。封裝 smoke 結束後沒有 v0.61.0、FFmpeg 或 ffprobe 程序殘留；C 槽約剩 17.13 GB。未修改來源媒體、根目錄 SOP 或 v0.60.0 release，未執行真實 YouTube 上傳，也未安排關機或睡眠。
+
+## v0.60.0 單筆字幕行寬與片段靜音實測（2026-09-12）
+
+| 項目             | 結果                                                                                                                                                                                          |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 字幕語言預設     | PASS；中文-only 12、英文／中英混合 20；單筆 6–40 覆寫優先、全域批次覆寫次之。共享 resolver 單元測試鎖定文字分類、優先序與上下限。                                                             |
+| 單筆行寬 UI      | PASS；每列顯示有效字數及自動／單筆狀態；行寬 dialog 使用 native number input、step=1，可鍵盤上下或輸入，Enter 立即走 `setSubtitleCues` 保存。Renderer UI 測試驗證 12→17 及 manifest payload。 |
+| 預覽／SRT／燒錄  | PASS；Subtitle overlay、UTF-8 SRT 與 ASS 都使用同一 cue-specific 規則；中英預設、人工 6 字覆寫及 480P／4K 斷行穩定有測試。                                                                    |
+| 無聲片段實測     | PASS；無音軌直接判定，AAC 靜音軌以 exact IN／duration 的 FFmpeg `volumedetect` 判為無聲；可聽音軌不套樂、照片不啟動分析、range cache hit 與 -50 dB 門檻有測試。                               |
+| 第一首配樂與開關 | PASS；實際靜音 AAC 影片只在該片段輸出範圍鋪上清單第一首 MP3；真實輸出量測有聲、`autoDubClipCount=1`。網格與放大預覽皆預設勾選；單片取消與整次 BGM 關閉仍優先。                                |
+| 完整回歸         | PASS；TypeScript、53 個 Vitest 測試檔／320 個測試、production build、Electron smoke、Windows packaged smoke、畫面快照與 `npm audit --audit-level=high`（0 vulnerabilities）全數通過。         |
+
+v0.60.0 可攜版位於 `release\v0.60.0\SceneryWalkerSourceOrganizer-win32-x64\SceneryWalkerSourceOrganizer-v0.60.0.exe`，EXE 大小 `244441088` bytes，資料夾大小 `407356452` bytes，SHA-256 `0C5FE34BE879904209D4A334D8019551882B055EBA4E76FAD3910BCAA19363E6`。封裝 smoke 與截圖程序均已結束，未留下 v0.60.0 程序；C 槽封裝後仍有約 25.3 GB。v0.59.0 EXE 複核 hash `21DFF2529E1E75C8F606695A970C60ECBE026DBE1EF98C5C38A16096EF48B8EF`，未被覆寫。未修改來源媒體、根目錄 SOP、舊 release，也未安排關機或睡眠。
+
 ## v0.59.0 無聲自動配音、網格串聯後時間、字幕換行修正（2026-09-12）
 
 | 項目           | 結果                                                                                                                                                                       |
@@ -995,3 +1335,88 @@ npm start
 | Provider honesty        | PASS；只有真正 provider 成功才標示 OPENAI_API／CODEX_CHATGPT，否則 LOCAL_FALLBACK 並保留失敗原因。            |
 | Full publish schema     | PASS；titles、description、English summary、hashtags、thumbnail candidate IDs、chapters、warnings 驗證。      |
 | 完整測試                | PASS；39 suites／243 tests。                                                                                  |
+
+## v0.75.0 封裝驗證（2026-09-17）
+
+| 項目 | 結果 |
+| --- | --- |
+| TypeScript | PASS；`npm run typecheck`。 |
+| 完整 Vitest | PASS；72 files／443 tests。 |
+| Production build | PASS；`npm run build`，Vite 8.2.2。 |
+| npm audit | PASS；0 vulnerabilities（`--audit-level=high`）。 |
+| Electron source smoke | PASS；`npm run smoke`。 |
+| UI screenshot | PASS；`npm run screenshot`，輸出 [IntroStudio overview](../artifacts/v075-intro-audio-flat-ui.png) 與 [IntroStudio Audio rows](../artifacts/v075-intro-audio-flat-ui-rows.png)。隔離 fixture 含 3 段片頭；rows 視覺檢查確認四軌 gate、SFX／BGM、音量與片段操作無重疊／橫向溢出。compact BGM select 的窄欄直排問題已以 CSS 機械修正。過程有預覽工作取消訊息，但腳本收到 `SCREENSHOT_READY` 且正常結束。 |
+| Windows x64 package | PASS；`npm run package:win`，輸出 `release/v0.75.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.75.0.exe`。 |
+| Packaged smoke | PASS；`npm run smoke:packaged`。 |
+| v0.75 EXE | 244,441,088 bytes；SHA-256 `EE19DDD3D29D0BD4267A01C09B353874F9237B451A1A3122F74D8DE92A4FAEF1`。 |
+| Process cleanup | PASS；驗證後沒有 v0.75／ffmpeg／ffprobe 殘留；既有 v0.74 程序未操作。 |
+| CSS／screenshot revalidation | PASS；compact Intro Audio select 修正後重新 typecheck、4 files／12 focused renderer tests、build、screenshot、audit、package 與 packaged smoke；main.ts screenshot compositor/rows hook 僅在 `APP_SCREENSHOT_PATH` 自動化分支執行。 |
+# v0.77.0 Render Resource Architecture（2026-09-22）
+
+| 驗證項目 | 結果 |
+| --- | --- |
+| TypeScript | PASS；`npm run typecheck` |
+| 完整 Vitest | PASS；73 files／449 tests |
+| Production build | PASS；`npm run build` |
+| Electron source smoke | PASS；`npm run smoke` |
+| npm audit | PASS；0 vulnerabilities |
+| Windows x64 package | PASS；輸出至 `release/v0.77.0/SceneryWalkerSourceOrganizer-win32-x64/`，未覆蓋 v0.76、既有 userData、checkpoint 或來源 |
+| Packaged smoke | PASS；`npm run smoke:packaged`；測試後無 SceneryWalker／FFmpeg 殘留程序 |
+| v0.77 EXE | 244,441,088 bytes；SHA-256 `E2C6C9AE3DD1D759E6107DFB0D588B14EC1C6EC729FBF813678C6035B02663DB` |
+| Real-project profile estimate | PASS；同一實際專案／輸入在 LOW_DISK 約 92.272 GiB peak + 20 GiB reserve = 112.272 GiB required；BALANCED 約 124.339 GiB + 24.868 GiB = 149.207 GiB；HIGH_SPEED 約 129.402 GiB + 25.880 GiB = 155.282 GiB |
+| Profile wiring | PASS；estimate、UI request、runtime policy、intermediate bitrate、RAM/TEMP budget 與 scheduler 使用同一 `resourceProfile` |
+| Dependency-aware GC／Resume | PASS；已驗證 downstream replacement 後才釋放 consumed intermediates；picture/base-audio master 保留供 final audio-only resume |
+| Thumbnail reliability | PASS；lazy first-valid-frame、source fingerprint／範圍／版本 cache key，來源檔 hash 前後不變 |
+
+### Bounded 180-second 4K intermediate benchmark
+
+This is an intermediate-stage benchmark, not a complete project render: the selected read-only source is a 29.433039-second 3840x2160 H.264 video-only cache file looped to 180 seconds. It has no audio, so subtitle／transition／overlay-photo／audio-mix stages are not represented. All four runs used one job, isolated TEMP, a 20 GiB output hard cap, the same source, and the actual `h264_qsv` command path with 3840x2160 NV12 normalization.
+
+| Profile | Wall | fps / speed | Output | RAM peak | CPU mean | GPU decode |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| v0.76 legacy 380 Mbps | 151.189 s | 36.07 / 1.20x | 8,076,448,958 B | 1,366,061,056 B | 18.50% | 65.78% |
+| v0.77 LOW_DISK 45 Mbps | 104.073 s | 52.42 / 1.75x | 1,033,237,450 B | 765,464,576 B | 26.88% | 44.42% |
+| v0.77 BALANCED 54.9 Mbps | 105.416 s | 51.59 / 1.72x | 1,203,410,311 B | 812,519,424 B | 26.30% | 42.87% |
+| v0.77 HIGH_SPEED 64.8 Mbps | 108.389 s | 50.01 / 1.67x | 1,258,498,150 B | 799,076,352 B | 25.11% | 42.03% |
+
+All runs PASSed, source SHA-256 remained `B4532CD2A234E1D12BE492C2EEA62B96AE003F65F257B8E392333085658312B8`, and no output approached the hard cap. Compared with legacy, wall time decreased 31.16%／30.28%／28.31% for LOW_DISK／BALANCED／HIGH_SPEED, with output-size reductions of 87.21%／85.10%／84.42%. GPU encode／compute／VRAM were unavailable from reliable Windows counters; SSD values were total-disk samples and are not treated as isolated causal measurements. The tested encoder is `h264_qsv`, not NVENC; this benchmark does not claim NVENC availability. No full 1-hour-40-minute render was run.
+
+封裝檔案：`release/v0.77.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.77.0.exe`。本次沒有執行真實 1 小時 40 分鐘完整輸出；開發期仍遵守 30–60 秒 bounded benchmark，再以 integration／estimate／resource gate 驗證。
+
+# v0.78.0 Intro Compact Thumbnail UI（2026-09-24）
+
+| 驗證項目 | 結果 |
+| --- | --- |
+| TypeScript | PASS；`npm run typecheck` |
+| Intro focused regression | PASS；`App.test.tsx`＋`preview-cache.integration.test.ts`，92 tests |
+| 完整 Vitest | PASS；73 files／450 tests |
+| Production build | PASS；`npm run build` |
+| Electron source smoke | PASS；`npm run smoke` |
+| npm audit | PASS；0 vulnerabilities |
+| Windows x64 package | PASS；独立输出至 `release/v0.78.0/SceneryWalkerSourceOrganizer-win32-x64/`，未覆盖 v0.77／userData／checkpoint／来源 |
+| Packaged smoke | PASS；`npm run smoke:packaged`；结束后 SceneryWalker／FFmpeg／ffprobe 残留程序为 0 |
+| v0.78 EXE | 244,441,088 bytes；SHA-256 `6C86AED80E8B343B311B29B7E18E1D5E476850FD87440A17CB287C8CE19EB8AC` |
+| Video／photo thumbnail | PASS；Renderer 使用 IntersectionObserver 与 `loading=lazy`，Main 使用 first-valid-frame／image single-frame 480px JPEG，不进入正式 Render pipeline |
+| Range invalidation | PASS；Renderer state 以 `assetId + inMs + outMs` signature 校验，裁切范围改变时不会继续显示旧 URL |
+| Sort identity | PASS；mouse drag 后序号／alt 更新，但 thumbnail URL、asset 与 Audio 状态仍绑定原 segment ID，不串位 |
+| Cache bound | PASS；cache key 仍含 source fingerprint／range／version；每个来源最多保留 64 组 App-owned Intro JPG＋marker，回收不会触碰来源或正式输出 |
+| Compact toolbar | PASS；Preview／Trim／Original／BGM／SFX／Delete／More 具有 selected／enabled／disabled／unavailable／hover／focus 状态与 ARIA／Tooltip；细节按需展开 |
+| Visual QA | PASS；人工检查 `artifacts/v078-intro-compact-thumbnail-ui-rows.png`，3 个片段在同屏对齐，无 toolbar overflow；照片真实缩图载入，影片懒载 placeholder／完成态布局一致 |
+
+Intro Final 当前产品契约固定为 16:9；Shorts 9:16 属于独立工作区。因此 v0.78 的 Intro thumbnail rail 使用与当前 Final Intro 一致的 16:9 canvas，没有虚构不存在的 Project-level Intro 9:16 设置。替换素材、复制片段与片段级转场在现有 IntroStudio 没有可调用行为，本版不建立无效按钮；既有 Preview、裁切、Audio、排序、分析、删除与输出逻辑均保留原 API。
+
+# v0.79.0 Render TEMP Persistence（2026-09-26）
+
+| 驗證項目 | 結果 |
+| --- | --- |
+| Root cause | `render-temp:choose`／`render-temp:validate` 已呼叫偏好更新，但 `UserPreferencesStore.update()` 沒有處理 `renderTemporaryFolder`，因此每次估算／啟動仍回退 `app.getPath("temp")` |
+| E: volume | PASS；`E:\temp` 存在、NTFS Healthy、可用約 212 GiB；建立 42-byte 唯一 marker 後立即刪除，前後目錄項目皆為 0 |
+| Preference | PASS；選擇絕對路徑後 snapshot、磁碟 JSON 及新 Store reopen 均保留同一路徑；相對路徑拒絕 |
+| Estimate/runtime routing | PASS；estimate 與 `concat:start` 均讀取持久偏好並通過 `validateRenderTemporaryFolder()`；新 checkpoint work root 建於指定 TEMP |
+| Existing checkpoint | PASS；checkpoint reopen 使用其既有 `workRoot`，變更偏好不搬移既有工作檔 |
+| Focused regression | PASS；`user-preferences.test.ts`＋`render-checkpoint.test.ts`，2 files／19 tests |
+| TypeScript／build | PASS；renderer＋main typecheck、production build |
+| Windows package | PASS；獨立輸出至 `release/v0.79.0/SceneryWalkerSourceOrganizer-win32-x64/`，未覆蓋 v0.78／checkpoint／來源 |
+| Packaged smoke／audit | PASS；Windows packaged smoke；npm audit 0 vulnerabilities；結束後沒有 SceneryWalker／FFmpeg／ffprobe 殘留程序 |
+| v0.79 EXE | 244,441,088 bytes；SHA-256 `3EACC116DBF0F37E8130C1B8E1D7C8A3928260BFEF71AFD58CF4E671D4DD223E` |
+| 實際偏好切換 | PASS；寫入前無進行中轉檔，原設定已備份；`E:\temp` 原子保存後由新 Store 重開回讀，其他偏好欄位未改變 |

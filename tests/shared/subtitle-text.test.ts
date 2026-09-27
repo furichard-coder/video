@@ -3,9 +3,13 @@ import {
   SUBTITLE_WRAP_MANUAL_MAX,
   SUBTITLE_WRAP_MANUAL_MIN,
   SUBTITLE_WRAP_REFERENCE_WIDTH,
+  defaultSubtitleLineWidth,
   isCjkText,
   overlayAnchorForPosition,
+  nudgeSubtitleCuePosition,
+  resolveSubtitleCuePosition,
   resolveSubtitleWrapLimit,
+  resolveCueSubtitleWrapLimit,
   wrapSubtitleText,
 } from "../../src/shared/subtitle-text";
 
@@ -23,6 +27,16 @@ describe("subtitle text wrapping", () => {
     expect(isCjkText("繁體中文")).toBe(true);
     expect(isCjkText("日本語テスト")).toBe(true);
     expect(isCjkText("pure english text")).toBe(false);
+  });
+
+  it("defaults Chinese-only cues to 12 and English or mixed cues to 20", () => {
+    expect(defaultSubtitleLineWidth("漫步森林神木群")).toBe(12);
+    expect(defaultSubtitleLineWidth("Old Forest Trail")).toBe(20);
+    expect(defaultSubtitleLineWidth("神木 Old Forest")).toBe(20);
+    expect(resolveCueSubtitleWrapLimit(undefined, undefined, "中文預設")).toBe(12);
+    expect(resolveCueSubtitleWrapLimit(undefined, undefined, "English default")).toBe(20);
+    expect(resolveCueSubtitleWrapLimit(9, undefined, "English default")).toBe(9);
+    expect(resolveCueSubtitleWrapLimit(undefined, 18, "中文預設")).toBe(18);
   });
 
   it("derives the automatic limit from frame width and font size", () => {
@@ -53,5 +67,35 @@ describe("subtitle text wrapping", () => {
     expect(resolveSubtitleWrapLimit(12, 3840, 126, true)).toBe(12);
     expect(resolveSubtitleWrapLimit(3, 3840, 126, true)).toBe(SUBTITLE_WRAP_MANUAL_MIN);
     expect(resolveSubtitleWrapLimit(100, 3840, 126, true)).toBe(SUBTITLE_WRAP_MANUAL_MAX);
+    expect(SUBTITLE_WRAP_MANUAL_MAX).toBe(60);
+  });
+
+  it("resolves and nudges cue positions consistently on every output canvas", () => {
+    expect(resolveSubtitleCuePosition(undefined, 82, 1920, 1080)).toMatchObject({
+      xPercent: 50,
+      yPercent: 82,
+      xPx: 960,
+      yPx: 886,
+      anchor: "BOTTOM",
+    });
+    expect(resolveSubtitleCuePosition({ xPercent: 25, yPercent: 70 }, 82, 2560, 1440)).toMatchObject({
+      xPx: 640,
+      yPx: 1008,
+      anchor: "BOTTOM",
+    });
+    expect(resolveSubtitleCuePosition({ xPercent: 25, yPercent: 70 }, 82, 1440, 2560)).toMatchObject({
+      xPx: 360,
+      yPx: 1792,
+      anchor: "BOTTOM",
+    });
+    expect(nudgeSubtitleCuePosition(undefined, 82, "LEFT")).toEqual({ xPercent: 49, yPercent: 82 });
+    expect(nudgeSubtitleCuePosition({ xPercent: 49, yPercent: 82 }, 82, "UP", true)).toEqual({
+      xPercent: 49,
+      yPercent: 77,
+    });
+    expect(nudgeSubtitleCuePosition({ xPercent: 5, yPercent: 95 }, 82, "LEFT", true)).toEqual({
+      xPercent: 5,
+      yPercent: 95,
+    });
   });
 });

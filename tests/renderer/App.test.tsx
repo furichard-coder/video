@@ -39,7 +39,7 @@ const project: ProjectManifest = {
   name: "測試專案",
   sourcePolicy: "READ_ONLY",
   previewPolicy: "DERIVED_CACHE_ONLY_NOT_MASTER",
-  previewerVersion: "preview-v3",
+  previewerVersion: "preview-v5-orientation-planar-safe",
   sortMode: "SMART_SEQUENCE",
   createdAt: "2026-08-01T00:00:00.000Z",
   updatedAt: "2026-08-01T00:00:00.000Z",
@@ -57,6 +57,7 @@ const project: ProjectManifest = {
   recentIntroRemovals: [],
   placementDecisions: [],
   mediaInsertions: [],
+  mainStartCue: { enabled: true, durationMs: 650 },
   photoSoundEffect: {
     id: "DUNES_CAMERA_SHUTTER_CLICK_14671",
     displayName: "沙丘前案相機快門（Camera Shutter Click）",
@@ -158,6 +159,8 @@ function mockApi(initialProject: ProjectManifest = project): AppApi {
         resolution: "480P" as const,
         prependIntro: true,
         autoUpload: true,
+        lowMemorySegmented: true,
+        youtubeFullAutoUpload: false,
         introPreviewIncludeBgm: false,
         mainPreviewIncludeBgm: true,
         mainStartCard: {
@@ -197,6 +200,8 @@ function mockApi(initialProject: ProjectManifest = project): AppApi {
         resolution: update.renderDefaults?.resolution ?? ("480P" as const),
         prependIntro: update.renderDefaults?.prependIntro ?? true,
         autoUpload: update.renderDefaults?.autoUpload ?? true,
+        lowMemorySegmented: update.renderDefaults?.lowMemorySegmented ?? true,
+        youtubeFullAutoUpload: update.renderDefaults?.youtubeFullAutoUpload ?? false,
         introPreviewIncludeBgm: update.renderDefaults?.introPreviewIncludeBgm ?? false,
         mainPreviewIncludeBgm: update.renderDefaults?.mainPreviewIncludeBgm ?? true,
         mainStartCard: update.renderDefaults?.mainStartCard ?? {
@@ -336,6 +341,8 @@ function mockApi(initialProject: ProjectManifest = project): AppApi {
         item.id === assetId ? { ...structuredClone(item), dubWithBgm: enabled } : structuredClone(item),
       ),
     })),
+    setMainAudioGates: vi.fn(async () => structuredClone(initialProject)),
+    setMainStartCue: vi.fn(async () => structuredClone(initialProject)),
     addMediaInsertion: vi.fn(async (anchorVideoAssetId, insertedAssetId, atMs, sourceRange) => ({
       ...structuredClone(initialProject),
       timelineOrder: initialProject.timelineOrder.filter((id) => id !== insertedAssetId),
@@ -367,6 +374,7 @@ function mockApi(initialProject: ProjectManifest = project): AppApi {
       ),
       timelineRevision: initialProject.timelineRevision + 1,
     })),
+    setInsertionAudio: vi.fn(async () => structuredClone(initialProject)),
     removeMediaInsertion: vi.fn(async () => structuredClone(initialProject)),
     moveMediaInsertion: vi.fn(async () => structuredClone(initialProject)),
     setVolumeSegments: vi.fn(async (_assetId, segments) => ({ ...structuredClone(video), volumeSegments: segments })),
@@ -399,6 +407,10 @@ function mockApi(initialProject: ProjectManifest = project): AppApi {
       url: `preview-media://cache/${assetId}/${variant.toLowerCase()}`,
       cacheStatus: "HIT" as const,
     })),
+    ensureIntroThumbnail: vi.fn(async (assetId, inMs, outMs) => ({
+      url: `preview-media://intro-thumbnail/${assetId}/${inMs}-${outMs}`,
+      cacheStatus: "HIT" as const,
+    })),
     ensureClipPreview: vi.fn(async (assetId, inMs, outMs) => ({
       assetId,
       variant: "VIDEO_CLIP_PROXY" as const,
@@ -424,6 +436,49 @@ function mockApi(initialProject: ProjectManifest = project): AppApi {
       estimatedFreeAfterBytes: 20 * 1024 ** 3 - 120 * 1024 ** 2,
       minimumReserveBytes: 1024 ** 3,
       canRender: true,
+      currentAvailableRamBytes: 8 * 1024 ** 3,
+      totalRamBytes: 16 * 1024 ** 3,
+      modeEstimates: {
+        lowMemory: {
+          lowMemorySegmented: true,
+          usesSegmentedPipeline: true,
+          estimatedOutputBytes: 120 * 1024 ** 2,
+          estimatedTemporaryBytes: 360 * 1024 ** 2,
+          estimatedPeakRamBytes: 2 * 1024 ** 3,
+          estimatedRenderTimeMs: 75_000,
+          estimatedFreeAfterBytes: 20 * 1024 ** 3 - 120 * 1024 ** 2,
+          maximumSimultaneousInputs: 6,
+          intermediateJobCount: 2,
+          warningLevel: "NONE" as const,
+          warnings: [],
+          canRender: true,
+        },
+        normal: {
+          lowMemorySegmented: false,
+          usesSegmentedPipeline: false,
+          estimatedOutputBytes: 120 * 1024 ** 2,
+          estimatedTemporaryBytes: 120 * 1024 ** 2,
+          estimatedPeakRamBytes: 5 * 1024 ** 3,
+          estimatedRenderTimeMs: 45_000,
+          estimatedFreeAfterBytes: 20 * 1024 ** 3 - 120 * 1024 ** 2,
+          maximumSimultaneousInputs: 12,
+          intermediateJobCount: 0,
+          warningLevel: "NONE" as const,
+          warnings: [],
+          canRender: true,
+        },
+      },
+      workload: {
+        visualInputCount: 12,
+        insertedInputCount: 2,
+        photoInputCount: 2,
+        videoInputCount: 10,
+        sourceDurationMs: 60_000,
+        weightedSourceFps: 29.97,
+        weightedSourceWidth: 1920,
+        weightedSourceHeight: 1080,
+        transitionSeconds: 0.3,
+      },
     })),
     startConcatRender: vi.fn(async (request) => ({
       jobId: "render-job",
@@ -763,6 +818,20 @@ describe("App source workflow", () => {
     expect(within(card).queryByText(/Preview 僅供檢視/)).not.toBeInTheDocument();
   });
 
+  it("shows compact independent Main audio gates and persists a per-clip BGM change", async () => {
+    const api = mockApi();
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
+    render(<App />);
+    const card = await screen.findByRole("article", { name: `影片 ${video.fileName}，順序 1` });
+    expect(within(card).getByRole("checkbox", { name: "原音 ✓" })).toBeChecked();
+    expect(within(card).getByRole("checkbox", { name: "配音 ✓" })).toBeChecked();
+    const bgm = within(card).getByRole("checkbox", { name: "BGM ✓" });
+    fireEvent.click(bgm);
+    await waitFor(() => expect(api.setMainAudioGates).toHaveBeenCalledWith(video.id, {
+      original: true, voice: true, bgm: false, sfx: true,
+    }));
+  });
+
   it("keeps the trailing time and sequence visible when adjacent grid filenames share a prefix and date", async () => {
     const first = { ...structuredClone(video), fileName: "VID_20260718_104425_001.MOV" };
     const middle = { ...structuredClone(secondVideo), fileName: "VID_20260718_105000_002.MOV" };
@@ -836,6 +905,7 @@ describe("App source workflow", () => {
       "is-configured",
       "insertion-tool-button",
     );
+    expect(card).toHaveTextContent(/素材合計 0:14，含插入 0:05；疊化後 0:13/);
   });
 
   it("long-press drags grid cards, updates sequence numbers live, and persists manual order", async () => {
@@ -911,8 +981,9 @@ describe("App source workflow", () => {
     fireEvent.click(screen.getByRole("button", { name: `預覽 ${photo.fileName}` }));
     const dialog = await screen.findByRole("dialog", { name: `預覽 ${photo.fileName}` });
     const enlarged = await within(dialog).findByRole("img", { name: photo.fileName });
-    expect(enlarged).toHaveStyle({ aspectRatio: "1080 / 1920" });
-    expect(enlarged.parentElement).toHaveClass("preview-image-shell");
+    expect(enlarged).toHaveClass("preview-canvas-foreground");
+    expect(enlarged.parentElement).toHaveStyle({ "--preview-aspect": "16 / 9" });
+    expect(within(dialog).getByText(/輸出畫布 16:9 · 854×480/)).toBeInTheDocument();
   });
 
   it("inserts a project photo at a chosen video time from the grid without duplicating it", async () => {
@@ -1104,10 +1175,11 @@ describe("App source workflow", () => {
     const openRender = await screen.findByRole("button", { name: /產出串連預覽/ });
     await act(async () => fireEvent.click(openRender));
     expect(await screen.findByRole("dialog", { name: "產出串連預覽" })).toBeInTheDocument();
-    expect(await screen.findByLabelText("轉檔前容量與時間預估")).toHaveTextContent("預估檔案大小");
-    expect(screen.getByLabelText("轉檔前容量與時間預估")).toHaveTextContent("目前剩餘");
+    expect(await screen.findByLabelText("轉檔前容量與時間預估")).toHaveTextContent("預估成品");
+    expect(screen.getByLabelText("轉檔前容量與時間預估")).toHaveTextContent("可用");
+    expect(screen.getByLabelText("轉檔前容量與時間預估")).toHaveTextContent("預估 RAM 峰值");
     expect(within(screen.getByLabelText("交接疊化秒數")).getAllByRole("button")).toHaveLength(3);
-    expect(within(screen.getByLabelText("預覽解析度")).getAllByRole("button")).toHaveLength(4);
+    expect(within(screen.getByLabelText("預覽解析度")).getAllByRole("button")).toHaveLength(6);
 
     const confirmButton = screen.getByRole("button", { name: "OK，開始產出" });
     await waitFor(() => expect(confirmButton).toBeEnabled());
@@ -1120,6 +1192,21 @@ describe("App source workflow", () => {
 
     await waitFor(() =>
       expect(api.startConcatRender).toHaveBeenCalledWith({
+        audioProcessing: {
+          bitrateKbps: 384,
+          codec: "AAC",
+          lfeCutoffHz: 100,
+          lfeStrengthPercent: 45,
+          loudnessTargetLufs: -16,
+          mode: "ORIGINAL_STEREO",
+          preset: "NATURAL",
+          sampleRate: 48_000,
+          surroundStrengthPercent: 65,
+          truePeakCeilingDb: -1.5,
+          stereoWidthPercent: 100,
+          eqLowDb: 0,
+          eqPresenceDb: 0,
+        },
         outputToken: "output-token",
         orderedAssetIds: [video.id, secondVideo.id],
         clipSelections: [
@@ -1128,7 +1215,7 @@ describe("App source workflow", () => {
         ],
         transitionSeconds: 0.5,
         resolution: "360P",
-        videoCodec: "H265",
+        videoCodec: "H264_QSV",
         includeWatermark: true,
         audioProtection: DEFAULT_AUDIO_PROTECTION_OPTIONS,
         purpose: "CONCAT",
@@ -1146,6 +1233,12 @@ describe("App source workflow", () => {
         },
         includeBgm: true,
         bgmScopes: { intro: false, main: true },
+        lowMemorySegmented: true,
+        highSpeedMode: false,
+        resourceWarningAcknowledged: false,
+        resourceProfile: "LOW_DISK",
+        maximumRenderRamGiB: 8,
+        maximumRenderTempGiB: 100,
         estimatedDurationMs: 19_500,
       }),
     );
@@ -1612,7 +1705,7 @@ describe("App source workflow", () => {
     Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /產出串連預覽/ }));
-    expect(screen.getByRole("checkbox", { name: /輸出後自動準備 YouTube 上傳/ })).toBeChecked();
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /YouTube 全自動上傳/ })).not.toBeChecked());
     fireEvent.click(screen.getByRole("button", { name: /選擇儲存位置/ }));
     await waitFor(() => expect(screen.getByRole("button", { name: "OK，開始產出" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "OK，開始產出" }));
@@ -1625,10 +1718,14 @@ describe("App source workflow", () => {
 
   it("does not start the upload countdown when the option is unchecked before render", async () => {
     const api = mockApi();
+    const preferences = await api.getUserPreferences();
+    preferences.renderDefaults.youtubeFullAutoUpload = true;
+    vi.mocked(api.getUserPreferences).mockResolvedValue(preferences);
     Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /產出串連預覽/ }));
-    const automatic = screen.getByRole("checkbox", { name: /輸出後自動準備 YouTube 上傳/ });
+    const automatic = await screen.findByRole("checkbox", { name: /YouTube 全自動上傳/ });
+    await waitFor(() => expect(automatic).toBeChecked());
     fireEvent.click(automatic);
     expect(automatic).not.toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: /選擇儲存位置/ }));
@@ -1661,7 +1758,7 @@ describe("App source workflow", () => {
     fireEvent.change(within(prompt).getByLabelText("提示頁背景來源"), { target: { value: intro.id } });
     expect(within(prompt).getByText(/已選片頭第 1 段/)).toBeInTheDocument();
     fireEvent.click(within(prompt).getByRole("button", { name: "儲存提示頁設定" }));
-    const combine = screen.getByRole("checkbox", { name: /自動串接已確認片頭＋正片/ });
+    const combine = screen.getByRole("checkbox", { name: /自動串接已確認片頭加正片/ });
     expect(combine).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: /選擇儲存位置/ }));
     await waitFor(() => expect(screen.getByRole("button", { name: "OK，開始產出" })).toBeEnabled());
@@ -1817,10 +1914,10 @@ describe("App source workflow", () => {
     fireEvent.change(seekHead, { target: { value: "4000" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "目前設為結束" }));
     expect(within(dialog).getByLabelText("排除 1 結束－秒數")).toHaveValue(4);
-    const player = dialog.querySelector("video")!;
+    const player = within(dialog).getByLabelText(`放大播放 ${video.fileName}`);
     expect(player).not.toHaveAttribute("controls");
-    expect(player).toHaveStyle({ aspectRatio: "1920 / 1080" });
-    expect(player.parentElement).toHaveClass("preview-video-shell");
+    expect(player).toHaveClass("preview-canvas-foreground");
+    expect(player.closest(".preview-output-canvas")).toHaveStyle({ "--preview-aspect": "16 / 9" });
     fireEvent.play(player);
     expect(within(dialog).getByRole("button", { name: "暫停放大預覽" })).toBeInTheDocument();
     fireEvent.pause(player);
@@ -1870,7 +1967,9 @@ describe("App source workflow", () => {
     const dialog = await screen.findByRole("dialog", { name: `預覽 ${portrait.fileName}` });
     const player = await within(dialog).findByLabelText(`放大播放 ${portrait.fileName}`);
     expect(player).not.toHaveAttribute("controls");
-    expect(player).toHaveStyle({ aspectRatio: "1080 / 1920" });
+    expect(player).toHaveClass("preview-canvas-foreground");
+    expect(player.closest(".preview-output-canvas")).toHaveStyle({ "--preview-aspect": "16 / 9" });
+    expect(player.parentElement?.querySelector(".preview-canvas-background")).not.toBeNull();
     expect(within(dialog).getByLabelText("放大預覽播放頭")).toBeInTheDocument();
   });
 
@@ -1939,10 +2038,80 @@ describe("App source workflow", () => {
     await waitFor(() => expect(api.setIntroTargetDuration).toHaveBeenCalledWith(90_000));
     expect(api.analyzeIntro).toHaveBeenCalledWith([video.id, secondVideo.id], 90_000, 15_000);
     expect(await within(studio).findByText(/精彩分數 82/)).toBeInTheDocument();
+    fireEvent.click(within(studio).getByRole("button", { name: "調整片頭第 1 段裁切與長度" }));
+    expect(within(studio).getByRole("group", { name: "片頭 Audio" })).toHaveClass("is-compact");
     expect(within(studio).getByLabelText("片段起點")).toHaveValue("1000");
     fireEvent.click(within(studio).getByRole("button", { name: "產出 Intro 預覽" }));
     const outputDialog = await screen.findByRole("dialog", { name: "產出 Intro 預覽" });
-    expect(within(within(outputDialog).getByLabelText("預覽解析度")).getAllByRole("button")).toHaveLength(4);
+    expect(within(within(outputDialog).getByLabelText("預覽解析度")).getAllByRole("button")).toHaveLength(6);
+  });
+
+  it("shows first-frame Intro thumbnails with compact icon actions and accessible tooltips", async () => {
+    const first = {
+      id: "intro-thumbnail-video",
+      assetId: video.id,
+      fileName: video.fileName,
+      inMs: 1_000,
+      outMs: 4_000,
+      score: 88,
+      reasons: ["人物事件"],
+    };
+    const second = {
+      id: "intro-thumbnail-photo",
+      assetId: photo.id,
+      fileName: photo.fileName,
+      inMs: 0,
+      outMs: 5_000,
+      score: 72,
+      reasons: ["地點畫面"],
+    };
+    const introProject = {
+      ...structuredClone(project),
+      sources: [video, photo],
+      timelineOrder: [video.id, photo.id],
+      introSegments: [first, second],
+    };
+    const api = mockApi(introProject);
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /AI 精彩片頭/ }));
+    const studio = await screen.findByRole("dialog", { name: "AI 精彩片頭建議" });
+    const videoThumbnail = await within(studio).findByRole("img", {
+      name: `片頭第 1 段 ${video.fileName} 第一幀縮圖`,
+    });
+    const photoThumbnail = await within(studio).findByRole("img", {
+      name: `片頭第 2 段 ${photo.fileName} 第一幀縮圖`,
+    });
+
+    expect(api.ensureIntroThumbnail).toHaveBeenCalledWith(video.id, 1_000, 4_000);
+    expect(api.ensureIntroThumbnail).toHaveBeenCalledWith(photo.id, 0, 5_000);
+    expect(videoThumbnail).toHaveAttribute(
+      "src",
+      `preview-media://intro-thumbnail/${video.id}/1000-4000`,
+    );
+    expect(photoThumbnail).toHaveAttribute(
+      "src",
+      `preview-media://intro-thumbnail/${photo.id}/0-5000`,
+    );
+
+    const trim = within(studio).getByRole("button", { name: "調整片頭第 2 段裁切與長度" });
+    expect(trim).toHaveClass("intro-icon-action");
+    expect(trim).toHaveAttribute("data-tooltip", "裁切與長度｜調整片段起訖與顯示秒數");
+    fireEvent.click(trim);
+    expect(await within(studio).findByLabelText(`${photo.fileName}片段秒數`)).toBeInTheDocument();
+
+    fireEvent.click(within(studio).getByRole("button", { name: "片頭第 2 段更多設定" }));
+    const moveForward = within(studio).getByRole("menuitem", { name: "↑ 往前一個順位" });
+    moveForward.focus();
+    expect(moveForward).toHaveFocus();
+
+    const remove = within(studio).getByRole("button", {
+      name: /從片頭移除 直式照片\.HEIC.*不刪除來源檔/,
+    });
+    expect(remove).toHaveAttribute("data-tooltip", "刪除片段｜只從片頭移除，不刪除來源檔");
+    expect(remove).toHaveTextContent("⌫");
+    expect(remove).not.toHaveTextContent("從片頭移除");
   });
 
   it("saves one maximum for every Intro segment and offers equalized adjustment", async () => {
@@ -2088,7 +2257,8 @@ describe("App source workflow", () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /AI 精彩片頭/ }));
     const studio = await screen.findByRole("dialog", { name: "AI 精彩片頭建議" });
-    fireEvent.click(within(studio).getAllByRole("button", { name: "↓ 往後" })[0]);
+    fireEvent.click(within(studio).getByRole("button", { name: "片頭第 1 段更多設定" }));
+    fireEvent.click(within(studio).getByRole("menuitem", { name: "↓ 往後一個順位" }));
     await waitFor(() =>
       expect(api.setIntroSegments).toHaveBeenCalledWith([
         expect.objectContaining({ id: second.id }),
@@ -2135,6 +2305,20 @@ describe("App source workflow", () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /AI 精彩片頭/ }));
     const studio = await screen.findByRole("dialog", { name: "AI 精彩片頭建議" });
+    const firstThumbnailBeforeDrag = await within(studio).findByRole("img", {
+      name: `片頭第 1 段 ${first.fileName} 第一幀縮圖`,
+    });
+    const secondThumbnailBeforeDrag = await within(studio).findByRole("img", {
+      name: `片頭第 2 段 ${second.fileName} 第一幀縮圖`,
+    });
+    expect(firstThumbnailBeforeDrag).toHaveAttribute(
+      "src",
+      `preview-media://intro-thumbnail/${first.assetId}/${first.inMs}-${first.outMs}`,
+    );
+    expect(secondThumbnailBeforeDrag).toHaveAttribute(
+      "src",
+      `preview-media://intro-thumbnail/${second.assetId}/${second.inMs}-${second.outMs}`,
+    );
     const dragButtons = within(studio).getAllByRole("button", { name: /選擇並拖曳片頭第/ });
     const targetCard = dragButtons[1].closest("li")!;
     const dataTransfer = {
@@ -2151,6 +2335,20 @@ describe("App source workflow", () => {
         expect.objectContaining({ id: second.id }),
         expect.objectContaining({ id: first.id }),
       ]),
+    );
+    const secondThumbnailAfterDrag = await within(studio).findByRole("img", {
+      name: `片頭第 1 段 ${second.fileName} 第一幀縮圖`,
+    });
+    const firstThumbnailAfterDrag = await within(studio).findByRole("img", {
+      name: `片頭第 2 段 ${first.fileName} 第一幀縮圖`,
+    });
+    expect(secondThumbnailAfterDrag).toHaveAttribute(
+      "src",
+      `preview-media://intro-thumbnail/${second.assetId}/${second.inMs}-${second.outMs}`,
+    );
+    expect(firstThumbnailAfterDrag).toHaveAttribute(
+      "src",
+      `preview-media://intro-thumbnail/${first.assetId}/${first.inMs}-${first.outMs}`,
     );
     expect(await within(studio).findByText(/已用滑鼠調整片頭順序/)).toBeInTheDocument();
   });
@@ -2651,7 +2849,7 @@ describe("App source workflow", () => {
       ),
     );
     fireEvent.change(within(dialog).getByLabelText("OpenAI API Key"), {
-      target: { value: "sk-ui-123456789012345678901234567890" },
+      target: { value: "fixture-ui-1234567890123456789012345" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "儲存並使用" }));
     await waitFor(() =>
@@ -2660,18 +2858,18 @@ describe("App source workflow", () => {
           id: "openai-default",
           provider: "OPENAI",
           makeActive: true,
-          apiKey: "sk-ui-123456789012345678901234567890",
+          apiKey: "fixture-ui-1234567890123456789012345",
         }),
       ),
     );
     expect(within(dialog).getByText(/ChatGPT／Codex 登入與 API 額度是分開的/)).toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText("Google Cloud Translation API Key"), {
-      target: { value: "AIza-ui-123456789012345678901234" },
+      target: { value: "test-key-ui-12345678901234567890" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "保存 Google 後援" }));
     await waitFor(() =>
       expect(api.updateTranslationSettings).toHaveBeenCalledWith({
-        googleCloudApiKey: "AIza-ui-123456789012345678901234",
+        googleCloudApiKey: "test-key-ui-12345678901234567890",
       }),
     );
   });
@@ -3110,6 +3308,118 @@ describe("App source workflow", () => {
     );
   });
 
+  it("edits one subtitle line width with a numeric keyboard control and saves it immediately", async () => {
+    const cueProject = {
+      ...structuredClone(project),
+      subtitleCues: [
+        {
+          id: "line-width-cue",
+          startMs: 0,
+          endMs: 1_500,
+          text: "森林步道字幕",
+          timelineScope: "MAIN" as const,
+          origin: "MANUAL" as const,
+          reviewStatus: "CONFIRMED" as const,
+        },
+      ],
+      subtitleTimelineRevision: project.timelineRevision,
+      mainSubtitleReviewRevision: project.mainTimelineRevision,
+    };
+    const api = mockApi(cueProject);
+    vi.mocked(api.setSubtitleCues).mockImplementation(async (next) => ({
+      ...structuredClone(cueProject),
+      subtitleCues: next,
+    }));
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /CC 字幕/ }));
+    const studio = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
+    expect(within(studio).getByText(/每行 12 字（自動）/)).toBeInTheDocument();
+    fireEvent.click(within(studio).getByRole("button", { name: "調整第 1 筆字幕每行字數" }));
+    const lineDialog = screen.getByRole("dialog", { name: "調整單筆字幕行寬" });
+    const input = within(lineDialog).getByLabelText("單筆字幕每行字數");
+    expect(input).toHaveAttribute("type", "number");
+    expect(input).toHaveAttribute("step", "1");
+    expect(input).toHaveAttribute("max", "60");
+    expect(input).toHaveValue(12);
+    fireEvent.change(input, { target: { value: "60" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(api.setSubtitleCues).toHaveBeenCalledWith([
+        expect.objectContaining({ id: "line-width-cue", lineWidthChars: 60 }),
+      ]),
+    );
+    expect(await within(studio).findByText(/每行 60 字（單筆）/)).toBeInTheDocument();
+  });
+
+  it("nudges one subtitle position with arrow keys without hijacking text editing", async () => {
+    const cueProject = {
+      ...structuredClone(project),
+      subtitleCues: [
+        {
+          id: "position-cue",
+          startMs: 0,
+          endMs: 1_500,
+          text: "可移動字幕",
+          timelineScope: "MAIN" as const,
+          origin: "MANUAL" as const,
+          reviewStatus: "CONFIRMED" as const,
+        },
+      ],
+      subtitleTimelineRevision: project.timelineRevision,
+      mainSubtitleReviewRevision: project.mainTimelineRevision,
+    };
+    const api = mockApi(cueProject);
+    vi.mocked(api.setSubtitleCues).mockImplementation(async (next) => ({
+      ...structuredClone(cueProject),
+      subtitleCues: next,
+    }));
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /CC 字幕/ }));
+    const studio = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
+    fireEvent.click(within(studio).getByRole("button", { name: "調整第 1 筆字幕畫面位置" }));
+    const positionDialog = screen.getByRole("dialog", { name: "調整單筆字幕畫面位置" });
+    expect(within(positionDialog).getByText(/X 50%.*Y 82%/)).toBeInTheDocument();
+    fireEvent.keyDown(positionDialog, { key: "ArrowRight" });
+    await waitFor(() =>
+      expect(api.setSubtitleCues).toHaveBeenLastCalledWith([
+        expect.objectContaining({ id: "position-cue", position: { xPercent: 51, yPercent: 82 } }),
+      ]),
+    );
+    await waitFor(() => expect(within(positionDialog).getByText(/X 51%.*Y 82%/)).toBeInTheDocument());
+    fireEvent.keyDown(positionDialog, { key: "ArrowUp", shiftKey: true });
+    await waitFor(() =>
+      expect(api.setSubtitleCues).toHaveBeenLastCalledWith([
+        expect.objectContaining({ id: "position-cue", position: { xPercent: 51, yPercent: 77 } }),
+      ]),
+    );
+    const callsAfterNudge = vi.mocked(api.setSubtitleCues).mock.calls.length;
+    const textEditor = within(studio).getByLabelText("直接編輯第 1 筆字幕");
+    fireEvent.keyDown(textEditor, { key: "ArrowLeft" });
+    expect(api.setSubtitleCues).toHaveBeenCalledTimes(callsAfterNudge);
+    fireEvent.click(within(positionDialog).getByRole("button", { name: "恢復中央／全域高低位置" }));
+    await waitFor(() =>
+      expect(api.setSubtitleCues).toHaveBeenLastCalledWith([
+        expect.objectContaining({ id: "position-cue", position: undefined }),
+      ]),
+    );
+  });
+
+  it("shows the default-on silent-range BGM switch for videos in the grid and expanded preview", async () => {
+    const api = mockApi();
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
+    render(<App />);
+    const gridToggle = await screen.findByRole("checkbox", { name: /偵測無聲時自動配樂/ });
+    expect(gridToggle).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "刪除／排除部分片段" }));
+    const previewDialog = await screen.findByRole("dialog", { name: `預覽 ${video.fileName}` });
+    const previewToggle = within(previewDialog).getByRole("checkbox", { name: /偵測無聲時自動配樂/ });
+    expect(previewToggle).toBeChecked();
+    fireEvent.click(previewToggle);
+    await waitFor(() => expect(api.setDubWithBgm).toHaveBeenCalledWith(video.id, false));
+  });
+
   it("makes an exhausted API project unmistakable and explains why local Intro selection could still work", async () => {
     const segment = {
       id: "local-only-intro",
@@ -3321,7 +3631,7 @@ describe("App source workflow", () => {
     expect(studio.querySelector(".is-duration-warning")).not.toBeNull();
   });
 
-  it("keeps an over-limit Intro review range, warns in orange, and confirms a capped output", async () => {
+  it("keeps an over-limit Intro range, warns in orange, and sends the full range to output", async () => {
     const longVideo = { ...structuredClone(video), mediaInfo: { ...video.mediaInfo!, durationMs: 40_000 } };
     const segment = {
       id: "over-limit-review",
@@ -3342,20 +3652,12 @@ describe("App source workflow", () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /AI 精彩片頭/ }));
     const studio = await screen.findByRole("dialog", { name: "AI 精彩片頭建議" });
-    expect(within(studio).getByText(/目前檢看片段為 0:18/)).toBeInTheDocument();
+    expect(within(studio).getByText(/目前為 0:18，超出建議範圍/)).toBeInTheDocument();
     expect(studio.querySelector(".is-over-duration-limit")).not.toBeNull();
     fireEvent.click(within(studio).getByRole("button", { name: "產出 Intro 預覽" }));
-    const warning = await screen.findByRole("alertdialog", { name: "有片段超過每段輸出上限" });
-    expect(
-      within(warning).getByText(
-        (_text, element) => element?.tagName === "P" && Boolean(element.textContent?.includes("保留所選 IN 起點")),
-      ),
-    ).toBeInTheDocument();
-    expect(within(warning).getByRole("button", { name: "返回調整" })).toHaveFocus();
-    fireEvent.click(within(warning).getByRole("button", { name: /是，以 0:12 上限產出/ }));
     const output = await screen.findByRole("dialog", { name: "產出 Intro 預覽" });
-    expect(within(output).getByText(/有 1 段檢看片段超時/)).toBeInTheDocument();
-    expect(within(output).getByText("0:02 → 0:14")).toBeInTheDocument();
+    expect(within(output).getByText(/有 1 段超過建議的 0:12/)).toBeInTheDocument();
+    expect(within(output).getByText("0:02 → 0:20")).toBeInTheDocument();
   });
 
   it("inserts a zoom range without changing existing Intro ranges or target duration, and opens 4K output", async () => {

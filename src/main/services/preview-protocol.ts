@@ -8,6 +8,7 @@ import { ProjectStore } from "./project-store";
 import path from "node:path";
 import type { SubtitlePreviewService } from "./subtitle-preview";
 import type { OutputHistoryStore } from "./output-history";
+import type { AudioPreviewService } from "./audio-preview";
 
 const VARIANTS: Record<string, PreviewVariant> = {
   thumbnail: "THUMBNAIL",
@@ -59,16 +60,41 @@ function sourceMimeType(filePath: string): string {
   }
 }
 
+function audioMimeType(filePath: string): string {
+  switch (path.extname(filePath).toLowerCase()) {
+    case ".mp3": return "audio/mpeg";
+    case ".m4a":
+    case ".aac": return "audio/mp4";
+    case ".wav": return "audio/wav";
+    case ".flac": return "audio/flac";
+    default: return "application/octet-stream";
+  }
+}
+
 export function registerPreviewProtocol(
   cache: PreviewCache,
   store: ProjectStore,
   photoSoundPath?: string,
   subtitlePreviews?: SubtitlePreviewService,
   outputHistory?: OutputHistoryStore,
+  audioPreviews?: AudioPreviewService,
 ): void {
   protocol.handle("preview-media", async (request) => {
     try {
       const url = new URL(request.url);
+      if (url.hostname === "audio-preview" && audioPreviews) {
+        const cacheKey = url.pathname.split("/").filter(Boolean)[0] ?? "";
+        const filePath = await audioPreviews.resolveExisting(cacheKey);
+        const fileStat = await stat(filePath);
+        const range = parseRange(request.headers.get("range"), fileStat.size);
+        const headers = { "Accept-Ranges": "bytes", "Content-Type": "audio/mp4", "Cache-Control": "private, no-store" };
+        if (range)
+          return new Response(streamBody(filePath, range.start, range.end), {
+            status: 206,
+            headers: { ...headers, "Content-Range": `bytes ${range.start}-${range.end}/${fileStat.size}`, "Content-Length": String(range.end - range.start + 1) },
+          });
+        return new Response(streamBody(filePath), { headers: { ...headers, "Content-Length": String(fileStat.size) } });
+      }
       if (url.hostname === "output" && outputHistory) {
         const jobId = decodeURIComponent(url.pathname.split("/").filter(Boolean)[0] ?? "");
         const output = await outputHistory.get(jobId);
@@ -109,6 +135,20 @@ export function registerPreviewProtocol(
           },
         });
       }
+      if (url.hostname === "intro-thumbnail") {
+        const parts = url.pathname.split("/").filter(Boolean);
+        const assetId = parts[0] ?? "";
+        const thumbnailKey = parts[1] ?? "";
+        const filePath = await cache.resolveIntroThumbnailExisting(assetId, thumbnailKey);
+        const fileStat = await stat(filePath);
+        return new Response(streamBody(filePath), {
+          headers: {
+            "Content-Length": String(fileStat.size),
+            "Content-Type": "image/jpeg",
+            "Cache-Control": "private, max-age=31536000, immutable",
+          },
+        });
+      }
       if (url.hostname === "asset" && url.pathname === "/dunes-shutter.mp3" && photoSoundPath) {
         const fileStat = await stat(photoSoundPath);
         const range = parseRange(request.headers.get("range"), fileStat.size);
@@ -130,6 +170,32 @@ export function registerPreviewProtocol(
             "Content-Type": "audio/mpeg",
             "Cache-Control": "private, max-age=31536000, immutable",
           },
+        });
+      }
+      if (url.hostname === "bgm") {
+        const trackId = decodeURIComponent(url.pathname.split("/").filter(Boolean)[0] ?? "");
+        const track = store.getProject().bgmTracks.find((item) => item.id === trackId);
+        if (!track?.sourcePath || track.resolutionStatus === "NEEDS_LOCAL_FILE")
+          return new Response("Not found", { status: 404 });
+        const fileStat = await stat(track.sourcePath);
+        if (!fileStat.isFile() || fileStat.size <= 0) return new Response("Not found", { status: 404 });
+        const range = parseRange(request.headers.get("range"), fileStat.size);
+        const headers = {
+          "Accept-Ranges": "bytes",
+          "Content-Type": audioMimeType(track.sourcePath),
+          "Cache-Control": "private, no-store",
+        };
+        if (range)
+          return new Response(streamBody(track.sourcePath, range.start, range.end), {
+            status: 206,
+            headers: {
+              ...headers,
+              "Content-Range": `bytes ${range.start}-${range.end}/${fileStat.size}`,
+              "Content-Length": String(range.end - range.start + 1),
+            },
+          });
+        return new Response(streamBody(track.sourcePath), {
+          headers: { ...headers, "Content-Length": String(fileStat.size) },
         });
       }
       if (url.hostname === "subtitle" && subtitlePreviews) {

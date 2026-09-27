@@ -1,5 +1,129 @@
 # Phase 0｜架構、範圍與驗收
 
+## v0.76 render scheduler／disk reliability boundary
+
+`Preflight workload → per-volume peak estimate → selected Render TEMP → segment wave → checkpoint → final picture/audio mux` 是轉檔容量與續轉的唯一資料流。估算不得只看成品；必須包含 remaining intermediates、parallel partials、audio TEMP、final output、mux overhead、reusable base master 與 `max(20 GiB, remaining × 20%)` reserve。TEMP 與 output 不同卷時各自判斷 free/peak/required；Runtime 每 30 秒寫 disk snapshot，CRITICAL／EMERGENCY 只停止排新 wave，在目前工作安全完成後保存 `PAUSED_DISK_SPACE`。
+
+Resume offer 只計算實體存在且 size 相符的 completed segment；真正重用前再執行 ffprobe、duration 與 SHA-256。Segment 使用 MKV；final output 仍採 unique partial 與 atomic replace。跨 batch xfade／ASS subtitle／watermark 仍在 picture pass，因此不得把 final picture pipeline 偽裝成 universal `-c copy`；audio-only post pass 仍 stream-copy video。
+
+Normal／High Speed 從一個 job 開始，只有完成 wave 後的 aggregate throughput 提升且 CPU/GPU/RAM/Commit/SSD 安全才向上探測。相容來源可用 QSV decode，接 CPU-only filter 前只做一次 `hwdownload`；任何 hardware decode error 都回退 CPU。此機 Intel `scale_qsv` 與 NVIDIA NVENC runtime probe 未通過，所以 v0.76 不建立不可靠的 zero-copy 或 NVENC 路徑。
+
+## v0.75 canonical four-track gate boundary
+
+`ProjectManifest/SourceAsset → buildInsertionAudioPlan → Preview / Review / Post Audio` 是原音、配音、BGM、SFX gate 的唯一資料流。UI 可分片頭／正片，但不得建立第二套 audio engine。Main ordinary clip 使用 source stable ID，Main insertion／Intro 使用 occurrence ID；Main-start cue 是 global MAIN SFX event，和 clip SFX gate 分離。
+
+可復用 master 保存 timeline-correct picture/source audio，audio-only post pass 依 canonical timeline 套 source/BGM 25 ms envelope、BGM/SFX placement、synthetic cue、Final DSP，再 `-c:v copy`。同曲 BGM range 跨 gate-off clip 保持 playhead，只將 gate-off 範圍靜音。Voice gate 在沒有獨立 narration track 時不改來源人聲。`pictureBaseSignature` 排除 gates/cue/global BGM，`finalAudioSignature` 收錄全部 canonical plan 與 post tracks，故 Resume 精確重跑音訊而不重編影片。
+
+## v0.74 canonical insertion audio boundary
+
+`Project occurrence settings → buildInsertionAudioPlan → Preview / Final Review / FFmpeg` 是唯一插入音訊資料流。Main `MediaInsertion` 與 Intro `IntroSuggestion` 保存相同的 instance-level `InsertionAudioSettings`；Renderer 不再從 asset-level `photoSoundEnabled` 猜測安插實例。舊的 `dubWithBgm` 只服務非安插靜音主素材。
+
+Final 分為 `picture/base-audio master (MKV + FLAC, no insertion audio) → canonical insertion BGM/SFX amix → Original/Enhanced/Virtual DSP → MP4 mux (-c:v copy)`。BGM range 以 occurrence adjacency、scope 與 stable track ID 分組，不隨素材邊界重啟；Loop graph 有 32-repeat 上限。`pictureBaseSignature` 與 `finalAudioSignature` 分離，因此 audio-only 變更與 post failure/resume 不會重編 video。Preview 複用現有 proxy video 與協定白名單內的 BGM／shutter URL，不開放任意路徑。
+
+## v0.73 QSV chroma safety 与 post-success power boundary
+
+Leaf render 方向链路为：`metadata resolver → -noautorotate → safe decoder selection → one orientation filter → canonical planar yuv420p → split/scale/crop/boxblur/overlay → encoder`。在Intel HD 530环境中，rotated 4K QSV surface进入blurred-fill分支可能无FFmpeg错误却产生UV污染，因此只有「需旋转＋需模糊填边」输入回退CPU decode；QSV encode以及其他输入硬解不变。
+
+`PostSuccessPowerScheduler` 位于Main process，Renderer只读状态、保存固定枚举偏好及发送Cancel。IPC在真实render／upload terminal result后才通知scheduler；scheduler与render/upload共用`RenderPowerGuard`的busy事实来源。60秒倒数结束前再次检查busy，新工作会取消旧倒数。实际执行器只有固定Windows executable/args且`spawn(...,{shell:false})`，测试全部依赖注入，不执行真实电源动作。
+
+## v0.72 canonical orientation boundary
+
+`MediaProbe → resolveMediaOrientation → input -noautorotate → decode → optional hwdownload → one orientation filter → existing canvas layout → normalized intermediate (rotation=0) → final` 是唯一方向鏈路。Renderer 只使用 `displayWidth/displayHeight/isPortrait` 顯示 canvas；它不自行猜測 transpose。Preview Cache 與 Concat Render 都使用相同 `media-orientation.ts`。方向 normalizer version 同時隔離 preview cache 與 render checkpoint，避免 metadata 已被物理套用後再於後級重複旋轉。
+
+## v0.71.0 字幕 cue canvas position 增量
+
+Manifest schema 19 在 `SubtitleCue` 增加可選的 `{xPercent,yPercent}`。省略欄位是嚴格相容路徑：X 仍為中央 50%，Y 繼續取 `SubtitleStyleProfile.verticalPositionPercent`。Main 在寫入時驗證 5–95 的整數百分比；舊 schema 18 讀取後只遷移有效值。
+
+`shared/subtitle-text.ts` 的 `resolveSubtitleCuePosition` 是 Preview／Final 的唯一座標換算來源，同時產出百分比、目標 frame 像素與 ASS anchor。Renderer 不自行計算另一個座標；ASS 僅對字幕頁所代表的 primary track 套用 cue 覆寫，第二翻譯軌維持既有獨立 track position，避免兩軌意外重疊。SRT 不含畫布座標。
+
+## v0.70.0 LAN adapter 與 Audio preview 增量
+
+`RenderCommandState` 位于 Main process，是 Electron IPC、background progress 与 LAN adapter 的共同 authority。`RemoteControlServer` 只负责 HTTP authentication/serialization，不持有 FFmpeg handle。Desktop 完整 request 经 output-token validation 后可成为 prepared job；remote Start 再进入同一 preflight/power-guard/checkpoint/output-history flow。人工 Pause 复用 staged scheduler 边界：当前 wave 完成后停止发新工作，Resume 才释放 waiter。
+
+LAN server 使用单一私人 IPv4、ephemeral port、REST + SSE；安全边界包括 fragment pairing、HttpOnly Strict cookie、CSRF、origin/host/remote-address allowlist、rate/body limits、cancel nonce 与 stop-time session teardown。Snapshot 不含 sourcePath/outputPath。
+
+Audio preview 的 video transport 仍是既有 `preview-media://` H.264 proxy；audio transport 是独立 M4A cache。Renderer 以 video currentTime 为 master，A/B audio 只在偏差超过 120 ms 时 seek。参数改变会取消旧 FFmpeg preview，并以 sequence 拒绝过期 response。正式音讯与 preview cache 没有输入依赖关系。
+
+## v0.69.0 Audio Processing 增量
+
+`AudioProcessingOptions` 只保存於 App user preferences／每次 render request，不改變 Project manifest schema。FFprobe 為新掃描或重新確認的影片補上 audio channels/layout/sample-rate/bitrate。畫面 timeline render 與空間音訊後處理分離；Enhanced／Virtual 的 post-audio pass 只 Decode 音訊並 `-c:v copy`。A/B preview 使用獨立 cache key（來源 path/size/mtime、範圍、完整 audio profile、preview version），實際 meter 結果隨 cache 保存。
+
+## v0.68.0 增量範圍（2026-09-14）
+
+- Main 的 `RenderElapsedTracker` 是實際耗時唯一來源；第一個 FFmpeg process-start callback 起算，跨 staged waves、memory gate 與 finalization 連續使用 monotonic clock。
+- Renderer 收到 Main snapshot 後以本地 monotonic receipt time 每秒內插畫面，不每秒 IPC 或寫檔；`timingCapturedAt` 僅供稽核。Main 以五分鐘 heartbeat 更新 checkpoint 與 append-only timing history。
+- checkpoint schema 2 將 finalized `cumulativeElapsedMs`、`lastAttemptElapsedMs` 與 active attempt 分開。active attempt 保存 `attemptId`、`startedAt`、`lastHeartbeatAt`、`persistedElapsedMs`。
+- Resume 先將 crash attempt 以最後 heartbeat 的 monotonic 值封存，再啟動新 attempt。wall timestamp 只用於保守核對，最多補五秒漂移且永不跨越最後 heartbeat 計入 downtime。
+- 既有 completion／user-cancel checkpoint cleanup 不變；terminal timing 使用獨立 `<renderId>.timing.ndjson`，不在 discard 範圍內。失敗 checkpoint 同時保留 timing schema 供續轉。
+- progress、background-job snapshot、result 與 output history 只新增 optional timing 欄位，不變更時間線、畫面、聲音、codec、輸出路徑或 v0.67 成品。
+
+## v0.67.0 增量範圍（2026-09-13）
+
+Main process 新增 `RenderHardwareService`，負責 FFmpeg／GPU inventory、低負載 runtime probe、fingerprint cache 與 render 前 encoder gate。Renderer 只能顯示 Main 回傳的實測能力，不能從選項名稱假設硬體可用。`ConcatRenderService` 保留 CPU filter graph，僅在分段高速路徑對相容 H.264／HEVC 使用 QSV/CUDA decode，隨即 `hwdownload` 供 xfade／ASS／drawtext／overlay 等 CPU filters 使用，避免為全 GPU 化額外往返搬幀。
+
+資源監控新增 GPU Compute、VRAM 與磁碟容量。排程仍以 wave 為安全邊界，逐波升降且不中止在途工作。完整決策見 `docs/adr/0060-runtime-probed-render-pipeline.md`。
+
+## v0.66.0 增量範圍（2026-09-13）
+
+- `concat-render.ts` 明確記錄 encoder/decoder；高速模式只對 H.264／HEVC 嘗試 QSV decode，並以 `hwdownload,format=nv12` 回到既有 CPU filter contract，硬體錯誤以相同 stage 自動 CPU retry。
+- reduction level 接受經 leaf stage 驗證的 normalized H.264 intermediate，不重複 `fps/scale/pad`、色彩／縮放或 audio resample。輸出解析度仍在 leaf stage 提前固定；final graph 負責必要 transition、字幕、浮水印、BGM、limiter 與成品 encode。
+- `adaptive-render.ts` 僅在 wave 邊界調整 scheduler：Available RAM/Commit/SSD 接近門檻時 WAIT，不中止在途 FFmpeg；嚴重壓力或 compute saturation 降低下一波；實際 throughput ≥3% 且有 headroom 才增加。
+- `system-resource.ts` 分開讀取 Windows VideoEncode／VideoDecode engine，並保存 CPU、RAM、FFmpeg private/working set、disk read/write 與工作檔用量。Renderer 僅顯示 Main 產生的快照。
+- 高速模式是 opt-in 且優先 QSV encode，maximum 4、initial ≤2；較高 RAM target 仍受 24 GiB 至少 6 GiB、32+ GiB 至少 8 GiB 系統保留與 commit gate 限制。
+
+完整決策見 `docs/adr/0059-bottleneck-aware-high-speed-render.md`。
+
+## v0.65.0 增量範圍（2026-09-13）
+
+- Main process 資源快照新增 CPU、GPU、SSD read/write throughput 與多個 FFmpeg process 聚合記憶體，不接受 Renderer 提供 process ID。
+- Normal Mode 的 RAM budget 依 Total/Available RAM 與目前 CPU/GPU 建立安全階段；24 GiB 至少保留 6 GiB，32 GiB 以上至少保留 8 GiB。
+- 中繼轉檔每個 process 最多 10 個輸入，透過 wave scheduler 將 RAM 用在獨立中繼 job。每批結束後比較實際 throughput，再升／降下一批 concurrency；Low Memory 維持單工作。
+- 每段成功仍先完成 atomic output、size/duration/codec/SHA-256 checkpoint；多工作 checkpoint 寫入改為 project 級序列化，final output 邏輯不變。
+
+完整決策見 docs/adr/0058-adaptive-normal-render-concurrency.md。
+
+## v0.64.0 增量範圍（2026-09-13）
+
+- `system-resource.ts` 由 Main process 讀取 RAM、Pagefile、Commit、TEMP／output disk 與 FFmpeg process memory；Renderer 只顯示經驗證快照，不能提供 process/path。
+- Normal 與 Low Memory 共用 `buildResumableIntermediates`。差異是動態 stage input limit／threads，不是不同時間軸；兩者最大分別 16 與 6，並保留 Windows 安全 RAM reserve。
+- `render-checkpoint.ts` 將狀態保存於 App Data project render-state root，中繼檔位於輸出旁的 unique resume root。只有驗證過的 segment 可重用；成功或人工取消清理，失敗／App close 保留。
+- `render-profile.ts` 集中 resolution dimensions。FFmpeg source filter、subtitle ASS、Preview Canvas、output-history probe 與 estimator 皆依 profile；1080P／1440P 支援 16:9／9:16。
+- UI tokens 統一 Primary、Secondary、Tertiary／Ghost、Destructive，以及 Default／Hover／Pressed／Disabled／Loading／Selected／Focus；色彩不改流程語義。
+
+完整決策見 `docs/adr/0057-commit-safe-resumable-render-profile.md`。
+
+## v0.63.0 增量範圍（2026-09-12）
+
+- `ConcatRenderEstimateRequest` 帶 exact ordered asset IDs／clip selections／transition 與 generated-input count；Main 只用 asset ID 查 canonical project metadata，不接受 Renderer 指定來源路徑。
+- `render-estimate.ts` 先建立共享 workload，再由同一次 `statfs`、`os.freemem()`、`os.totalmem()` 快照產生 LOW_MEMORY 與 NORMAL 兩份估算。UI 只選 strategy，不另建第二套時間軸或輸出 request。
+- NORMAL 與現行單次 `buildConcatFilterGraph` 一致，所有 visual inputs 同時存在；LOW_MEMORY 沿用 `groupLowMemoryInputs`、每層 H.264 normalized intermediate、驗證後移除 consumed files，final stage 才套字幕、BGM、浮水印與指定 codec。
+- SSD 模型模擬每層 duration、bitrate 與 live intermediate bytes，包含 partial output；RAM 模型依來源 pixel count、FPS、codec decode factor、frame queues、輸出 frame/filter buffers 與 concurrent input count。時間模型使用既有 resolution/codec realtime factor，再加入來源 workload、graph／insertion cost 與逐層中繼工作。
+- `canRender` 只代表峰值 SSD 工作空間能否保留 1 GiB；RAM／接近容量的 WARNING 或 DANGER 只提示，不禁用 radio。估算標示為約值，不能作硬體效能保證。
+
+完整決策見 `docs/adr/0056-dual-render-mode-resource-estimate.md`。
+
+## v0.62.0 增量範圍（2026-09-12）
+
+- `subtitle-text.ts` 是字幕 Preview／ASS 的共用版面契約：行寬 6–60、480p 字級、外框／陰影比例、錨點與垂直百分比；Main 不再把百分比降階為 TOP／MIDDLE／BOTTOM 固定位置。
+- `output-canvas.ts` 是 Preview／FFmpeg 的畫布與模糊背景判斷契約。Renderer 只呈現同一政策，沒有改寫 Render 的 crop/scale/pad 參數。
+- `buildTimelinePlan` 仍是正式時間線唯一來源；`buildMainTimelineGroups` 只把已展開的插入 clip 歸回 anchor，禁止 UI 自行加總另一套 duration。
+- Intro 儲存 IN／OUT 等於輸出 IN／OUT；3–22 秒為建議，編輯器僅保留 0.1 秒步進與來源長度邊界。極短段落能否支援所選疊化由既有 Render preflight 判定。
+
+## v0.61.0 增量範圍（2026-09-12）
+
+- 低記憶體模式沿用單一 `ConcatRenderService` 與既有 output token／partial／atomic finalize 邊界。每層最多六個 visual inputs；中繼 MP4 經 probe 驗證後才可進入下一層，final stage 才套字幕、浮水印、BGM、master audio dynamics 與使用者選定 codec。
+- 中繼檔只存在輸出目錄的 unique job temp root，上一層被消費後立即刪除，outer `finally` 遞迴清理剩餘檔案。取消共用原本 `AbortController`；來源影片、照片、音訊與 metadata 持續唯讀。
+- Render estimate 在低記憶體模式保守納入約兩倍預估成品大小的暫存需求及 1.9 倍時間係數；Main process 在正式開始前以「成品＋暫存＋安全保留」再次檢查實際磁碟。
+- YouTube 全自動只組合既有 official API services：Renderer 不接收 refresh token，也不觸發任意 browser automation。自動模式預置 `madeForKids=false` 與完整 review gate，等待設定、AI 發布素材及頻道比對完成後才呼叫同一個受驗證 upload API。
+- 全自動是可持久化 render preference，預設開啟；關閉後原本 Chrome drag/drop 與人工 official API 流程仍可選。60 秒倒數為唯一自動開始邊界，倒數期間可取消且不刪除已完成 MP4。
+
+## v0.60.0 增量範圍（2026-09-12）
+
+- `SubtitleCue.lineWidthChars` 是可選的單筆人工覆寫；undefined 依目前文字動態採中文 12／英文或中英混合 20。Renderer 只送完整 cue 清單，Main 沿用既有驗證與 atomic manifest 寫入；schema 18 僅新增相容欄位。
+- Subtitle overlay、SRT 與 ASS 共用 `shared/subtitle-text` 的 cue resolver，避免三種輸出各自換行。現有全域行寬保留作批次覆寫，單筆值最高優先。
+- `ClipSilenceDetector` 只讀分析精確來源 IN／duration：無音軌直接靜音，有音軌以本機 FFmpeg `volumedetect` 的最大音量 ≤ -50 dB 判定。照片不進入分析；最多同時兩個分析程序，session cache 綁來源 preview fingerprint、range、analyzer version 與門檻。
+- 自動配樂固定指向 BGM 清單第一項且必須是已解析的本機音樂；不偷換第二首。原有 render-level `includeBgm` 與 asset-level `dubWithBgm=false` 都可明確停止自動鋪樂。
+
 ## v0.56.0 增量範圍（2026-09-11）
 
 - 字幕列的確認動作繼續使用既有 `setSubtitleCues` 單一 Main-process 寫入邊界，不新增 Renderer 直寫檔案或平行狀態來源。操作提示只在 canonical manifest 回傳後顯示成功。
@@ -257,6 +381,8 @@
 | VS-65 | 強制逐筆字幕校對             | 現行主軸／疊化重新對位、來源 OUT 更新、一致／不一致修改／略過流程、人工判定邊界                                                       |
 | VS-66 | 安全預設游標                 | 確認視窗安全按鍵自動焦點與滑鼠定位、Renderer 邊界驗證、關閉預設不關閉                                                                 |
 | VS-67 | 版本化 EXE                   | 封裝產物及 smoke 使用 `SceneryWalkerSourceOrganizer-v<version>.exe`                                                                   |
+| VS-68 | 單筆字幕行寬                 | 中文 12／英文或混合 20、自訂 6–60、native ↑／↓ 與輸入、立即保存、預覽／SRT／ASS 同步                                                  |
+| VS-69 | 片段靜音自動配樂             | exact IN／OUT volumedetect、有／無音軌、照片忽略、第一首 BGM、單片 opt-out、真實 MP4 音量與來源唯讀                                   |
 
 ## 後續安全階段
 

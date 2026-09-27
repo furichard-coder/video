@@ -14,16 +14,17 @@ import { mainRenderSelections } from "../../shared/editing-rules";
 import { buildTimelinePlan } from "../../shared/timeline-plan";
 import type { SubtitleTranslationResult } from "./subtitle-translation";
 import { sanitizeSubtitleBurnInOptions } from "./user-preferences";
-import { SUBTITLE_WRAP_REFERENCE_WIDTH, resolveSubtitleWrapLimit, wrapSubtitleText } from "../../shared/subtitle-text";
+import {
+  resolveCueSubtitleWrapLimit,
+  resolveSubtitleCuePosition,
+  subtitleFrameFontSize,
+  subtitleFrameOutlineWidth,
+  subtitleFrameShadowSize,
+  wrapSubtitleText,
+} from "../../shared/subtitle-text";
+import { outputDimensions } from "../../shared/render-profile";
 
-export { wrapSubtitleText };
-
-const RESOLUTIONS: Record<PreviewResolution, { width: number; height: number }> = {
-  "360P": { width: 640, height: 360 },
-  "480P": { width: 854, height: 480 },
-  "720P": { width: 1280, height: 720 },
-  "4K": { width: 3840, height: 2160 },
-};
+export { subtitleFrameFontSize, wrapSubtitleText };
 
 const FONT_NAMES: Record<SubtitleRenderLanguage, string> = {
   "zh-TW": "Microsoft JhengHei",
@@ -75,11 +76,6 @@ export interface SubtitleAssBuildResult {
 
 export type SubtitleOutputScope = "MAIN" | "INTRO" | "MAIN_WITH_INTRO";
 
-/** Subtitle-page preview pixels are defined against its 480p review canvas. */
-export function subtitleFrameFontSize(fontSizePx: number, frameHeight: number): number {
-  return Math.max(12, Math.round((fontSizePx * frameHeight) / 480));
-}
-
 export function validateSubtitleBurnInOptions(rawOptions: SubtitleBurnInOptions): SubtitleBurnInOptions {
   if (
     !rawOptions ||
@@ -114,6 +110,7 @@ export function buildSubtitleAss(
   translations: SubtitleTranslationResult,
   mainStartCard?: MainStartCardOptions,
   outputScope: SubtitleOutputScope = introClipCount > 0 ? "MAIN_WITH_INTRO" : "MAIN",
+  portrait = false,
 ): SubtitleAssBuildResult {
   const options = validateSubtitleBurnInOptions(rawOptions);
   const includesMain = outputScope !== "INTRO";
@@ -147,7 +144,7 @@ export function buildSubtitleAss(
     outputClips.length !== expectedIntroCount + mainClips.length
   )
     throw new Error("字幕時間線與目前輸出片段不一致。");
-  const { width, height } = RESOLUTIONS[resolution];
+  const { width, height } = outputDimensions(resolution, portrait);
   const transitionMs = Math.round(transitionSeconds * 1000);
   const outputStarts: number[] = [];
   let outputCursor = 0;
@@ -190,10 +187,16 @@ export function buildSubtitleAss(
   const styles = options.tracks.map((track, index) => {
     const fontSize = resolvedFontSizes[index];
     const outline = sharedStyle
-      ? Math.max(0, Math.round((sharedStyle.outlineWidthPx * height) / 480))
+      ? subtitleFrameOutlineWidth(sharedStyle.outlineWidthPx, height)
       : Math.max(0, Math.round((2 * height) / 1080));
-    const shadow = sharedStyle?.shadowEnabled === false ? 0 : Math.max(1, Math.round(fontSize * 0.035));
-    return `Style: Lang${index + 1},${FONT_NAMES[track.language]},${fontSize},${assColor(sharedStyle?.textColor ?? "#FFFFFF")},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${outline},${shadow},2,20,20,20,1`;
+    const shadow =
+      sharedStyle?.shadowEnabled === false
+        ? 0
+        : sharedStyle && index === 0
+          ? subtitleFrameShadowSize(sharedStyle.fontSizePx, height)
+          : Math.max(1, Math.round(fontSize * 0.035));
+    const horizontalMargin = sharedStyle ? Math.max(20, Math.round((20 * height) / 480)) : 20;
+    return `Style: Lang${index + 1},${FONT_NAMES[track.language]},${fontSize},${assColor(sharedStyle?.textColor ?? "#FFFFFF")},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${outline},${shadow},2,${horizontalMargin},${horizontalMargin},20,1`;
   });
   const events: string[] = [];
   options.tracks.forEach((track, trackIndex) => {
@@ -205,17 +208,12 @@ export function buildSubtitleAss(
       .slice(0, trackIndex)
       .filter((candidate) => candidate.position === track.position).length;
     const fontSize = resolvedFontSizes[trackIndex];
-    const cjk = track.language !== "en";
-    // Wrap against the fixed 480p reference canvas (not the output width) so the
-    // preview overlay and every output resolution break lines identically.
-    const wrapBaseFontSize = sharedStyle ? sharedStyle.fontSizePx : (fontSize * 480) / height;
-    const maxCharacters = resolveSubtitleWrapLimit(
-      sharedStyle?.maxCharactersPerLine,
-      SUBTITLE_WRAP_REFERENCE_WIDTH,
-      wrapBaseFontSize,
-      cjk,
-    );
     confirmed.forEach((cue, cueIndex) => {
+      const maxCharacters = resolveCueSubtitleWrapLimit(
+        cue.lineWidthChars,
+        sharedStyle?.maxCharactersPerLine,
+        trackTexts[cueIndex],
+      );
       const scope = cue.timelineScope ?? "MAIN";
       const scopedClips = scope === "INTRO" ? introClips : mainClips;
       const logicalStarts = scope === "INTRO" ? introLogicalStarts : mainLogicalStarts;
@@ -229,15 +227,20 @@ export function buildSubtitleAss(
         const actualStart = outputStarts[outputOffset + clipIndex] + overlapStart - logicalStart;
         const actualEnd = outputStarts[outputOffset + clipIndex] + overlapEnd - logicalStart;
         const text = wrapSubtitleText(trackTexts[cueIndex], maxCharacters).map(escapeAssLine).join("\\N");
-        const position =
-          sharedStyle && trackIndex === 0
-            ? ((sharedStyle.verticalPositionPercent < 38
-                ? "TOP"
-                : sharedStyle.verticalPositionPercent > 64
-                  ? "BOTTOM"
-                  : "MIDDLE") as SubtitleRenderPosition)
-            : track.position;
-        const override = positionOverride(position, lane, laneCount, width, height, fontSize);
+        const override =
+          trackIndex === 0 && (sharedStyle || cue.position)
+            ? (() => {
+                const defaultVerticalPercent = track.position === "TOP" ? 5.5 : track.position === "MIDDLE" ? 50 : 94.5;
+                const position = resolveSubtitleCuePosition(
+                  cue.position,
+                  sharedStyle?.verticalPositionPercent ?? defaultVerticalPercent,
+                  width,
+                  height,
+                );
+                const alignment = position.anchor === "TOP" ? 8 : position.anchor === "BOTTOM" ? 2 : 5;
+                return `{\\an${alignment}\\pos(${position.xPx},${position.yPx})}`;
+              })()
+            : positionOverride(track.position, lane, laneCount, width, height, fontSize);
         events.push(
           `Dialogue: ${trackIndex},${assTime(actualStart)},${assTime(actualEnd)},Lang${trackIndex + 1},,0,0,0,,${override}${text}`,
         );

@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { MediaInsertion, PreviewRange, ProjectManifest, SourceAsset } from "../../shared/domain";
+import {
+  PHOTO_SOUND_PREVIEW_URL,
+  type InsertionAudioPlanItem,
+  type MediaInsertion,
+  type PreviewRange,
+  type ProjectManifest,
+  type SourceAsset,
+} from "../../shared/domain";
 import { imageDurationMs, retainedRangesForAsset } from "../../shared/editing-rules";
+import { buildInsertionAudioPlan } from "../../shared/insertion-audio-plan";
 import { formatDuration } from "../format";
 import { MinuteSecondFields } from "./MinuteSecondFields";
 import { ClipRangeControl } from "./ClipRangeControl";
+import { InsertionAudioControls } from "./InsertionAudioControls";
 
 interface Props {
   project: ProjectManifest;
@@ -23,12 +32,42 @@ function folderLabel(folder: string): string {
   return parts.at(-1) ?? folder;
 }
 
-function InsertionMediaPreview({ asset }: { asset: SourceAsset }) {
+function InsertionMediaPreview({
+  asset,
+  project,
+  audioItem,
+}: {
+  asset: SourceAsset;
+  project?: ProjectManifest;
+  audioItem?: InsertionAudioPlanItem;
+}) {
   const [url, setUrl] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [playing, setPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const sfxRef = useRef<HTMLAudioElement>(null);
+  const bgmRef = useRef<HTMLAudioElement>(null);
+  const bgmTrack = audioItem?.bgmTrackId
+    ? project?.bgmTracks.find((track) => track.id === audioItem.bgmTrackId)
+    : undefined;
+  const syncAudio = (shouldPlay: boolean, restart = false) => {
+    const bgmPlayer = bgmRef.current;
+    if (bgmPlayer && bgmTrack) {
+      bgmPlayer.volume = Math.max(0, Math.min(1, (audioItem?.bgmVolumePercent ?? 28) / 100));
+      if (restart) bgmPlayer.currentTime = (audioItem?.bgmSourcePositionMs ?? bgmTrack.sourceInMs) / 1000;
+      if (shouldPlay) void bgmPlayer.play().catch(() => undefined);
+      else bgmPlayer.pause();
+    }
+    const sfxPlayer = sfxRef.current;
+    if (sfxPlayer && audioItem?.sfxEnabled) {
+      sfxPlayer.volume = Math.max(0, Math.min(1, (audioItem.sfxVolumePercent ?? 70) / 100));
+      if (shouldPlay && restart) {
+        sfxPlayer.currentTime = 0;
+        void sfxPlayer.play().catch(() => undefined);
+      } else if (!shouldPlay) sfxPlayer.pause();
+    }
+  };
   const load = async () => {
     setLoading(true);
     setError(undefined);
@@ -57,6 +96,7 @@ function InsertionMediaPreview({ asset }: { asset: SourceAsset }) {
         ref={videoRef}
         className="insertion-media-preview"
         src={url}
+        muted={audioItem?.gates.original === false}
         preload="metadata"
         aria-label={`等比例預覽 ${asset.fileName}`}
         onClick={() => {
@@ -65,8 +105,8 @@ function InsertionMediaPreview({ asset }: { asset: SourceAsset }) {
           if (player.paused) void player.play();
           else player.pause();
         }}
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
+        onPlay={() => { setPlaying(true); syncAudio(true, true); }}
+        onPause={() => { setPlaying(false); syncAudio(false); }}
       />
       <button
         type="button"
@@ -79,9 +119,38 @@ function InsertionMediaPreview({ asset }: { asset: SourceAsset }) {
       >
         {playing ? "❚❚ 暫停" : "▶ 播放"}
       </button>
+      {audioItem?.sfxEnabled && <audio ref={sfxRef} src={PHOTO_SOUND_PREVIEW_URL} preload="auto" />}
+      {bgmTrack && audioItem?.bgmEnabled && (
+        <audio
+          ref={bgmRef}
+          src={`preview-media://bgm/${encodeURIComponent(bgmTrack.id)}`}
+          preload="auto"
+          onTimeUpdate={(event) => {
+            if (event.currentTarget.currentTime >= bgmTrack.sourceOutMs / 1000 - 0.03)
+              event.currentTarget.currentTime = bgmTrack.sourceInMs / 1000;
+          }}
+        />
+      )}
     </div>
   ) : (
-    <img className="insertion-media-preview" src={url} alt={`${asset.fileName} 預覽`} />
+    <div className="insertion-image-preview-with-audio">
+      <img className="insertion-media-preview" src={url} alt={`${asset.fileName} 預覽`} />
+      {(audioItem?.sfxEnabled || audioItem?.bgmEnabled) && (
+        <button type="button" onClick={() => syncAudio(true, true)}>▶ 試聽 SFX／BGM</button>
+      )}
+      {audioItem?.sfxEnabled && <audio ref={sfxRef} src={PHOTO_SOUND_PREVIEW_URL} preload="auto" />}
+      {bgmTrack && audioItem?.bgmEnabled && (
+        <audio
+          ref={bgmRef}
+          src={`preview-media://bgm/${encodeURIComponent(bgmTrack.id)}`}
+          preload="auto"
+          onTimeUpdate={(event) => {
+            if (event.currentTarget.currentTime >= bgmTrack.sourceOutMs / 1000 - 0.03)
+              event.currentTarget.currentTime = bgmTrack.sourceInMs / 1000;
+          }}
+        />
+      )}
+    </div>
   );
 }
 
@@ -93,15 +162,19 @@ export function MediaInsertionModal({ project, video, onProjectUpdated, onClose 
         .sort((a, b) => a.atMs - b.atMs || a.sequenceIndex - b.sequenceIndex),
     [project.mediaInsertions, video.id],
   );
+  const insertionAudioPlan = useMemo(
+    () => buildInsertionAudioPlan(project, { purpose: "CONCAT", prependIntro: false }),
+    [project],
+  );
   const insertedIds = useMemo(
     () => new Set(project.mediaInsertions.map((item) => item.insertedAssetId)),
     [project.mediaInsertions],
   );
   const availableMedia = useMemo(
     () =>
-      [...project.timelineOrder, ...project.pendingAssetIds]
+      [...new Set([...project.timelineOrder, ...project.pendingAssetIds, ...insertedIds])]
         .map((id) => project.sources.find((asset) => asset.id === id))
-        .filter((asset): asset is SourceAsset => Boolean(asset && asset.id !== video.id && !insertedIds.has(asset.id))),
+        .filter((asset): asset is SourceAsset => Boolean(asset && asset.id !== video.id)),
     [project.sources, project.timelineOrder, project.pendingAssetIds, video.id, insertedIds],
   );
   const folders = useMemo(
@@ -460,7 +533,23 @@ export function MediaInsertionModal({ project, video, onProjectUpdated, onClose 
                           : "來源離線"}
                       </small>
                     </div>
-                    {inserted && <InsertionMediaPreview asset={inserted} />}
+                    {inserted && (
+                      <InsertionMediaPreview
+                        asset={inserted}
+                        project={project}
+                        audioItem={insertionAudioPlan.items.find((item) => item.instanceId === insertion.id)}
+                      />
+                    )}
+                    {inserted && (
+                      <InsertionAudioControls
+                        project={project}
+                        scope="MAIN"
+                        instanceId={insertion.id}
+                        asset={inserted}
+                        value={insertion.insertionAudio}
+                        onProjectUpdated={onProjectUpdated}
+                      />
+                    )}
                     <MinuteSecondFields
                       label={`${inserted?.fileName ?? "素材"} 安插時間`}
                       valueMs={draft.atMs}

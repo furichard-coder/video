@@ -14,6 +14,7 @@ let imagePath: string;
 let videoPath: string;
 let rotatedVideoPath: string;
 let appleHevcMovPath: string;
+let blackLeadVideoPath: string;
 let store: ProjectStore;
 let sources: SourceService;
 let previews: PreviewCache;
@@ -31,6 +32,7 @@ beforeAll(async () => {
   rotatedVideoPath = path.join(root, "portrait-rotated.mp4");
   const hevcBasePath = path.join(root, "apple-hevc-base.mp4");
   appleHevcMovPath = path.join(root, "iPhone 中文 空格.MOV");
+  blackLeadVideoPath = path.join(root, "black-lead.mp4");
   await runProcess("ffmpeg", [
     "-hide_banner",
     "-loglevel",
@@ -67,6 +69,13 @@ beforeAll(async () => {
     "-shortest",
     "-y",
     videoPath,
+  ]);
+  await runProcess("ffmpeg", [
+    "-hide_banner", "-loglevel", "error",
+    "-f", "lavfi", "-i", "color=c=black:s=320x180:r=30:d=0.35",
+    "-f", "lavfi", "-i", "color=c=red:s=320x180:r=30:d=0.65",
+    "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0,format=yuv420p[v]",
+    "-map", "[v]", "-c:v", "libx264", "-y", blackLeadVideoPath,
   ]);
   await runProcess("ffmpeg", [
     "-hide_banner",
@@ -131,7 +140,7 @@ beforeAll(async () => {
   sources = new SourceService(store, new MediaProbe());
   previews = new PreviewCache(path.join(root, "app-data", "cache", "previews"), store, sources);
   await previews.initialize();
-  await sources.importSelected([imagePath, videoPath, rotatedVideoPath, appleHevcMovPath]);
+  await sources.importSelected([imagePath, videoPath, rotatedVideoPath, appleHevcMovPath, blackLeadVideoPath]);
 });
 
 afterAll(async () => {
@@ -194,6 +203,25 @@ describe("preview cache integration", () => {
     expect((await previews.ensureClip(video.id, 200, 800)).cacheStatus).toBe("CREATED");
     expect((await new MediaProbe().probe(clipPath)).videoCodec).toBe("h264");
     expect(await sha256(videoPath)).toBe(beforeHash);
+  }, 30_000);
+
+  it("lazily caches the first visible Intro frame after a black lead without changing the source", async () => {
+    const asset = store.getProject().sources.find((item) => item.sourcePath === blackLeadVideoPath)!;
+    const before = await sha256(blackLeadVideoPath);
+    const created = await previews.ensureIntroThumbnail(asset.id, 0, 1_000);
+    const hit = await previews.ensureIntroThumbnail(asset.id, 0, 1_000);
+    expect(created.cacheStatus).toBe("CREATED");
+    expect(hit.cacheStatus).toBe("HIT");
+    const key = /intro-thumbnail\/[a-f0-9]{64}\/([a-f0-9]{64})/.exec(created.url)?.[1];
+    expect(key).toBeTruthy();
+    const thumbnail = await previews.resolveIntroThumbnailExisting(asset.id, key!);
+    const measured = await runProcess("ffmpeg", [
+      "-hide_banner", "-loglevel", "info", "-i", thumbnail,
+      "-vf", "signalstats,metadata=print:key=lavfi.signalstats.YAVG", "-frames:v", "1", "-f", "null", "-",
+    ]);
+    const yAverage = Number(/lavfi\.signalstats\.YAVG=([0-9.]+)/.exec(measured.stderr)?.[1]);
+    expect(yAverage).toBeGreaterThan(30);
+    expect(await sha256(blackLeadVideoPath)).toBe(before);
   }, 30_000);
 
   it("hits valid cache and invalidates only when source identity inputs change", async () => {

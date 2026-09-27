@@ -30,18 +30,18 @@ async function stores(dataRoot: string) {
     provider: "OPENAI",
     visionModel: "gpt-test",
     transcriptionModel: "whisper-1",
-    apiKey: "sk-test-123456789012345678901234",
+    apiKey: "fixture-test-123456789012345678901",
     makeActive: true,
   });
   const translation = new TranslationSettingsStore(dataRoot, protector);
   await translation.initialize();
-  await translation.update({ googleCloudApiKey: "AIza-test-12345678901234567890" });
+  await translation.update({ googleCloudApiKey: "test-key-google-12345678901234" });
   return { ai, translation };
 }
 
 describe("subtitle translation orchestration", () => {
   it("sends the Google key in a header, never in the URL, and decodes returned text", async () => {
-    const key = "AIza-sensitive-never-in-url";
+    const key = "test-key-sensitive-never-in-url";
     const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       expect(String(url)).not.toContain(key);
       expect(init?.headers).toMatchObject({ "X-Goog-Api-Key": key });

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -8,6 +8,8 @@ import {
   buildWatermarkFilterChain,
   concatInputStartTimesMs,
   ConcatRenderService,
+  groupLowMemoryInputs,
+  hardwareDecodeIndexes,
   runFfmpegWithProgress,
   selectBgmTracksForScopes,
   validateAudioProtectionOptions,
@@ -17,9 +19,11 @@ import {
 import { MediaProbe } from "../src/main/services/media-probe";
 import { runProcess } from "../src/main/services/process-runner";
 import { ProjectStore } from "../src/main/services/project-store";
+import { RenderCheckpointStore } from "../src/main/services/render-checkpoint";
 import { SourceService } from "../src/main/services/source-service";
 import { mainRenderSelections } from "../src/shared/editing-rules";
 import { colorPreset } from "../src/shared/color-presets";
+import { DEFAULT_AUDIO_PROCESSING_OPTIONS, DEFAULT_AUDIO_PROTECTION_OPTIONS } from "../src/shared/domain";
 
 let root: string;
 let firstPath: string;
@@ -62,6 +66,14 @@ async function sha256(filePath: string): Promise<string> {
   return createHash("sha256")
     .update(await readFile(filePath))
     .digest("hex");
+}
+
+async function packetHash(filePath: string, stream: "v:0" | "a:0"): Promise<string> {
+  const result = await runProcess("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-i", filePath, "-map", `0:${stream}`,
+    "-c", "copy", "-f", "hash", "-hash", "sha256", "-",
+  ]);
+  return result.stdout.trim();
 }
 
 function currentMainRequest() {
@@ -174,6 +186,72 @@ afterAll(async () => {
 });
 
 describe("concat preview filter plan", () => {
+  it.each([
+    [0, undefined],
+    [90, "transpose=cclock"],
+    [180, "hflip,vflip"],
+    [270, "transpose=clock"],
+    [-90, "transpose=clock"],
+    [-180, "hflip,vflip"],
+    [-270, "transpose=cclock"],
+  ] as const)("normalizes rotation metadata %s exactly once before layout", (rotation, expected) => {
+    const plan = buildConcatFilterGraph(
+      [
+        {
+          sourcePath: "rotated.mp4",
+          durationMs: 4_000,
+          hasAudio: false,
+          isPortrait: rotation === 90 || rotation === 270 || rotation === -90 || rotation === -270,
+          orientationRotationDegrees: rotation,
+        },
+      ],
+      0.3,
+      "1080P",
+    );
+    const orientationFilters = plan.filterGraph.match(/transpose=(?:c?clock)|hflip,vflip/g) ?? [];
+    expect(orientationFilters).toEqual(expected ? [expected] : []);
+    if (expected) expect(plan.filterGraph.indexOf(expected)).toBeLessThan(plan.filterGraph.indexOf("fps=30000/1001"));
+  });
+
+  it("skips duplicate normalization in reduction stages and bridges QSV frames to CPU filters", () => {
+    const inputs = [
+      { sourcePath: "a.mp4", durationMs: 4_000, hasAudio: true, orientationRotationDegrees: 270 },
+      { sourcePath: "b.mp4", durationMs: 4_000, hasAudio: true },
+    ];
+    const normalized = buildConcatFilterGraph(inputs, 0.3, "1080P", [], 100, false, undefined, {
+      inputsAreNormalized: true,
+    });
+    expect(normalized.filterGraph).not.toMatch(/scale=|fps=30000\/1001/);
+    const hardware = buildConcatFilterGraph(inputs, 0.3, "1080P", [], 100, false, undefined, {
+      hardwareDecodedInputIndexes: new Set([0]),
+    });
+    expect(hardware.filterGraph).toContain("[0:v:0]hwdownload,format=nv12[vdownload0]");
+    expect(hardware.filterGraph).toContain("[vdownload0]transpose=clock[voriented0]");
+    expect(hardware.filterGraph).toContain("[voriented0]format=yuv420p[vplanar0]");
+    expect(hardware.filterGraph).toContain("[vplanar0]fps=30000/1001");
+    expect(hardware.filterGraph.indexOf("hwdownload")).toBeLessThan(hardware.filterGraph.indexOf("transpose=clock"));
+  });
+
+  it("keeps rotated blurred-fill inputs off the QSV decoder while retaining safe hardware decode candidates", () => {
+    const rotatedPortrait = {
+      sourcePath: "tunnel.mp4",
+      sourceVideoCodec: "h264",
+      durationMs: 4_000,
+      hasAudio: true,
+      isPortrait: true,
+      orientationRotationDegrees: 270,
+    };
+    const landscape = {
+      sourcePath: "landscape.mp4",
+      sourceVideoCodec: "h264",
+      durationMs: 4_000,
+      hasAudio: true,
+      isPortrait: false,
+      orientationRotationDegrees: 0,
+    };
+    expect([...hardwareDecodeIndexes([rotatedPortrait, landscape], true, false)]).toEqual([1]);
+    expect([...hardwareDecodeIndexes([rotatedPortrait], true, true)]).toEqual([]);
+  });
   it("uses cumulative overlap offsets and the requested fixed preview size", () => {
     const plan = buildConcatFilterGraph(
       [
@@ -309,6 +387,269 @@ describe("concat preview filter plan", () => {
     expect(buildConcatFilterGraph(inputs, 0.3, "4K")).toMatchObject({ width: 3840, height: 2160 });
   });
 
+  it("resumes from a failed segment and retries only final concat after a simulated OOM", async () => {
+    const resumeRoot = path.join(root, "resume-final-only");
+    const localStore = new ProjectStore(path.join(resumeRoot, "app-data"));
+    await localStore.initialize();
+    const localSources = new SourceService(localStore, new MediaProbe());
+    const paths: string[] = [];
+    for (let index = 0; index < 7; index += 1) {
+      const sourcePath = path.join(resumeRoot, `clip-${index + 1}.mp4`);
+      await copyFile(firstPath, sourcePath);
+      paths.push(sourcePath);
+    }
+    await localSources.importSelected(paths);
+    await Promise.all(localStore.getProject().sources.map((asset) => localSources.ensureMetadata(asset.id)));
+    const clips = mainRenderSelections(localStore.getProject());
+    let firstRunCalls = 0;
+    const failAtFinal = async (...args: Parameters<typeof runFfmpegWithProgress>) => {
+      firstRunCalls += 1;
+      if (args[5]?.currentSegment === "独立音讯混音与无损影像重新封装")
+        throw new Error("FFmpeg 串連失敗：Error while filtering: Cannot allocate memory return code -12");
+      return runFfmpegWithProgress(...args);
+    };
+    const request = {
+      outputToken: "resume-test",
+      orderedAssetIds: clips.map((clip) => clip.assetId),
+      clipSelections: clips,
+      transitionSeconds: 0.3 as const,
+      resolution: "360P" as const,
+      videoCodec: "H264" as const,
+      purpose: "CONCAT" as const,
+      lowMemorySegmented: false,
+      runtimePolicy: {
+        mode: "NORMAL" as const,
+        maxVisualInputsPerStage: 3,
+        initialParallelJobs: 1,
+        maximumParallelJobs: 1,
+        filterComplexThreads: 1,
+        encoderThreads: 1,
+        systemSafetyReserveBytes: 4 * 1024 ** 3,
+        renderRamBudgetBytes: 4 * 1024 ** 3,
+        pauseNewStageBelowAvailableBytes: 1024 ** 3,
+      },
+    };
+    const output = path.join(resumeRoot, "resumed.mp4");
+    const firstService = new ConcatRenderService(localStore, localSources, "ffmpeg", failAtFinal);
+    await expect(firstService.render(request, output)).rejects.toThrow(/記憶體配置失敗/);
+    const offer = await firstService.getResumeOffer();
+    // v0.77 checkpoints keep the validated picture/base-audio master and
+    // dependency-GC the now-consumed stage files before the post-audio pass.
+    expect(offer).toMatchObject({ concatStatus: "FAILED", completedSegmentCount: 0, totalSegmentCount: 3 });
+    expect(firstRunCalls).toBe(5);
+
+    let resumeCalls = 0;
+    const countRunner = async (...args: Parameters<typeof runFfmpegWithProgress>) => {
+      resumeCalls += 1;
+      return runFfmpegWithProgress(...args);
+    };
+    const resumed = await new ConcatRenderService(localStore, localSources, "ffmpeg", countRunner).resume(
+      offer!.checkpointId,
+      undefined,
+      () => undefined,
+    );
+    expect(resumeCalls).toBe(1);
+    expect(resumed).toMatchObject({ resumedSegmentCount: 1, segmentedRender: true, videoBaseMasterReused: true });
+    expect((await new MediaProbe().probe(output)).videoCodec).toBe("h264");
+    expect(await firstService.getResumeOffer()).toBeUndefined();
+
+    let midFailureCalls = 0;
+    const failMidStage = async (...args: Parameters<typeof runFfmpegWithProgress>) => {
+      midFailureCalls += 1;
+      if (args[5]?.currentSegment === "片段 2/3")
+        throw new Error("FFmpeg 串連失敗：Error while filtering: Cannot allocate memory return code -12");
+      return runFfmpegWithProgress(...args);
+    };
+    const midOutput = path.join(resumeRoot, "resumed-from-middle.mp4");
+    const midService = new ConcatRenderService(localStore, localSources, "ffmpeg", failMidStage);
+    await expect(midService.render({ ...request, outputToken: "mid-resume-test", resolution: "480P" }, midOutput)).rejects.toThrow(
+      /已保留並驗證 1 個完成片段/,
+    );
+    expect(midFailureCalls).toBe(2);
+    const midOffer = await midService.getResumeOffer();
+    expect(midOffer).toMatchObject({ concatStatus: "FAILED", completedSegmentCount: 1, totalSegmentCount: 3 });
+    let midResumeCalls = 0;
+    const midResumeRunner = async (...args: Parameters<typeof runFfmpegWithProgress>) => {
+      midResumeCalls += 1;
+      return runFfmpegWithProgress(...args);
+    };
+    const midResumed = await new ConcatRenderService(localStore, localSources, "ffmpeg", midResumeRunner).resume(
+      midOffer!.checkpointId,
+      undefined,
+      () => undefined,
+    );
+    expect(midResumeCalls).toBe(4);
+    expect(midResumed.resumedSegmentCount).toBe(1);
+    expect((await new MediaProbe().probe(midOutput)).videoCodec).toBe("h264");
+    expect(await midService.getResumeOffer()).toBeUndefined();
+
+    let audioFailureCalls = 0;
+    const failPostAudio = async (...args: Parameters<typeof runFfmpegWithProgress>) => {
+      audioFailureCalls += 1;
+      if (args[5]?.currentSegment === "独立音讯混音与无损影像重新封装") throw new Error("simulated post-audio failure");
+      return runFfmpegWithProgress(...args);
+    };
+    const audioOutput = path.join(resumeRoot, "resumed-post-audio.mp4");
+    const audioRequest = {
+      ...request,
+      outputToken: "audio-resume-test",
+      audioProcessing: { ...DEFAULT_AUDIO_PROCESSING_OPTIONS, mode: "VIRTUAL_SURROUND_5_1" as const },
+    };
+    const audioService = new ConcatRenderService(localStore, localSources, "ffmpeg", failPostAudio);
+    await expect(audioService.render(audioRequest, audioOutput)).rejects.toThrow(/simulated post-audio failure/);
+    const audioOffer = await audioService.getResumeOffer();
+    expect(audioOffer).toMatchObject({ concatStatus: "FAILED", completedSegmentCount: 0 });
+    let audioResumeCalls = 0;
+    const audioResumeRunner = async (...args: Parameters<typeof runFfmpegWithProgress>) => {
+      audioResumeCalls += 1;
+      return runFfmpegWithProgress(...args);
+    };
+    const audioResumed = await new ConcatRenderService(localStore, localSources, "ffmpeg", audioResumeRunner).resume(
+      audioOffer!.checkpointId,
+      undefined,
+      () => undefined,
+    );
+    expect(audioResumeCalls).toBe(1);
+    expect(audioResumed).toMatchObject({ audioChannels: 6, audioRemuxedWithoutVideoEncode: true });
+  }, 120_000);
+
+  it("reuses a complete external legacy segment level without deriving missing v0.80 paths or encoding it again", async () => {
+    const recoveryRoot = path.join(root, "v079-external-segment-recovery");
+    const appStore = new ProjectStore(path.join(recoveryRoot, "app-data"));
+    await appStore.initialize();
+    const checkpointStore = new RenderCheckpointStore(path.join(recoveryRoot, "state"));
+    const externalSegment = path.join(recoveryRoot, "v079-read-only-level-1.mkv");
+    await copyFile(firstPath, externalSegment);
+    const info = await new MediaProbe().probe(externalSegment);
+    const item = await stat(externalSegment);
+    const request = {
+      outputToken: "legacy-recovery",
+      orderedAssetIds: Array.from({ length: 93 }, (_, index) => `asset-${index}`),
+      transitionSeconds: 0.3 as const,
+      resolution: "360P" as const,
+      videoCodec: "H264" as const,
+      purpose: "CONCAT" as const,
+      prependIntro: false,
+      includeBgm: false,
+      subtitleBurnIn: { enabled: false, tracks: [] },
+    };
+    const checkpoint = await checkpointStore.create(
+      appStore.getProject().id,
+      appStore.getProject().updatedAt,
+      "legacy-signature",
+      "HIGH_SPEED",
+      path.join(recoveryRoot, "output.mp4"),
+      request,
+      path.join(recoveryRoot, "v080-work"),
+    );
+    checkpoint.segments = Array.from({ length: 10 }, (_, index) => ({
+      id: `legacy-segment-${index}`,
+      level: 1,
+      index: index + 1,
+      status: "COMPLETED" as const,
+      outputPath: externalSegment,
+      durationMs: info.durationMs!,
+      sizeBytes: item.size,
+    }));
+    await checkpointStore.save(checkpoint);
+    let encodeCalls = 0;
+    const service = new ConcatRenderService(
+      appStore,
+      new SourceService(appStore, new MediaProbe()),
+      "ffmpeg",
+      async () => {
+        encodeCalls += 1;
+        throw new Error("legacy level must not be encoded again");
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      checkpointStore,
+    );
+    const inputs = Array.from({ length: 93 }, (_, index) => ({
+      sourcePath: `never-read-${index}.mp4`,
+      durationMs: 1_000,
+      hasAudio: true,
+      checkpointKey: `source-${index}`,
+    }));
+    const result = await (service as unknown as {
+      buildResumableIntermediates: (...args: unknown[]) => Promise<{ inputs: Array<{ sourcePath: string }>; resumedSegmentCount: number }>;
+    }).buildResumableIntermediates(
+      inputs,
+      0.3,
+      "360P",
+      "H264",
+      false,
+      100,
+      DEFAULT_AUDIO_PROTECTION_OPTIONS,
+      checkpoint,
+      10,
+      1,
+      1,
+      undefined,
+      new Set<number>(),
+      () => undefined,
+      93_000,
+      undefined,
+      () => undefined,
+    );
+
+    expect(encodeCalls).toBe(0);
+    expect(result.resumedSegmentCount).toBe(10);
+    expect(result.inputs).toHaveLength(10);
+    expect(result.inputs.every((input) => input.sourcePath === externalSegment)).toBe(true);
+    await expect(stat(externalSegment)).resolves.toMatchObject({ size: item.size });
+  }, 30_000);
+
+  it("keeps the eight 1080p/1440p landscape/portrait mode combinations on the same canvas profile", () => {
+    const inputs = [{ sourcePath: "one.mp4", durationMs: 2_000, hasAudio: true }];
+    for (const lowMemorySegmented of [true, false]) {
+      for (const portrait of [true, false]) {
+        for (const resolution of ["1080P", "1440P"] as const) {
+          const plan = buildConcatFilterGraph(inputs, 0.3, resolution, [], 100, portrait);
+          const expected =
+            resolution === "1080P" ? (portrait ? [1080, 1920] : [1920, 1080]) : portrait ? [1440, 2560] : [2560, 1440];
+          expect([plan.width, plan.height], `${resolution}/${portrait}/${lowMemorySegmented}`).toEqual(expected);
+          expect(plan.expectedDurationMs).toBe(2_000);
+          expect(plan.filterGraph).toContain(`scale=${expected[0]}:${expected[1]}`);
+        }
+      }
+    }
+  });
+
+  it("bounds low-memory groups and keeps a Main-start card with both neighbours", () => {
+    const inputs = Array.from({ length: 14 }, (_, index) => ({
+      sourcePath: `${index}.mp4`,
+      durationMs: 2_000,
+      hasAudio: true,
+      ...(index === 6
+        ? {
+            mainStartCard: {
+              ...validateMainStartCardOptions({
+                durationSeconds: 4,
+                line1: "正片",
+                line2: "開始",
+                line1FontSize1080p: 114,
+                line2FontSize1080p: 90,
+                lineGap1080p: 122,
+                overlayOpacityPercent: 62,
+                transitionStyle: "DISSOLVE",
+              }),
+              sourceDurationMs: 2_000,
+              line1TextFilePath: "one.txt",
+              line2TextFilePath: "two.txt",
+              fontFilePath: "font.ttc",
+            },
+          }
+        : {}),
+    }));
+    const groups = groupLowMemoryInputs(inputs);
+    expect(groups.every((group) => group.length <= 7)).toBe(true);
+    const cardGroup = groups.find((group) => group.some((input) => input.mainStartCard))!;
+    expect(cardGroup.map((input) => input.sourcePath)).toEqual(expect.arrayContaining(["5.mp4", "6.mp4", "7.mp4"]));
+  });
+
   it("supports dissolve, fade-to-black and hard-cut joins around a validated Main-start card", () => {
     const options = {
       durationSeconds: 4,
@@ -390,6 +731,127 @@ describe("concat preview filter plan", () => {
 });
 
 describe("concat preview integration", () => {
+  it("post-processes Virtual 5.1 without re-encoding completed video frames", async () => {
+    const localStore = new ProjectStore(path.join(root, "audio-v069-app-data"));
+    await localStore.initialize();
+    const localSources = new SourceService(localStore, new MediaProbe());
+    await localSources.importSelected([firstPath]);
+    await localSources.ensureMetadata(localStore.getProject().sources[0].id);
+    const selections = mainRenderSelections(localStore.getProject());
+    const output = path.join(root, "audio-v069-virtual.mp4");
+    const sourceHash = await sha256(firstPath);
+    const result = await new ConcatRenderService(localStore, localSources).render(
+      {
+        outputToken: "unused",
+        orderedAssetIds: selections.map((clip) => clip.assetId),
+        clipSelections: selections,
+        transitionSeconds: 0.3,
+        resolution: "360P",
+        videoCodec: "H264",
+        includeWatermark: false,
+        includeBgm: false,
+        purpose: "CONCAT",
+        audioProcessing: {
+          mode: "VIRTUAL_SURROUND_5_1",
+          preset: "NATURAL",
+          codec: "AAC",
+          bitrateKbps: 384,
+          sampleRate: 48_000,
+          surroundStrengthPercent: 65,
+          lfeStrengthPercent: 45,
+          lfeCutoffHz: 100,
+          loudnessTargetLufs: -16,
+          truePeakCeilingDb: -1.5,
+        },
+      },
+      output,
+    );
+    const info = await new MediaProbe().probe(output);
+    expect(result.audioRemuxedWithoutVideoEncode).toBe(true);
+    expect(info.audioChannels).toBe(6);
+    expect(info.audioChannelLayout).toMatch(/5\.1/);
+    expect(info.audioSampleRate).toBe(48_000);
+    expect(await sha256(firstPath)).toBe(sourceHash);
+  }, 30_000);
+  it("renders more than six clips through bounded low-memory stages and removes every work file", async () => {
+    const localRoot = path.join(root, "low-memory-case");
+    const localStore = new ProjectStore(path.join(localRoot, "app-data"));
+    await localStore.initialize();
+    const clipPaths = await Promise.all(
+      Array.from({ length: 7 }, async (_, index) => {
+        const clipPath = path.join(localRoot, `clip-${index + 1}.mp4`);
+        await copyFile(firstPath, clipPath);
+        return clipPath;
+      }),
+    );
+    const localSources = new SourceService(localStore, new MediaProbe());
+    await localSources.importSelected(clipPaths);
+    await Promise.all(localStore.getProject().sources.map((asset) => localSources.ensureMetadata(asset.id)));
+    const sourceHashesBefore = await Promise.all(clipPaths.map((clipPath) => sha256(clipPath)));
+    const clips = mainRenderSelections(localStore.getProject());
+    const lowMemoryOutput = path.join(localRoot, "low-memory-preview.mp4");
+    const result = await new ConcatRenderService(localStore, localSources).render(
+      {
+        outputToken: "low-memory",
+        orderedAssetIds: clips.map((clip) => clip.assetId),
+        clipSelections: clips,
+        transitionSeconds: 0.3,
+        resolution: "360P",
+        videoCodec: "H264",
+        lowMemorySegmented: true,
+      },
+      lowMemoryOutput,
+    );
+    expect(result).toMatchObject({ lowMemorySegmented: true, lowMemoryStageCount: 3 });
+    expect(await new MediaProbe().probe(lowMemoryOutput)).toMatchObject({
+      width: 640,
+      height: 360,
+      videoCodec: "h264",
+    });
+    expect(
+      (await readdir(localRoot)).filter((name) => name.includes("low-memory") && name !== "low-memory-preview.mp4"),
+    ).toEqual([]);
+    const normalOutput = path.join(localRoot, "normal-preview.mp4");
+    const normalResult = await new ConcatRenderService(localStore, localSources).render(
+      {
+        outputToken: "normal",
+        orderedAssetIds: clips.map((clip) => clip.assetId),
+        clipSelections: clips,
+        transitionSeconds: 0.3,
+        resolution: "360P",
+        videoCodec: "H264",
+        lowMemorySegmented: false,
+      },
+      normalOutput,
+    );
+    const [lowInfo, normalInfo] = await Promise.all([
+      new MediaProbe().probe(lowMemoryOutput),
+      new MediaProbe().probe(normalOutput),
+    ]);
+    expect(normalResult.lowMemorySegmented).toBe(false);
+    expect(normalResult.lowMemoryStageCount).toBeUndefined();
+    expect(normalResult.expectedDurationMs).toBe(result.expectedDurationMs);
+    expect(normalInfo).toMatchObject({ width: lowInfo.width, height: lowInfo.height, videoCodec: lowInfo.videoCodec });
+    expect(Math.abs((normalInfo.durationMs ?? 0) - (lowInfo.durationMs ?? 0))).toBeLessThanOrEqual(100);
+    const visualComparison = await runProcess("ffmpeg", [
+      "-hide_banner",
+      "-nostats",
+      "-i",
+      lowMemoryOutput,
+      "-i",
+      normalOutput,
+      "-lavfi",
+      "[0:v][1:v]ssim",
+      "-an",
+      "-f",
+      "null",
+      "-",
+    ]);
+    const ssim = Number(/All:([\d.]+)/.exec(visualComparison.stderr)?.[1]);
+    expect(ssim).toBeGreaterThan(0.98);
+    expect(await Promise.all(clipPaths.map((clipPath) => sha256(clipPath)))).toEqual(sourceHashesBefore);
+  }, 90_000);
+
   it("outputs one fixed source range as an actual 3840x2160 MP4 with local zoom and leaves the source unchanged", async () => {
     const asset = store.getProject().sources.find((item) => item.sourcePath === firstPath)!;
     await store.setZoomSegments(asset.id, [
@@ -654,7 +1116,7 @@ describe("concat preview integration", () => {
     expect(info.height).toBe(480);
   }, 30_000);
 
-  it("renders an over-limit review range from its IN point using the configured maximum", async () => {
+  it("renders a manually extended Intro range without applying the configured recommendation as a cap", async () => {
     const asset = introStore.getProject().sources[0];
     await introStore.setIntroSegmentMaxDuration(3_000);
     const reviewRange = {
@@ -667,11 +1129,15 @@ describe("concat preview integration", () => {
       reasons: ["完整檢看"],
     };
     await introStore.setIntroSegments([reviewRange]);
-    const outputRange = { ...reviewRange, outMs: 4_000 };
+    const outputRange = { ...reviewRange };
     let ffmpegArgs: string[] = [];
     const fakeRunner = async (_executable: string, args: string[], expectedDurationMs: number) => {
-      ffmpegArgs = args;
-      await writeFile(args.at(-1)!, "valid-capped-intro-preview");
+      if (args.includes("copy")) {
+        await runProcess("ffmpeg", args);
+      } else {
+        ffmpegArgs = args;
+        await copyFile(asset.sourcePath, args.at(-1)!);
+      }
       return { cancelled: false, outTimeMs: expectedDurationMs };
     };
     const result = await new ConcatRenderService(introStore, introSources, "fake-ffmpeg", fakeRunner).render(
@@ -685,9 +1151,9 @@ describe("concat preview integration", () => {
       },
       path.join(root, "capped-intro-preview.mp4"),
     );
-    expect(result.expectedDurationMs).toBe(3_000);
+    expect(result.expectedDurationMs).toBe(6_000);
     expect(ffmpegArgs).toContain("1");
-    expect(ffmpegArgs).toContain("3");
+    expect(ffmpegArgs).toContain("6");
     expect(introStore.getProject().introSegments[0]).toMatchObject({ inMs: 1_000, outMs: 7_000 });
     await introStore.setIntroSegmentMaxDuration(15_000);
   });
@@ -721,10 +1187,13 @@ describe("concat preview integration", () => {
     let ffmpegArgs: string[] = [];
     let filterGraphFromScript = "";
     const fakeRunner = async (_executable: string, args: string[], expectedDurationMs: number) => {
-      ffmpegArgs = args;
       const scriptIndex = args.indexOf("-/filter_complex");
-      filterGraphFromScript = await readFile(args[scriptIndex + 1], "utf8");
-      await writeFile(args.at(-1)!, "valid-combined-preview");
+      const script = await readFile(args[scriptIndex + 1], "utf8");
+      if (!args.includes("copy")) {
+        ffmpegArgs = args;
+        filterGraphFromScript = script;
+      }
+      await runProcess("ffmpeg", args);
       return { cancelled: false, outTimeMs: expectedDurationMs };
     };
     const result = await new ConcatRenderService(introStore, introSources, "fake-ffmpeg", fakeRunner).render(
@@ -771,11 +1240,12 @@ describe("concat preview integration", () => {
       asset.sourcePath,
       asset.sourcePath,
     ]);
-    expect(ffmpegArgs.slice(inputPositions[2] - 4, inputPositions[2] + 2)).toEqual([
+    expect(ffmpegArgs.slice(inputPositions[2] - 5, inputPositions[2] + 2)).toEqual([
       "-ss",
       "4",
       "-t",
       "3",
+      "-noautorotate",
       "-i",
       asset.sourcePath,
     ]);
@@ -797,7 +1267,10 @@ describe("concat preview integration", () => {
     ];
     await introStore.setIntroSegments(introClips);
     const bgmPath = path.join(root, "scope-music.mp3");
-    await writeFile(bgmPath, "read-only-test-music");
+    await runProcess("ffmpeg", [
+      "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+      "sine=frequency=330:sample_rate=48000:duration=8", "-c:a", "libmp3lame", "-y", bgmPath,
+    ]);
     const track = {
       id: "scope-music",
       sourcePath: bgmPath,
@@ -820,7 +1293,7 @@ describe("concat preview integration", () => {
     const fakeRunner = async (_executable: string, args: string[], expectedDurationMs: number) => {
       const scriptIndex = args.indexOf("-/filter_complex");
       graphs.push(await readFile(args[scriptIndex + 1], "utf8"));
-      await writeFile(args.at(-1)!, "valid-bgm-scope-preview");
+      await runProcess("ffmpeg", args);
       return { cancelled: false, outTimeMs: expectedDurationMs };
     };
     const baseRequest = {
@@ -842,7 +1315,16 @@ describe("concat preview integration", () => {
         transitionStyle: "DISSOLVE" as const,
       },
     };
-    const renderer = new ConcatRenderService(introStore, introSources, "fake-ffmpeg", fakeRunner);
+    const renderer = new ConcatRenderService(
+      introStore,
+      introSources,
+      "fake-ffmpeg",
+      fakeRunner,
+      undefined,
+      undefined,
+      undefined,
+      { isSilent: async (_asset, _startMs, _durationMs) => false },
+    );
     const introOnly = await renderer.render(
       { outputToken: "intro-bgm-only", ...baseRequest, bgmScopes: { intro: true, main: false } },
       path.join(root, "intro-bgm-only.mp4"),
@@ -852,13 +1334,13 @@ describe("concat preview integration", () => {
       path.join(root, "main-bgm-only.mp4"),
     );
     expect(introOnly.bgmScopesApplied).toEqual({ intro: true, main: false });
-    expect(graphs[0]).toContain("atrim=start=0:end=2.9");
-    expect(graphs[0]).toContain("afade=t=out:st=1.4:d=1.5");
+    expect(graphs.some((graph) => graph.includes("atrim=start=0:end=2.9"))).toBe(true);
+    expect(graphs.some((graph) => graph.includes("afade=t=out:st=1.4:d=1.5"))).toBe(true);
     expect(mainOnly.bgmScopesApplied).toEqual({ intro: false, main: true });
-    expect(graphs[1]).toContain("adelay=5600:all=1");
+    expect(graphs.some((graph) => graph.includes("adelay=5600:all=1"))).toBe(true);
     await introStore.removeBgmTrack(track.id);
     await rm(bgmPath);
-  });
+  }, 30_000);
 
   it("renders the required 3-second Main-start prompt from a read-only source with two Chinese text rows", async () => {
     const asset = introStore.getProject().sources[0];
@@ -1090,8 +1572,42 @@ describe("concat preview integration", () => {
     expect(result.photoShutterAppliedCount).toBe(1);
     const expectedDurationMs = anchor.mediaInfo!.durationMs! + 3_000 - 600;
     expect(Math.abs((await new MediaProbe().probe(output)).durationMs! - expectedDurationMs)).toBeLessThanOrEqual(120);
+    const firstVideoHash = await packetHash(output, "v:0");
+    const firstAudioHash = await packetHash(output, "a:0");
+    const firstInsertion = insertionStore.getProject().mediaInsertions[0];
+    await insertionStore.setInsertionAudio("MAIN", firstInsertion.id, {
+      ...firstInsertion.insertionAudio!,
+      sfxEnabled: false,
+    });
+    const secondOutput = path.join(root, "photo-inside-video-audio-only.mp4");
+    let videoEncodeInvocations = 0;
+    let postCopyInvocations = 0;
+    const countedRunner = async (...parameters: Parameters<typeof runFfmpegWithProgress>) => {
+      const args = parameters[1];
+      const videoCodecIndex = args.indexOf("-c:v");
+      if (videoCodecIndex >= 0 && args[videoCodecIndex + 1] === "copy") postCopyInvocations += 1;
+      else if (videoCodecIndex >= 0) videoEncodeInvocations += 1;
+      return runFfmpegWithProgress(...parameters);
+    };
+    const second = await new ConcatRenderService(
+      insertionStore, insertionSources, "ffmpeg", countedRunner, shutterPath,
+    ).render(
+      {
+        outputToken: "inside-audio-only",
+        orderedAssetIds: clips.map((clip) => clip.assetId),
+        clipSelections: clips,
+        transitionSeconds: 0.3,
+        resolution: "360P",
+      },
+      secondOutput,
+    );
+    expect(second.videoBaseMasterReused).toBe(true);
+    expect(videoEncodeInvocations).toBe(0);
+    expect(postCopyInvocations).toBe(1);
+    expect(await packetHash(secondOutput, "v:0")).toBe(firstVideoHash);
+    expect(await packetHash(secondOutput, "a:0")).not.toBe(firstAudioHash);
     expect(await Promise.all([sha256(anchorPath), sha256(photoPath)])).toEqual(before);
-  }, 45_000);
+  }, 60_000);
 
   it("splits a host around an independently trimmed inserted video and preserves both sources", async () => {
     const anchorPath = path.join(root, "影片安插主片.mp4");
@@ -1349,6 +1865,23 @@ describe("concat preview integration", () => {
     // First clip has audio, second is silent: exactly one auto-dub.
     expect(dubbed).toMatchObject({ autoDubClipCount: 1, bgmAppliedCount: 1 });
     expect((await volumeStats(dubbedOutput, 1.5, 0.9)).mean).toBeGreaterThan(-35);
+    const virtualOutput = path.join(root, "dubbed-virtual-5.1.mp4");
+    const virtualResult = await new ConcatRenderService(store, sources).render(
+      {
+        outputToken: "dub-virtual",
+        ...currentMainRequest(),
+        transitionSeconds: 0.3,
+        resolution: "360P",
+        audioProcessing: { ...DEFAULT_AUDIO_PROCESSING_OPTIONS, mode: "VIRTUAL_SURROUND_5_1" },
+      },
+      virtualOutput,
+    );
+    expect(virtualResult).toMatchObject({
+      autoDubClipCount: 1,
+      audioChannels: 6,
+      audioRemuxedWithoutVideoEncode: true,
+    });
+    expect((await new MediaProbe().probe(virtualOutput)).audioChannelLayout).toMatch(/5\.1/);
     await store.setDubWithBgm(clips[1].id, false);
     const mutedOutput = path.join(root, "dubbed-optout.mp4");
     const mutedResult = await new ConcatRenderService(store, sources).render(
@@ -1360,6 +1893,91 @@ describe("concat preview integration", () => {
     await store.setDubWithBgm(clips[1].id, true);
     await store.removeBgmTrack("bgm-dub-source");
   }, 90_000);
+
+  it("auto-dubs a selected video range whose audio track exists but is acoustically silent", async () => {
+    const silentVideoPath = path.join(root, "silent-audio-track.mp4");
+    const firstMusicPath = path.join(root, "first-page-music.mp3");
+    await runProcess("ffmpeg", [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=green:s=640x360:r=24",
+      "-f",
+      "lavfi",
+      "-i",
+      "anullsrc=r=48000:cl=stereo",
+      "-t",
+      "1.5",
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-shortest",
+      "-y",
+      silentVideoPath,
+    ]);
+    await runProcess("ffmpeg", [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=660:sample_rate=48000",
+      "-t",
+      "2",
+      "-c:a",
+      "libmp3lame",
+      "-q:a",
+      "4",
+      "-y",
+      firstMusicPath,
+    ]);
+    const localStore = new ProjectStore(path.join(root, "silent-audio-app-data"));
+    await localStore.initialize();
+    const localSources = new SourceService(localStore, new MediaProbe());
+    await localSources.importSelected([silentVideoPath]);
+    const localAsset = await localSources.ensureMetadata(localStore.getProject().sources[0].id);
+    expect(localAsset.mediaInfo?.audioCodec).toBe("aac");
+    await localStore.addBgmTracks([
+      {
+        id: "literal-first-track",
+        sourcePath: firstMusicPath,
+        fileName: path.basename(firstMusicPath),
+        sizeBytes: (await stat(firstMusicPath)).size,
+        durationMs: 2_000,
+        sourceInMs: 0,
+        sourceOutMs: 2_000,
+        timelineInMs: 999_999,
+        timelineOutMs: 1_001_999,
+        fadeInMs: 0,
+        fadeOutMs: 0,
+        volumePercent: 100,
+        sourcePolicy: "READ_ONLY",
+        addedAt: new Date().toISOString(),
+      },
+    ]);
+    const selections = mainRenderSelections(localStore.getProject());
+    const output = path.join(root, "silent-audio-auto-dubbed.mp4");
+    const result = await new ConcatRenderService(localStore, localSources).render(
+      {
+        outputToken: "silent-audio-auto-dub",
+        orderedAssetIds: selections.map((clip) => clip.assetId),
+        clipSelections: selections,
+        transitionSeconds: 0.3,
+        resolution: "360P",
+        purpose: "CONCAT",
+      },
+      output,
+    );
+    expect(result).toMatchObject({ autoDubClipCount: 1, bgmAppliedCount: 1 });
+    expect((await volumeStats(output, 0.2, 0.8)).mean).toBeGreaterThan(-35);
+  }, 60_000);
 
   it("honors rotation metadata and renders a portrait clip over same-source blurred side fill", async () => {
     const basePath = path.join(root, "rotation-base.mp4");
@@ -1406,10 +2024,19 @@ describe("concat preview integration", () => {
       isPortrait: true,
     });
     const graph = buildConcatFilterGraph(
-      [{ sourcePath: rotatedPath, durationMs: 1500, hasAudio: false, isPortrait: true }],
+      [
+        {
+          sourcePath: rotatedPath,
+          durationMs: 1500,
+          hasAudio: false,
+          isPortrait: true,
+          orientationRotationDegrees: 90,
+        },
+      ],
       0.3,
       "360P",
     );
+    expect(graph.filterGraph).toContain("transpose=cclock");
     expect(graph.filterGraph).toContain("split=2");
     expect(graph.filterGraph).toContain("boxblur");
     expect(graph.filterGraph).toContain("overlay=(W-w)/2:(H-h)/2");
@@ -1423,7 +2050,11 @@ describe("concat preview integration", () => {
       { outputToken: "portrait", ...currentMainRequest(), transitionSeconds: 0.3, resolution: "360P" },
       portraitOutput,
     );
-    expect(await new MediaProbe().probe(portraitOutput)).toMatchObject({ width: 640, height: 360 });
+    expect(await new MediaProbe().probe(portraitOutput)).toMatchObject({
+      width: 640,
+      height: 360,
+      rotationDegrees: 0,
+    });
   }, 60_000);
 
   it("actually burns independently styled Traditional Chinese and English subtitles into a playable MP4", async () => {

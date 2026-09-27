@@ -1,15 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_ZOOM_ENHANCEMENT_PRESET,
   DEFAULT_ZOOM_PERCENT,
-  INTRO_MAX_SEGMENT_MS,
+  INTRO_EDIT_MIN_SEGMENT_MS,
   INTRO_MAX_SEGMENTS,
-  INTRO_MIN_SEGMENT_MS,
   MAX_ZOOM_PERCENT,
   MIN_ZOOM_PERCENT,
+  PHOTO_SOUND_PREVIEW_URL,
   type IntroSuggestion,
   type MainExclusionRange,
   type PreviewResult,
+  type PreviewResolution,
   type ProjectManifest,
   type SourceAsset,
   type ZoomEnhancementPreset,
@@ -17,10 +18,12 @@ import {
   type ZoomSegmentUpdateResult,
 } from "../../shared/domain";
 import { retainedDurationMs } from "../../shared/editing-rules";
+import { outputCanvasProfile, usesBlurredCanvas, type OutputCanvasAspect } from "../../shared/output-canvas";
 import { formatBytes, formatDate, formatDuration, formatResolution } from "../format";
 import { ConcatRenderModal } from "./ConcatRenderModal";
 import { TimeRangeFields } from "./MinuteSecondFields";
 import { SafeDefaultButton } from "./SafeDefaultButton";
+import { buildInsertionAudioPlan } from "../../shared/insertion-audio-plan";
 
 function formatPlayerTime(milliseconds: number): string {
   const value = Math.max(0, Math.round(milliseconds));
@@ -54,6 +57,8 @@ interface PreviewModalProps {
   onProjectUpdated(project: ProjectManifest): void;
   onOpenExternal(asset: SourceAsset): void;
   onOpenIntro(): void;
+  outputAspect?: OutputCanvasAspect;
+  outputResolution?: PreviewResolution;
 }
 
 export function PreviewModal({
@@ -64,6 +69,8 @@ export function PreviewModal({
   onProjectUpdated,
   onOpenExternal,
   onOpenIntro,
+  outputAspect = "LANDSCAPE_16_9",
+  outputResolution = "1080P",
 }: PreviewModalProps) {
   const [preview, setPreview] = useState<PreviewResult>();
   const [previewError, setPreviewError] = useState<string>();
@@ -81,14 +88,60 @@ export function PreviewModal({
   const [introAddedRank, setIntroAddedRank] = useState<number>();
   const [introAddedTargetDurationMs, setIntroAddedTargetDurationMs] = useState<number>();
   const [previewRetry, setPreviewRetry] = useState(0);
+  const [dubBusy, setDubBusy] = useState(false);
+  const [selectedAudioInstanceId, setSelectedAudioInstanceId] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
+  const backgroundVideoRef = useRef<HTMLVideoElement>(null);
+  const insertionSfxRef = useRef<HTMLAudioElement>(null);
+  const insertionBgmRef = useRef<HTMLAudioElement>(null);
   const variant = asset.kind === "VIDEO" ? "VIDEO_PROXY" : "IMAGE_PREVIEW";
   const durationMs = asset.mediaInfo?.durationMs ?? 0;
   const allowed = asset.previewRange ?? { inMs: 0, outMs: durationMs };
   const draftRetainedDurationMs = safeRetainedDuration(asset, ranges);
   const displayWidth = asset.mediaInfo?.displayWidth ?? asset.mediaInfo?.width ?? 16;
   const displayHeight = asset.mediaInfo?.displayHeight ?? asset.mediaInfo?.height ?? 9;
+  const canvas = outputCanvasProfile(outputAspect, outputResolution);
+  const sourceIsPortrait = asset.mediaInfo?.isPortrait ?? displayHeight > displayWidth;
+  const blurredCanvas = usesBlurredCanvas(sourceIsPortrait, outputAspect);
   const activeZoom = zoomSegments.find((segment) => currentMs >= segment.startMs && currentMs < segment.endMs);
+  const insertionAudioItems = useMemo(() => {
+    const main = buildInsertionAudioPlan(project, { purpose: "CONCAT", prependIntro: false }).items;
+    const intro = buildInsertionAudioPlan(project, { purpose: "INTRO" }).items;
+    return [...main, ...intro].filter((item) => item.assetId === asset.id);
+  }, [project, asset.id]);
+  const selectedAudioItem = insertionAudioItems.find((item) => item.instanceId === selectedAudioInstanceId);
+  const selectedBgmTrack = selectedAudioItem?.bgmTrackId
+    ? project.bgmTracks.find((track) => track.id === selectedAudioItem.bgmTrackId)
+    : undefined;
+  const selectedSourceRange = selectedAudioItem?.scope === "MAIN"
+    ? project.mediaInsertions.find((item) => item.id === selectedAudioItem.instanceId)
+    : selectedAudioItem?.scope === "INTRO"
+      ? project.introSegments.find((item) => item.id === selectedAudioItem.instanceId)
+      : undefined;
+  const selectedSourceInMs = selectedSourceRange
+    ? "sourceInMs" in selectedSourceRange ? selectedSourceRange.sourceInMs : selectedSourceRange.inMs
+    : undefined;
+  const selectedSourceOutMs = selectedSourceRange
+    ? "sourceOutMs" in selectedSourceRange ? selectedSourceRange.sourceOutMs : selectedSourceRange.outMs
+    : undefined;
+
+  const syncInsertionAudio = (shouldPlay: boolean, restart: boolean) => {
+    const bgm = insertionBgmRef.current;
+    if (bgm && selectedBgmTrack && selectedAudioItem?.bgmEnabled) {
+      bgm.volume = Math.max(0, Math.min(1, (selectedAudioItem.bgmVolumePercent ?? 28) / 100));
+      if (restart) bgm.currentTime = (selectedAudioItem.bgmSourcePositionMs ?? selectedBgmTrack.sourceInMs) / 1000;
+      if (shouldPlay) void bgm.play().catch(() => undefined);
+      else bgm.pause();
+    }
+    const sfx = insertionSfxRef.current;
+    if (sfx && selectedAudioItem?.sfxEnabled) {
+      sfx.volume = Math.max(0, Math.min(1, (selectedAudioItem.sfxVolumePercent ?? 70) / 100));
+      if (shouldPlay && restart) {
+        sfx.currentTime = 0;
+        void sfx.play().catch(() => undefined);
+      } else if (!shouldPlay) sfx.pause();
+    }
+  };
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -138,6 +191,7 @@ export function PreviewModal({
     const player = videoRef.current;
     const clamped = Math.max(0, Math.min(durationMs || Number.MAX_SAFE_INTEGER, Math.round(nextMs)));
     if (player) player.currentTime = clamped / 1000;
+    if (backgroundVideoRef.current) backgroundVideoRef.current.currentTime = clamped / 1000;
     setCurrentMs(clamped);
   };
 
@@ -233,9 +287,8 @@ export function PreviewModal({
 
   const validateIntroRange = (range: { inMs: number; outMs: number }, latestProject: ProjectManifest) => {
     const lengthMs = range.outMs - range.inMs;
-    const segmentMaximum = Math.min(INTRO_MAX_SEGMENT_MS, latestProject.introSegmentMaxDurationMs);
-    if (lengthMs < INTRO_MIN_SEGMENT_MS || lengthMs > segmentMaximum)
-      throw new Error(`加入片頭的放大時段必須介於 3 秒與目前每段上限 ${segmentMaximum / 1000} 秒。`);
+    if (lengthMs < INTRO_EDIT_MIN_SEGMENT_MS)
+      throw new Error(`加入片頭的放大時段至少需要 ${INTRO_EDIT_MIN_SEGMENT_MS / 1000} 秒。`);
     if (latestProject.introSegments.length >= INTRO_MAX_SEGMENTS)
       throw new Error(`片頭已達 ${INTRO_MAX_SEGMENTS} 段上限。`);
     const usedMs = latestProject.introSegments.reduce((sum, segment) => sum + segment.outMs - segment.inMs, 0);
@@ -287,6 +340,26 @@ export function PreviewModal({
     reasons: ["從刪除／排除編輯器手動選取"],
     origin: "MANUAL",
   });
+
+  const changeDubWithBgm = async (enabled: boolean) => {
+    setDubBusy(true);
+    setEditorError(undefined);
+    try {
+      const updated = await window.sourceApp.setDubWithBgm(asset.id, enabled);
+      const updatedAsset = updated.sources.find((item) => item.id === asset.id);
+      if (updatedAsset) onAssetUpdated(updatedAsset);
+      onProjectUpdated(updated);
+      setNotice(
+        enabled
+          ? "已啟用：轉出前會實測這支影片所用片段；若無聲，使用配樂頁第一首配樂。"
+          : "已停用這支影片的無聲自動配樂；即使偵測為無聲也保持原音。",
+      );
+    } catch (reason) {
+      setEditorError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setDubBusy(false);
+    }
+  };
 
   return (
     <>
@@ -341,59 +414,178 @@ export function PreviewModal({
             )}
             {preview && asset.kind === "IMAGE" && (
               <div
-                className="preview-image-shell"
-                style={{ "--preview-aspect": `${displayWidth} / ${displayHeight}` } as React.CSSProperties}
+                className={`preview-output-canvas ${blurredCanvas ? "uses-blurred-fill" : "uses-black-pad"}`}
+                style={{ "--preview-aspect": canvas.cssAspectRatio } as React.CSSProperties}
               >
-                <img
-                  src={preview.url}
-                  alt={asset.fileName}
-                  style={{ aspectRatio: `${displayWidth} / ${displayHeight}` }}
-                />
+                {blurredCanvas && (
+                  <img className="preview-canvas-background" src={preview.url} alt="" aria-hidden="true" />
+                )}
+                <img className="preview-canvas-foreground" src={preview.url} alt={asset.fileName} />
+                <span className="preview-canvas-badge">
+                  輸出畫布 {outputAspect === "PORTRAIT_9_16" ? "9:16" : "16:9"} · {canvas.width}×{canvas.height}
+                </span>
               </div>
             )}
             {preview && asset.kind === "VIDEO" && (
               <div
-                className={`preview-video-shell preview-aspect-frame ${displayWidth >= displayHeight ? "is-landscape" : "is-portrait"}`}
-                style={{ "--preview-aspect": `${displayWidth} / ${displayHeight}` } as React.CSSProperties}
+                className={`preview-output-canvas ${blurredCanvas ? "uses-blurred-fill" : "uses-black-pad"}`}
+                style={{ "--preview-aspect": canvas.cssAspectRatio } as React.CSSProperties}
               >
-                <video
-                  ref={videoRef}
-                  src={preview.url}
-                  autoPlay
-                  playsInline
-                  preload="metadata"
-                  aria-label={`放大播放 ${asset.fileName}`}
-                  tabIndex={0}
+                <div
+                  className="preview-canvas-zoom-layer"
                   style={{
-                    aspectRatio: `${displayWidth} / ${displayHeight}`,
                     transform: activeZoom ? `scale(${activeZoom.zoomPercent / 100})` : "scale(1)",
                     transformOrigin: activeZoom
                       ? `${activeZoom.centerXPercent}% ${activeZoom.centerYPercent}%`
                       : "50% 50%",
                   }}
-                  onClick={() => void togglePlayback()}
-                  onKeyDown={(event) => {
-                    if (event.key === " " || event.key === "Enter") {
-                      event.preventDefault();
-                      void togglePlayback();
-                    }
-                  }}
-                  onLoadedMetadata={(event) => {
-                    setCurrentMs(Math.round(event.currentTarget.currentTime * 1000));
-                  }}
-                  onTimeUpdate={(event) => setCurrentMs(Math.round(event.currentTarget.currentTime * 1000))}
-                  onPlay={() => setPlaying(true)}
-                  onPause={() => setPlaying(false)}
-                  onEnded={() => setPlaying(false)}
                 >
-                  此裝置無法播放預覽代理。
-                </video>
+                  {blurredCanvas && (
+                    <video
+                      ref={backgroundVideoRef}
+                      className="preview-canvas-background"
+                      src={preview.url}
+                      autoPlay
+                      muted
+                      playsInline
+                      preload="metadata"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <video
+                    ref={videoRef}
+                    className="preview-canvas-foreground"
+                    src={preview.url}
+                    muted={selectedAudioItem?.gates.original === false || (!selectedAudioItem && asset.mainAudioGates?.original === false)}
+                    autoPlay
+                    playsInline
+                    preload="metadata"
+                    aria-label={`放大播放 ${asset.fileName}`}
+                    tabIndex={0}
+                    onClick={() => void togglePlayback()}
+                    onKeyDown={(event) => {
+                      if (event.key === " " || event.key === "Enter") {
+                        event.preventDefault();
+                        void togglePlayback();
+                      }
+                    }}
+                    onLoadedMetadata={(event) => {
+                      const time = Math.round(event.currentTarget.currentTime * 1000);
+                      setCurrentMs(time);
+                      if (backgroundVideoRef.current) backgroundVideoRef.current.currentTime = time / 1000;
+                    }}
+                    onTimeUpdate={(event) => {
+                      const time = Math.round(event.currentTarget.currentTime * 1000);
+                      setCurrentMs(time);
+                      const background = backgroundVideoRef.current;
+                      if (background && Math.abs(background.currentTime * 1000 - time) > 120)
+                        background.currentTime = time / 1000;
+                      if (selectedSourceOutMs !== undefined && time >= selectedSourceOutMs - 20) {
+                        event.currentTarget.pause();
+                        syncInsertionAudio(false, false);
+                      }
+                    }}
+                    onPlay={() => {
+                      setPlaying(true);
+                      void backgroundVideoRef.current?.play().catch(() => undefined);
+                      const atOccurrenceStart =
+                        selectedSourceInMs !== undefined && Math.abs(currentMs - selectedSourceInMs) < 100;
+                      syncInsertionAudio(true, atOccurrenceStart);
+                    }}
+                    onPause={() => {
+                      setPlaying(false);
+                      backgroundVideoRef.current?.pause();
+                      syncInsertionAudio(false, false);
+                    }}
+                    onEnded={() => setPlaying(false)}
+                  >
+                    此裝置無法播放預覽代理。
+                  </video>
+                </div>
+                <span className="preview-canvas-badge">
+                  輸出畫布 {outputAspect === "PORTRAIT_9_16" ? "9:16" : "16:9"} · {canvas.width}×{canvas.height}
+                </span>
               </div>
             )}
           </div>
 
+          {insertionAudioItems.length > 0 && (
+            <section className="preview-insertion-audio-context" aria-label="插入實例混音預覽">
+              <h3>插入實例的 SFX／BGM 預覽</h3>
+              <p>
+                一般來源預覽只播放原素材，不代表插入後混音。請選擇明確的片頭／正片實例，預覽會讀取與 Final 相同的 Audio Plan。
+              </p>
+              <label>
+                插入實例
+                <select
+                  aria-label="選擇插入實例混音"
+                  value={selectedAudioInstanceId}
+                  onChange={(event) => {
+                    const instanceId = event.target.value;
+                    setSelectedAudioInstanceId(instanceId);
+                    const selected = insertionAudioItems.find((item) => item.instanceId === instanceId);
+                    const range = selected?.scope === "MAIN"
+                      ? project.mediaInsertions.find((item) => item.id === instanceId)
+                      : project.introSegments.find((item) => item.id === instanceId);
+                    const sourceIn = range
+                      ? "sourceInMs" in range ? range.sourceInMs : range.inMs
+                      : 0;
+                    seek(sourceIn);
+                  }}
+                >
+                  <option value="">只播放原素材（不套用插入混音）</option>
+                  {insertionAudioItems.map((item, index) => (
+                    <option key={`${item.scope}:${item.instanceId}`} value={item.instanceId}>
+                      {item.scope === "INTRO" ? "片頭" : "正片"}實例 {index + 1} · {formatDuration(item.timelineStartMs)} · {item.sfxEnabled ? "SFX" : "無 SFX"}／{item.bgmEnabled ? `BGM #${item.bgmTrackIndex}` : "無 BGM"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {selectedAudioItem && asset.kind === "IMAGE" && (
+                <button type="button" onClick={() => syncInsertionAudio(true, true)}>
+                  ▶ 試聽這個照片實例的 SFX／BGM
+                </button>
+              )}
+              {selectedAudioItem && (
+                <small>
+                  {selectedAudioItem.scope === "INTRO" ? "片頭" : "正片"} · Project {formatDuration(selectedAudioItem.timelineStartMs)}–{formatDuration(selectedAudioItem.timelineEndMs)} · {selectedAudioItem.continuousWithPrevious ? "BGM 延續前一實例" : "BGM 新範圍／關閉"}
+                </small>
+              )}
+              {selectedAudioItem?.sfxEnabled && (
+                <audio ref={insertionSfxRef} src={PHOTO_SOUND_PREVIEW_URL} preload="auto" />
+              )}
+              {selectedBgmTrack && selectedAudioItem?.bgmEnabled && (
+                <audio
+                  ref={insertionBgmRef}
+                  src={`preview-media://bgm/${encodeURIComponent(selectedBgmTrack.id)}`}
+                  preload="auto"
+                  onLoadedMetadata={(event) => {
+                    event.currentTarget.currentTime =
+                      (selectedAudioItem.bgmSourcePositionMs ?? selectedBgmTrack.sourceInMs) / 1000;
+                  }}
+                  onTimeUpdate={(event) => {
+                    if (event.currentTarget.currentTime >= selectedBgmTrack.sourceOutMs / 1000 - 0.03)
+                      event.currentTarget.currentTime = selectedBgmTrack.sourceInMs / 1000;
+                  }}
+                />
+              )}
+            </section>
+          )}
+
           {asset.kind === "VIDEO" && durationMs > 0 && (
             <section className="main-exclusion-editor">
+              <label className="photo-sound-toggle preview-auto-dub-toggle">
+                <input
+                  type="checkbox"
+                  checked={asset.dubWithBgm !== false}
+                  disabled={dubBusy}
+                  onChange={(event) => void changeDubWithBgm(event.target.checked)}
+                />
+                <span>
+                  <strong>預設勾選：偵測無聲時自動配樂</strong>
+                  <small>忽略照片；依本片段時間實測，使用配樂頁第一首</small>
+                </span>
+              </label>
               <div className="precision-transport">
                 <button
                   type="button"

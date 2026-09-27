@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTimelinePlan } from "../src/shared/timeline-plan";
+import { buildMainTimelineGroups, buildTimelinePlan } from "../src/shared/timeline-plan";
 import type { ProjectManifest } from "../src/shared/domain";
 
 function project(): ProjectManifest {
@@ -109,5 +109,92 @@ describe("canonical timeline plan", () => {
     expect(plan.durationMs).toBe(2_000 + 20 * 2_000 - 20 * 700);
     expect(plan.clips[0].scope).toBe("INTRO");
     expect(plan.clips[1].scope).toBe("MAIN");
+  });
+
+  it("includes inserted videos and photos in the anchor duration and subsequent starts", () => {
+    const p = project();
+    p.sources = [
+      {
+        id: "anchor",
+        kind: "VIDEO",
+        fileName: "anchor.mp4",
+        sourcePath: "C:/anchor.mp4",
+        sizeBytes: 1,
+        modifiedAt: "",
+        addedAt: "",
+        sourcePolicy: "READ_ONLY",
+        mediaInfo: { durationMs: 5_000 },
+      },
+      {
+        id: "insert-video",
+        kind: "VIDEO",
+        fileName: "insert.mp4",
+        sourcePath: "C:/insert.mp4",
+        sizeBytes: 1,
+        modifiedAt: "",
+        addedAt: "",
+        sourcePolicy: "READ_ONLY",
+        mediaInfo: { durationMs: 3_000 },
+      },
+      {
+        id: "insert-photo",
+        kind: "IMAGE",
+        fileName: "insert.jpg",
+        sourcePath: "C:/insert.jpg",
+        sizeBytes: 1,
+        modifiedAt: "",
+        addedAt: "",
+        sourcePolicy: "READ_ONLY",
+      },
+      {
+        id: "next",
+        kind: "VIDEO",
+        fileName: "next.mp4",
+        sourcePath: "C:/next.mp4",
+        sizeBytes: 1,
+        modifiedAt: "",
+        addedAt: "",
+        sourcePolicy: "READ_ONLY",
+        mediaInfo: { durationMs: 4_000 },
+      },
+    ] as never;
+    p.timelineOrder = ["anchor", "next"];
+    p.mediaInsertions = [
+      {
+        id: "iv",
+        anchorVideoAssetId: "anchor",
+        insertedAssetId: "insert-video",
+        atMs: 2_000,
+        sourceInMs: 0,
+        sourceOutMs: 3_000,
+        sequenceIndex: 0,
+        previousPlacement: "TIMELINE",
+        previousTimelineIndex: 1,
+        createdAt: "",
+      },
+      {
+        id: "ip",
+        anchorVideoAssetId: "anchor",
+        insertedAssetId: "insert-photo",
+        atMs: 4_000,
+        sourceInMs: 0,
+        sourceOutMs: 2_000,
+        sequenceIndex: 1,
+        previousPlacement: "TIMELINE",
+        previousTimelineIndex: 2,
+        createdAt: "",
+      },
+    ];
+
+    const groups = buildMainTimelineGroups(p, { transitionSeconds: 0 });
+    expect(groups[0]).toMatchObject({
+      anchorAssetId: "anchor",
+      outputStartMs: 0,
+      outputEndMs: 10_000,
+      sourceDurationMs: 10_000,
+      insertedDurationMs: 5_000,
+    });
+    expect(groups[1].outputStartMs).toBe(10_000);
+    expect(buildTimelinePlan(p, { transitionSeconds: 0 }).durationMs).toBe(14_000);
   });
 });

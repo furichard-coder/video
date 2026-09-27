@@ -37,7 +37,13 @@ import { MusicSuggestionService } from "./services/music-suggestion";
 import { AiPublishAssetsService } from "./services/ai-publish-assets";
 import type { CredentialProtector } from "./services/ai-settings";
 import { RenderPowerGuard } from "./services/render-power-guard";
+import { RenderHardwareService } from "./services/render-hardware";
+import { RenderBenchmarkService } from "./services/render-benchmark";
+import { AudioPreviewService } from "./services/audio-preview";
 import { moveWindowsCursor, safeActionCenter } from "./services/safe-cursor";
+import { RenderCommandState } from "./services/render-command-state";
+import { RemoteControlServer } from "./services/remote-control-server";
+import { PostSuccessPowerScheduler } from "./services/post-success-power";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -66,11 +72,15 @@ if (process.env.APP_TEST_USER_DATA_PATH) {
 
 let mainWindow: BrowserWindow | undefined;
 let applicationQuitting = false;
+let remoteControlServer: RemoteControlServer | undefined;
 const renderPowerGuard = new RenderPowerGuard(powerSaveBlocker);
+const postSuccessPower = new PostSuccessPowerScheduler({ isBusy: () => renderPowerGuard.isActive });
 const confirmedCloseWindowIds = new Set<number>();
 
 app.on("before-quit", () => {
   applicationQuitting = true;
+  void remoteControlServer?.stop();
+  postSuccessPower.stop();
 });
 
 function createWindow(): BrowserWindow {
@@ -117,9 +127,51 @@ function createWindow(): BrowserWindow {
         async () => {
           try {
             if (screenshotPath) {
+              const clickText = process.env.APP_SCREENSHOT_CLICK_TEXT?.trim();
+              if (clickText) {
+                const clicked = await window.webContents.executeJavaScript(`(() => {
+                  const target = [...document.querySelectorAll('button')]
+                    .find((button) => button.textContent?.includes(${JSON.stringify(clickText)}));
+                  target?.click();
+                  return Boolean(target);
+                })()`);
+                console.log(`SCREENSHOT_CLICK ${clicked ? "READY" : "NOT_FOUND"} ${clickText}`);
+                await new Promise((resolve) => setTimeout(resolve, 700));
+                const opened = await window.webContents.executeJavaScript(
+                  `Boolean(document.querySelector('.intro-studio-backdrop'))`,
+                );
+                console.log(`SCREENSHOT_INTRO ${opened ? "OPEN" : "CLOSED"}`);
+                // Allow the modal's first compositor frame to settle before capture.
+                await new Promise((resolve) => setTimeout(resolve, 900));
+                await window.webContents.executeJavaScript(`new Promise((resolve) => {
+                  const started = Date.now();
+                  const check = () => {
+                    const rows = document.querySelectorAll('.suggestion-list li').length;
+                    const thumbnails = document.querySelectorAll('.intro-segment-thumbnail img').length;
+                    if ((rows > 0 && thumbnails >= rows) || Date.now() - started > 8000) resolve(true);
+                    else setTimeout(check, 150);
+                  };
+                  check();
+                })`);
+              }
               await mkdir(path.dirname(screenshotPath), { recursive: true });
               const image = await window.capturePage();
               await writeFile(screenshotPath, image.toPNG());
+              const rowsScreenshotPath = screenshotPath.replace(/\.png$/i, "-rows.png");
+              const rowsReady = await window.webContents.executeJavaScript(`(() => {
+                const pane = document.querySelector('.intro-suggestions');
+                const lastRow = pane?.querySelector('.suggestion-list li:last-child');
+                if (!pane || !lastRow) return false;
+                pane.scrollTop = pane.scrollHeight;
+                lastRow.scrollIntoView({ block: 'end', inline: 'nearest' });
+                return true;
+              })()`);
+              if (rowsReady) {
+                await new Promise((resolve) => setTimeout(resolve, 1200));
+                const rowsImage = await window.capturePage();
+                await writeFile(rowsScreenshotPath, rowsImage.toPNG());
+                console.log(`SCREENSHOT_ROWS_READY ${rowsScreenshotPath}`);
+              }
               console.log("SCREENSHOT_READY");
             } else {
               if (smokeMarkerPath) {
@@ -172,6 +224,10 @@ void app.whenReady().then(async () => {
     translationSettings,
   );
   await subtitleTranslation.initialize();
+  const renderHardware = new RenderHardwareService(app.getPath("userData"));
+  const renderCommands = new RenderCommandState(store.getProject().name);
+  const remoteControl = new RemoteControlServer(renderCommands);
+  remoteControlServer = remoteControl;
   const concatRenderer = new ConcatRenderService(
     store,
     sources,
@@ -180,6 +236,10 @@ void app.whenReady().then(async () => {
     photoSoundPath,
     subtitleTranslation,
     path.join(app.getPath("userData"), "cache", "subtitle-burnin"),
+    undefined,
+    undefined,
+    renderHardware,
+    renderCommands,
   );
   const subtitlePreviews = new SubtitlePreviewService(
     path.join(app.getPath("userData"), "cache", "subtitle-preview"),
@@ -189,7 +249,9 @@ void app.whenReady().then(async () => {
   await subtitlePreviews.initialize();
   const outputHistory = new OutputHistoryStore(app.getPath("userData"));
   await outputHistory.initialize();
-  registerPreviewProtocol(previews, store, photoSoundPath, subtitlePreviews, outputHistory);
+  const audioPreviews = new AudioPreviewService(path.join(app.getPath("userData"), "cache", "audio-preview"), store);
+  await audioPreviews.initialize();
+  registerPreviewProtocol(previews, store, photoSoundPath, subtitlePreviews, outputHistory, audioPreviews);
   const youtubeBrowsers = new WindowsYoutubeBrowserLauncher((url) => shell.openExternal(url));
   const youtubeSettings = new YoutubeSettingsStore(
     app.getPath("userData"),
@@ -257,6 +319,12 @@ void app.whenReady().then(async () => {
     shell.openPath(targetPath),
   );
   const bgm = new BgmService(store, new MediaProbe());
+  const renderBenchmark = new RenderBenchmarkService(
+    app.getPath("userData"),
+    app.isPackaged
+      ? path.join(process.resourcesPath, "assets", "benchmark-render-modes.ps1")
+      : path.join(app.getAppPath(), "scripts", "benchmark-render-modes.ps1"),
+  );
   registerIpc(
     store,
     sources,
@@ -279,7 +347,17 @@ void app.whenReady().then(async () => {
     musicSuggestions,
     aiPublishAssets,
     renderPowerGuard,
+    renderHardware,
+    renderBenchmark,
+    audioPreviews,
+    renderCommands,
+    remoteControl,
+    postSuccessPower,
   );
+  postSuccessPower.subscribe((status) => {
+    for (const window of BrowserWindow.getAllWindows())
+      if (!window.isDestroyed()) window.webContents.send("power-action:status", status);
+  });
   ipcMain.removeAllListeners("app:confirm-close");
   ipcMain.on("app:confirm-close", (event) => {
     const target = BrowserWindow.fromWebContents(event.sender);
@@ -287,6 +365,9 @@ void app.whenReady().then(async () => {
     if (renderPowerGuard.isActive) {
       target.webContents.send("app:close-requested");
       return;
+    }
+    if (postSuccessPower.isScheduled) {
+      postSuccessPower.cancel("使用者确认关闭 App；已明确取消尚未执行的电源动作。");
     }
     confirmedCloseWindowIds.add(target.id);
     target.close();

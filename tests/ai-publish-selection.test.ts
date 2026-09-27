@@ -34,7 +34,7 @@ describe("AI publish visual candidate selection", () => {
       name: "AI 發布候選",
       sourcePolicy: "READ_ONLY",
       previewPolicy: "DERIVED_CACHE_ONLY_NOT_MASTER",
-      previewerVersion: "preview-v3",
+      previewerVersion: "preview-v5-orientation-planar-safe",
       sortMode: "MANUAL_ORDER",
       createdAt: "2026-09-01T00:00:00.000Z",
       updatedAt: "2026-09-01T00:00:00.000Z",

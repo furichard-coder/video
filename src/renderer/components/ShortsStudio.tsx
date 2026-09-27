@@ -4,6 +4,7 @@ import type {
   ConcatRenderEstimate,
   IntroSuggestion,
   OutputSelection,
+  PreviewResolution,
   ProjectManifest,
 } from "../../shared/domain";
 import { DEFAULT_AUDIO_PROTECTION_OPTIONS } from "../../shared/domain";
@@ -20,6 +21,8 @@ export function ShortsStudio({ project, onClose }: Props) {
   const [segments, setSegments] = useState<IntroSuggestion[]>(() => structuredClone(project.introSegments));
   const [limit, setLimit] = useState<60 | 180>(60);
   const [includeBgm, setIncludeBgm] = useState(true);
+  const [resolution, setResolution] = useState<PreviewResolution>("1080P");
+  const [lowMemorySegmented, setLowMemorySegmented] = useState(true);
   const [audioProtection, setAudioProtection] = useState<AudioProtectionOptions>(() => ({
     ...DEFAULT_AUDIO_PROTECTION_OPTIONS,
   }));
@@ -81,8 +84,12 @@ export function ShortsStudio({ project, onClose }: Props) {
       .estimateConcatRender({
         outputToken: output.token,
         expectedDurationMs: durationMs,
-        resolution: "480P",
+        resolution,
         videoCodec: "H265_QSV",
+        lowMemorySegmented,
+        orderedAssetIds: segments.map((item) => item.assetId),
+        clipSelections: segments.map((item) => ({ assetId: item.assetId, inMs: item.inMs, outMs: item.outMs })),
+        transitionSeconds: 0.3,
       })
       .then((value) => {
         if (active) {
@@ -99,7 +106,7 @@ export function ShortsStudio({ project, onClose }: Props) {
     return () => {
       active = false;
     };
-  }, [durationMs, output?.token]);
+  }, [durationMs, lowMemorySegmented, output?.token, resolution, segments]);
 
   const move = (index: number, delta: number) => {
     const next = [...segments];
@@ -119,22 +126,32 @@ export function ShortsStudio({ project, onClose }: Props) {
         const latest = await window.sourceApp.estimateConcatRender({
           outputToken: output.token,
           expectedDurationMs: durationMs,
-          resolution: "480P",
+          resolution,
           videoCodec: "H265_QSV",
+          lowMemorySegmented,
+          orderedAssetIds: segments.map((item) => item.assetId),
+          clipSelections: segments.map((item) => ({ assetId: item.assetId, inMs: item.inMs, outMs: item.outMs })),
+          transitionSeconds: 0.3,
         });
         setEstimate(latest);
         if (!latest.canRender) {
           setError(latest.warning);
           return;
         }
+        const selectedWarnings = lowMemorySegmented
+          ? latest.modeEstimates?.lowMemory.warnings
+          : latest.modeEstimates?.normal.warnings;
+        if (selectedWarnings?.length && !window.confirm(`${selectedWarnings.join("\n")}\n\n仍要繼續轉檔嗎？`)) return;
       }
       const completed = await window.sourceApp.startConcatRender({
         outputToken: output.token,
         orderedAssetIds: segments.map((item) => item.assetId),
         clipSelections: segments.map((item) => ({ assetId: item.assetId, inMs: item.inMs, outMs: item.outMs })),
         transitionSeconds: 0.3,
-        resolution: "480P",
+        resolution,
         videoCodec: "H265_QSV",
+        lowMemorySegmented,
+        resourceWarningAcknowledged: true,
         purpose: "SHORTS",
         shortsSource: "INTRO",
         shortsPortrait: true,
@@ -176,6 +193,39 @@ export function ShortsStudio({ project, onClose }: Props) {
                 <option value={180}>180 秒（明確選擇）</option>
               </select>
             </label>
+            <fieldset className="render-choice-group compact-render-choice" aria-label="Shorts 輸出解析度">
+              <legend>輸出解析度</legend>
+              {(["1080P", "1440P"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={resolution === value ? "is-selected" : ""}
+                  aria-pressed={resolution === value}
+                  onClick={() => setResolution(value)}
+                >
+                  {value === "1440P" ? "1440p（2K）· 1440×2560" : "1080p · 1080×1920"}
+                </button>
+              ))}
+            </fieldset>
+            <fieldset className="render-choice-group compact-render-choice" aria-label="Shorts 轉檔模式">
+              <legend>轉檔模式</legend>
+              <button
+                type="button"
+                className={lowMemorySegmented ? "is-selected" : ""}
+                aria-pressed={lowMemorySegmented}
+                onClick={() => setLowMemorySegmented(true)}
+              >
+                低記憶體分段（預設）
+              </button>
+              <button
+                type="button"
+                className={!lowMemorySegmented ? "is-selected" : ""}
+                aria-pressed={!lowMemorySegmented}
+                onClick={() => setLowMemorySegmented(false)}
+              >
+                一般模式
+              </button>
+            </fieldset>
             <label>
               <input type="checkbox" checked={includeBgm} onChange={(e) => setIncludeBgm(e.target.checked)} />{" "}
               套用目前配樂／音量設定
@@ -248,6 +298,34 @@ export function ShortsStudio({ project, onClose }: Props) {
                   <dd>{formatBytes(estimate.estimatedFreeAfterBytes)}</dd>
                 </div>
               </dl>
+              <div className="render-mode-comparison" role="table" aria-label="Shorts 兩種轉檔模式資源比較">
+                {(
+                  [
+                    ["lowMemory", "低記憶體分段"],
+                    ["normal", "一般轉檔"],
+                  ] as const
+                ).map(([key, label]) => {
+                  const mode = estimate.modeEstimates[key];
+                  const selected = mode.lowMemorySegmented === lowMemorySegmented;
+                  return (
+                    <article
+                      key={key}
+                      className={`render-mode-estimate is-${mode.warningLevel.toLowerCase()} ${selected ? "is-selected" : ""}`}
+                    >
+                      <header>
+                        <strong>{label}</strong>
+                        {selected && <span>目前選擇</span>}
+                      </header>
+                      <dl>
+                        <div><dt>SSD 工作空間</dt><dd>約 {formatBytes(mode.estimatedTemporaryBytes)}</dd></div>
+                        <div><dt>RAM 峰值</dt><dd>約 {formatBytes(mode.estimatedPeakRamBytes)}</dd></div>
+                        <div><dt>處理時間</dt><dd>約 {formatDuration(mode.estimatedRenderTimeMs)}</dd></div>
+                        <div><dt>處理差異</dt><dd>{key === "lowMemory" ? "較省 RAM／較慢" : "較快／較吃 RAM"}</dd></div>
+                      </dl>
+                    </article>
+                  );
+                })}
+              </div>
               {estimate.warning && <p className="render-preflight-warning">⚠ {estimate.warning}</p>}
               <small>預設使用 H.265 Intel QSV GPU；開始前會再次檢查並保留至少 1 GB。</small>
             </section>
@@ -275,6 +353,7 @@ export function ShortsStudio({ project, onClose }: Props) {
           <div className="concat-footer-actions">
             <button
               className="primary-button"
+              aria-busy={busy || checking}
               disabled={
                 busy ||
                 checking ||
@@ -285,7 +364,11 @@ export function ShortsStudio({ project, onClose }: Props) {
               }
               onClick={() => void start()}
             >
-              {busy ? "產出中…" : checking ? "正在檢查磁碟…" : "產出 Shorts 1080×1920"}
+              {busy
+                ? "產出中…"
+                : checking
+                  ? "正在檢查資源…"
+                  : `產出 Shorts ${resolution === "1440P" ? "1440×2560" : "1080×1920"}`}
             </button>
             <button className="secondary-button" onClick={onClose}>
               完成

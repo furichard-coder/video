@@ -100,14 +100,11 @@ export function balanceIntroSegments(
 }
 
 /**
- * A stored Intro range is also the user's review range and may be longer than
- * the configured output maximum. Rendering always keeps the chosen IN point
- * and takes at most the configured duration from there.
+ * The stored Intro range is the render range. The configured per-segment value
+ * is a recommendation for AI/balancing only and must never silently trim a
+ * manually dragged range.
  */
 export function introSegmentsForOutput(segments: IntroSuggestion[], maxSegmentDurationMs: number): IntroSuggestion[] {
-  const maximumMs = normalizeIntroSegmentMaxDuration(maxSegmentDurationMs);
-  return segments.map((segment) => ({
-    ...segment,
-    outMs: Math.min(segment.outMs, segment.inMs + maximumMs),
-  }));
+  normalizeIntroSegmentMaxDuration(maxSegmentDurationMs);
+  return segments.map((segment) => ({ ...segment }));
 }

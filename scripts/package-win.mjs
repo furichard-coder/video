@@ -1,5 +1,6 @@
 import { packager } from "@electron/packager";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,10 +9,30 @@ const appRoot = fileURLToPath(new URL("..", import.meta.url));
 const packageMeta = JSON.parse(await readFile(path.join(appRoot, "package.json"), "utf8"));
 const outputRoot = path.join(appRoot, "release", `v${packageMeta.version}`);
 const executableName = `SceneryWalkerSourceOrganizer-v${packageMeta.version}`;
-const dunesShutterSource =
-  "C:\\草漯沙丘地質公園 YT長片\\camera shutter sound\\freesound_community-camera-shutter-click-14671.mp3";
+const dunesShutterSource = [
+  "C:\\草漯沙丘地質公園 YT長片\\camera shutter sound\\freesound_community-camera-shutter-click-14671.mp3",
+  path.join(
+    appRoot,
+    "release",
+    "v0.75.0",
+    "SceneryWalkerSourceOrganizer-win32-x64",
+    "resources",
+    "assets",
+    "camera-shutter-click-14671.mp3",
+  ),
+  path.join(
+    appRoot,
+    "release",
+    "v0.61.0",
+    "SceneryWalkerSourceOrganizer-win32-x64",
+    "resources",
+    "assets",
+    "camera-shutter-click-14671.mp3",
+  ),
+].find((candidate) => existsSync(candidate));
 const dunesShutterHash = "0AC71ECABF302784F5FFB9483C2939C46B1784AA0D016A322CB6D1A0ECA07B93";
 
+if (!dunesShutterSource) throw new Error("找不到已核准的沙丘快門音效，已停止封裝。");
 const shutterBytes = await readFile(dunesShutterSource);
 if (createHash("sha256").update(shutterBytes).digest("hex").toUpperCase() !== dunesShutterHash) {
   throw new Error("沙丘前案相機快門音效雜湊不符，已停止封裝。");
@@ -29,7 +50,10 @@ const appPaths = await packager({
   prune: true,
   electronZipDir: process.env.ELECTRON_ZIP_DIR?.trim() || undefined,
   ignore: [
-    /^\/(?:artifacts|docs|release|scripts|src|tests|\.upload-staging)(?:\/|$)/,
+    /^\/(?:artifacts|docs|release|scripts|src|tests|\.upload-staging|\.recovery)(?:\/|$)/,
+    /^\/\.v069-validation(?:\/|$)/,
+    /^\/\.v070-validation(?:\/|$)/,
+    /^\/\.v071-validation(?:\/|$)/,
     /^\/(?:tsconfig\..*|vite\.config\..*|vitest\.config\..*|啟動素材整理App\.cmd)$/,
   ],
 });
@@ -43,6 +67,10 @@ await mkdir(outputPath, { recursive: true });
 const soundAssetDirectory = path.join(outputPath, "resources", "assets");
 await mkdir(soundAssetDirectory, { recursive: true });
 await copyFile(dunesShutterSource, path.join(soundAssetDirectory, "camera-shutter-click-14671.mp3"));
+await copyFile(
+  path.join(appRoot, "scripts", "benchmark-render-modes.ps1"),
+  path.join(soundAssetDirectory, "benchmark-render-modes.ps1"),
+);
 await writeFile(
   path.join(soundAssetDirectory, "相機快門音效來源與授權.txt"),
   [
@@ -75,6 +103,7 @@ await writeFile(
     "- 從正片或片頭移除只改專案引用，不會刪除磁碟來源、proxy 或 metadata；最近移除可恢復。",
     "- 縮圖與低解析 preview 位於 App Data cache，不能作正式輸出。",
     "- 依目前排序可產生串連預覽，交接疊化可選 0.3／0.5／0.7 秒。",
+    "- 串連／片頭輸出可選低記憶體、一般或高速轉檔；高速模式優先 Intel QSV 編碼與相容來源的硬體解碼，失敗自動回退 CPU。三種模式都保留動態記憶體／Commit／SSD 安全閘與失敗續轉。",
     "- 網格內可播放影片，並以雙把手設定每支影片的 IN／OUT。",
     "- 網格影片縮圖左鍵會直接依副檔名設定用外部播放器開啟唯讀意圖原檔；照片縮圖仍在 App 內等比例放大，其他卡片按鍵不變。",
     "- 程式上方「Aa 設定」可調整全介面文字與 75%–150% 整體縮放；也支援 Ctrl＋滑鼠滾輪、Ctrl＋上下鍵／加減號及 Ctrl+0，並在下次開啟時恢復。",
@@ -90,11 +119,22 @@ await writeFile(
     "- MOV 代理使用 preview-v3：iPhone HEVC MOV 優先走較穩定的軟體解碼，輸出 H.264/AAC MP4；新檔與 cache hit 都會驗證 codec、尺寸與時長，損壞舊代理會局部重建。",
     "- 片段時段編輯整合局部放大、固定時段、片頭加入與 4K 輸出；使用者放大量為 0%–300%，0% 代表不改構圖，另有四組銳利化／消噪預設。",
     "- 新片段時段預設勾選加入片頭；保存後會顯示實際順位，可直接前往片頭確認。也可開啟該時段的 4K MP4 輸出確認頁，真正輸出仍需按 OK。",
-    "- 片頭影片的 IN／OUT 拉桿是完整檢看範圍，可超過目前每段最高秒數；超時會顯示橘紅警示，拖回上限內即恢復正常。",
-    "- 超時片段仍可完整循環預覽；片頭輸出前會再次詢問，確認後保留 IN 起點並只轉出每段最高秒數。相同規則也套用片頭＋正片與字幕片頭預覽。",
+    "- 片頭影片／照片的 IN／OUT 與秒數可超出 3–22 秒建議範圍；超出只顯示橘色提醒，不會回彈或自動改值。",
+    "- 片頭預覽與輸出都完整保留所選 IN／OUT，不再依每段建議秒數截短；編輯只保留來源邊界與 0.1 秒步進，極短片段會由轉出預檢提示疊化需求。",
     "- 從網格加入片頭時，片頭目前目標時間會自動增加該片段秒數，避免短目標阻擋。",
     "- 正片排除時間不會輸出黑畫面或靜音占位，也不影響獨立的 Intro 片段。",
-    "- 串連與 Intro 預覽可選 360p／480p／720p／4K。",
+    "- 串連與 Intro 預覽可選 360p／480p／720p／1080p／1440p（2K）／4K；新安裝預設 1080p。Shorts 可選 1080×1920 或 1440×2560。",
+    "- 轉檔前會檢查 RAM、Pagefile、Windows Commit、TEMP 與輸出磁碟；執行中顯示 Encoder、Decoder、CPU、GPU Encode/Decode、RAM、FPS、speed、Current Jobs、SSD/TEMP 與動態剩餘時間。",
+    "- 實際耗時從第一個 FFmpeg 工作正式啟動後起算，與預估剩餘時間分開顯示；每五分鐘保存，失敗、取消與 Resume 後的本次／累積耗時都不會因關閉 App 而歸零。",
+    "- 已完成分段會以 codec、duration、size 與 SHA-256 驗證並保存；失敗、App 關閉或 Windows 重開後可續轉，final concat 失敗不會重編完成片段。",
+    "- 音訊可選 Original Stereo 2.0、Enhanced Stereo 2.0、Virtual Surround 5.1，或在安全條件成立時保持原始多聲道；Virtual 5.1 是演算法模擬，不等同原生錄製的 5.1。",
+    "- Virtual 5.1 可輸出 AAC／AC-3／E-AC-3、48 kHz；YouTube 預設 AAC 384 kbps。A/B 試聽在雙聲道設備使用清楚標示的 5.1→Stereo 相容性監聽。",
+    "- Enhanced／Virtual 音訊是在已完成影片後獨立處理，影片 stream copy 不重新編碼；若音訊階段失敗，Resume 可沿用已完成的影片 master。",
+    "- 正片安插與片頭的每次照片預設啟用相機快門 SFX；SFX 與 BGM 可獨立複選。同一首 BGM 會跨連續照片／影片延續播放，短曲會以平滑循環補足。",
+    "- 放大預覽若同一來源有多個插入實例，会要求明确选择实例后才套用该次 SFX／BGM，不会猜测或把一个实例设定套到另一个。",
+    "- 『iPhone 遠端』只在使用者主动开启时绑定一个私人 LAN IP；QR 为十分钟单次配对。手机可看转档状态并安全开始、分段边界暂停、继续或二次确认取消，断线不会中止 Windows 转档。",
+    "- 远端不提供来源／输出文件浏览，不直接控制 FFmpeg，也不开放 Internet；外网请使用 VPN／Tailscale 类型安全连接，不要直接做 port forwarding。",
+    "- Audio Processing 可复用既有 H.264 Proxy Video，并从当前播放头建立约 20 秒原始高品质音讯试听 cache；A/B 保留同一播放头，Preview cache 不用于正式输出。",
     "- 正片、片頭與 Shorts 轉檔預設 H.265／HEVC；若舊裝置無法播放，可改選 H.264／AVC。",
     "- 所有 MP4 轉檔預設啟用本機人聲／突發聲音保護：可調 3–6 dB 平滑壓低、1–4 kHz EQ 與 -1／-2 dB Peak Ceiling；只改新輸出，不改來源音軌。",
     "- 這是聲學能量判斷，不會把音訊上傳，也不能理解談話內容是否真的私密；請在輸出後人工聽檢。",
@@ -117,7 +157,7 @@ await writeFile(
     "- AI 測試會先實際檢查 API；失敗時再確認 Codex／ChatGPT 登入備援。API project 額度和 Codex 使用量仍是不同資源。",
     "- 設定頁可指定全域或依副檔名的外部播放器（系統預設／VLC／WMP／MPC-HC／自訂 EXE）。",
     "- 網格影片中央縮圖左鍵會直接開啟唯讀意圖原檔；在中央縮圖按右鍵才顯示 proxy／原檔選項；底部不再重複顯示外部播放按鈕。",
-    "- 放大預覽維持素材原始顯示比例，播放與拖曳控制列位於影像外，不遮住畫面。",
+    "- 網格放大預覽使用正片 16:9 輸出畫布；橫式素材置中補黑，直式素材中央等比並以同來源放大模糊填滿，接近實際成片構圖。",
     "- 若明確選擇原檔，來源保護仍取決於外部播放器行為。",
     "- 素材原音預設 80%、新配樂預設 35%；兩者及每段 automation 可在 0%–200% 調整。",
     "- 補充素材須逐筆決定安插位置；待決定素材不會進入串連輸出。",
@@ -127,6 +167,8 @@ await writeFile(
     "- 可用 AI 建立語音／畫面字幕草稿，逐項同步預覽、修改、確認或排除；只有已確認字幕可匯出 UTF-8 SRT。",
     "- 字幕工作台可複選片頭／正片範圍；兩者使用各自的時間基準，舊專案字幕預設歸入正片。",
     "- 片頭／正片片段秒數、IN／OUT、順序、插入與疊化更動時，字幕會依素材來源時間逐筆同步；字幕頁也可強制把所選範圍改回待確認，再逐筆核對畫面與頭尾。",
+    "- 字幕沒有單筆覆寫時，中文預設每行 12 字，英文或中英混合預設每行 20 字；每一筆可在行寬視窗用上下鍵或直接輸入 6–60 並立即保存。預覽與嵌入 MP4 共用 480p 樣式、換行及精確位置規則。",
+    "- 每支影片在網格與放大預覽都有預設勾選的『偵測無聲時自動配樂』；轉出前實測該片段 IN／OUT，照片不分析，真正無聲時使用配樂頁第一首。",
     "- 字幕逐筆檢查只建立該 cue 對應的短區段 H.264 proxy；強制校對會依現行主軸重新對位，再逐筆詢問畫面一致或進入文字／時間修改。",
     "- 選擇片頭字幕後，AI 完成會自動建立可取消、有進度顯示的 480P 審核代理；有效 cache 會直接重用，不會拿代理當正式輸出來源。",
     "- 片頭字幕會隨代理播放時間動態顯示；可即時修改文字、垂直位置、字級、顏色、陰影與外框，格式會保留為下次預設。字幕頁以 480P 為字級基準，實際 360P／720P／4K 輸出會等比例換算。",
@@ -134,7 +176,7 @@ await writeFile(
     "- 已嵌入 MP4 畫面的字幕不能直接替換舊字；修改字幕時須從無字幕乾淨影片或唯讀來源產生新版本，舊 MP4 不覆寫。SRT 則可直接修改後重新匯出。",
     "- 翻譯先使用 OpenAI API 的全新無狀態請求；失敗才用另行設定並以 Windows 安全儲存加密的 Google Cloud Translation API Key。ChatGPT／Codex 登入與 API 額度分開。",
     "- 每支影片卡有『刪除／排除部分片段』入口；只改專案時間線，不刪除來源、proxy 或 metadata。",
-    "- Intro 沒有 3 分鐘硬上限；超過 3 分鐘只顯示紅色警示。最多 50 段、每段 3–22 秒。",
+    "- Intro 沒有 3 分鐘硬上限；超過 3 分鐘只顯示紅色警示。最多 50 段；每段 3–22 秒是橘色建議，非人工拖曳上限。",
     "- 手動加入 Intro 影片、照片或局部放大時，不會重算既有片段 IN／OUT，也不會自動增加片頭目標時間；容量不足會要求明確調整。",
     "- 按下「OK，開始產出」後才會寫入選定的新 MP4；取消時會先要求 FFmpeg 安全寫完 MPEG-4 結尾，已有足夠畫面便保留較短可播放檔，太早取消才清除 partial。",
     "- 完成或取消後保留的 MP4 可直接用 .mp4 播放器設定開啟。",
@@ -147,6 +189,7 @@ await writeFile(
     "- 勾選 Intro＋Main 串接時會強制確認 3–7 秒的正片開始提示頁；可輸入兩行文字、調整字級／間距／半透明暗色遮罩，並選柔和疊化、淡至黑或直接切換。設定會沿用到下次開啟。",
     "- 正片開始提示頁可挑選正片開場或任一已確認片頭片段；輸出時重讀唯讀原始素材，不使用 proxy 當背景來源。",
     "- 完整正片完成後預設倒數 60 秒開啟 YouTube 最後確認頁；可取消或事先取消勾選，MP4 仍保留，且不會跳過人工確認。",
+    "- 成功後電源動作預設關閉；可另行選擇轉檔成功或官方 YouTube API 上傳成功後，倒數 60 秒自动关机、休眠或睡眠。失败、取消、暂停、未完成缩图及浏览器拖放都不会触发；倒数期间可取消。",
     "- YouTube 預設交接會開啟 Chrome 官方上傳頁、複製最新 MP4 路徑並在檔案總管選取；請自行拖入並確認發布。官方 API 保留為第二選項。",
     "- 正片預覽完成後也可交接到 BiliBili／TikTok 官方投稿頁；App 會複製路徑並選取 MP4，仍需在平台內確認後發布。",
     "- 關閉 App 時會先顯示第二確認與短提示音；預設焦點在繼續剪輯，確認後才關閉。",

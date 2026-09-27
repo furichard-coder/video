@@ -107,7 +107,7 @@ beforeAll(async () => {
     provider: "OPENAI",
     visionModel: "gpt-5.6-terra",
     transcriptionModel: "gpt-4o-transcribe-diarize",
-    apiKey: "sk-test-123456789012345678901234567890",
+    apiKey: "fixture-test-1234567890123456789012345",
     makeActive: true,
   });
   service = new AiStoryAnalysisService(
@@ -350,7 +350,7 @@ describe("AI story and subtitle pipeline", () => {
       expect.any(Uint8Array),
       "voice-input.webm",
       "audio/webm",
-      expect.objectContaining({ apiKey: expect.stringMatching(/^sk-/) }),
+      expect.objectContaining({ apiKey: expect.stringMatching(/^fixture-/) }),
       "zh",
       undefined,
     );

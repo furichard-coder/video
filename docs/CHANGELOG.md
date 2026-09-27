@@ -2,6 +2,193 @@
 
 本檔案是每次可交付功能變更的簡短索引。完成一個階段後，必須同步更新本檔案、`README.md` 與 `VERIFICATION.md`；只有通過建置／測試的內容才可標記為完成。
 
+## v0.80.0 — 2026-09-27
+
+- 完成舊 checkpoint 的唯讀、copy-on-write recovery 驗證：10 個 level-1 segments（合計約 67.547 GiB、媒體時間約 8976.718 秒）全部可讀並可重用；不重編這 10 段，但 Base Master 必須重跑。
+- 舊版已刪除的 `base.partial.mkv` 不可恢復。跨 group xfade、ASS 字幕與浮水印需要 picture pass，因此 10 段不能直接全程 `-c copy`；最後 audio mux 保持 `-c:v copy`。
+- 加入／驗證 15 秒 disk monitor 與 EMERGENCY safe pause。v0.79 classifier 命中 ENOSPC，但原始 stderr 未保存；E: 144.45 GiB free 是刪除 partial 後的過時快照，UI 曾顯示「建議再清 20 GiB」的錯誤提示，但沒有執行該清理，實際最低 free 未知。
+- QSV GQ25 維持為基準；30 秒 bounded 方案測試出現 SSIM 下降，故回退既有 GQ25。本機 NVENC runtime 不支援，實際為 QSV／CPU filter，慢速瓶頸約 0.10–0.115x；完整長片未實測，不宣稱加速成功。
+- 驗證：74 files／459 tests、typecheck、production build、audit、source／packaged smokes 通過。這些數字是本次 run 的紀錄，日後重跑可能修正。
+- Windows x64 可攜版獨立封裝於 `release/v0.80.0/SceneryWalkerSourceOrganizer-win32-x64/`，EXE SHA-256：`2445347DC1F96D24A4B463C6CB669F0C0BEF9FA2607BA27D0E40E6BD853B93FC`；未覆蓋 v0.79。
+
+## v0.79.0 — 2026-09-26
+
+- 修正 `UserPreferencesStore.update()` 遺漏 `renderTemporaryFolder` 的問題；先前檔案選擇器與寫入權限檢查雖成功，設定卻未進入持久偏好，估算與轉檔啟動因而繼續回退至 Windows `C:` TEMP。
+- Render TEMP 現在會驗證為絕對路徑、保存至 `settings/user-preferences.json`，重開 App 後仍能回讀；選擇後的 estimate 與 `concat:start` 均由同一偏好取得 validated path。
+- 新 checkpoint 的 work root 建於新選擇的 TEMP；既有 checkpoint 依舊使用紀錄中的原 work root，不進行跨磁碟搬移，也不觸碰來源、成品或舊 TEMP。
+- 本機 `E:\temp` 驗證為健康 NTFS、可寫，測試 marker 已立即移除且沒有留下檔案。
+
+## v0.78.0 — 2026-09-24
+
+- 「精彩片頭」左側片段清單改為縮圖優先的 Flat／Compact UI；片段卡固定使用與 Intro Final 相同的 16:9 canvas，照片與影片一致排列，时长叠在缩图角落。
+- 常用功能收敛为 Preview／Trim／Original Audio／BGM／SFX／Delete icon toolbar；每个 icon 具有 selected／enabled／disabled／unavailable／hover／focus 状态、短 Tooltip 与明确 ARIA 名称。排序、影像分析／字幕与缩图重载移入 More menu。
+- 裁切、秒数与既有 `InsertionAudioControls` 改为按需展开；仍调用原有 Project State／Audio Engine，没有修改 Preview、Render、排序、删除或混音逻辑。
+- Intro thumbnail Renderer state 加入 `assetId + IN/OUT` signature，裁切范围改变后不会继续显示旧缩图；拖曳仍以 segment ID 作为 React／cache state key，并新增排序后图片不串位测试。
+- 继续沿用 480px JPEG、IntersectionObserver lazy load、首个非黑有效影格与来源 fingerprint／range／version cache；每个来源最多保留 64 组 Intro thumbnail JPG／marker，旧缩图只从 App-owned cache 依时间回收。
+
+## v0.77.0 — 2026-09-22
+
+- Render Resource Architecture 收斂為 LOW_DISK／BALANCED／HIGH_SPEED 三種明確 profile；UI、estimate、runtime policy 與實際 render request 共用同一份 profile／RAM／TEMP budget，避免只顯示設定值卻未真正套用。
+- Peak disk estimate 拆出 retained intermediates、concurrent partial、可重用 picture/base-audio master、audio TEMP、final output 與 mux overhead；完成 downstream 驗證後才依 checkpoint dependency 回收已消費中繼，保留可安全 resume 的 durable master。
+- 三種 profile 使用同一份實際專案輸入估算；Low Disk 45 Mbps、Balanced 1.22×、High Speed 1.44× intermediate cap，並保留 runtime RAM／Commit／SSD admission gate 與 adaptive jobs。
+- Intro thumbnail 改為 first-valid-frame lazy generation；cache key 包含來源 fingerprint、時間範圍與版本，來源 hash／縮圖 cache 不移動、不覆蓋來源，失敗時保留來源並顯示可診斷狀態。
+- UI controls 補足 render profile、RAM／TEMP budget 與片頭段落移動按鈕的可存取名稱；更新 checkpoint／GC／profile 契約測試。
+
+## v0.76.0 — 2026-09-22
+
+- 依 v0.75 真實 checkpoint／diagnostic 釐清 `-28 ENOSPC`：C: 從 87.4 GiB 可用降至 0，work root 約 92.2 GiB、平行 partial 觀測峰值約 118.4 GiB，六個完成片段合計約 74.63 GiB。舊估算漏算 QSV GQ18 實際碼率、parallel partial 與 final/base master 同卷生命週期重疊。
+- SSD preflight 改為 selected Render TEMP 與 final output 分卷峰值；納入中繼、partial、audio TEMP、final、mux overhead、existing reusable data 與 `max(20 GiB, remaining × 20%)` reserve。UI 可選／開啟 Render TEMP 並顯示分卷明細。
+- Runtime 每 30 秒記錄 disk NDJSON；兩個 volume 都有 WARNING／CRITICAL／EMERGENCY 檢查。壓力過高時停止新 wave、完成安全邊界、保存 `PAUSED_DISK_SPACE`；`-28` 顯示失敗路徑、需要釋放容量與可否續轉。
+- Resume offer 先做實體存在／size consistency 檢查，重用前仍執行 ffprobe／SHA-256。舊 05:57:13 checkpoint 的 workRoot／六個 segment 已不存在，因此不能直接續用，UI 不再誤稱為已驗證成果。
+- Segment 改用 MKV；Normal／High Speed 從 1 job 開始並依 completed-wave throughput/pressure 自適應。Normal 相容來源啟用 QSV decode，失敗仍安全回退 CPU。
+- 180 秒 4K→1440p 受控測試：CPU decode baseline `171.72 s / 31.45 fps / 1.05x`，QSV decode `162.33 s / 33.35 fps / 1.11x`，wall time 改善 5.47%。十輸入 xfade 的 2 jobs 僅比 1 job 多約 4% aggregate throughput，因此不固定預設 2 jobs。
+- NVENC 實際 probe 因 driver API 13.0 低於 FFmpeg 要求 13.1 而失敗；本機推薦 H.264 QSV。GQ22 畫質量測低於 GQ18，正式中繼仍保留 GQ18／CQ18／CRF16。
+- 驗證：TypeScript、73 files／447 tests、46 個真實 concat integration tests、production build、Electron source／packaged smoke、npm audit 0 vulnerabilities。EXE SHA-256 `1FD6A1F1B3EA0158A51BA2795BD5869C3D83DC6E5E35C627DD80073177797DBC`。
+
+## v0.75.0 — 2026-09-17
+
+- Main 網格每個 clip 新增原音／配音／BGM／SFX 四個獨立 gate；Intro 與 Main insertion 使用同一型別、sanitizer 與 canonical plan。
+- 片頭／正片 Audio UI 與 Final Review 分區；Intro rows 改成薄分隔線與 compact audio controls，刪除厚重巢狀 card 視覺。
+- 新增正片開始 synthetic SFX：預設 650 ms、可關閉或調整 100–3000 ms；WebAudio 與 FFmpeg 共用同一 cue spec，並與 clip SFX gate 解耦。
+- Global／insertion BGM 都在 post-audio 以 25 ms envelope 套 clip gate；關閉期間歌曲 playhead 持續，重新開啟不 restart。
+- picture/base 與 final audio signature 分離延伸至 gates、cue 與 global BGM；音訊設定更動後沿用畫面 master，`-c:v copy` 重新 mux。
+- manifest 升級 schema 21；schema 20 的 SFX/BGM instance 設定保留，新 gates 全開、cue ON／650 ms。
+- 驗證完成：TypeScript、72 files／443 Vitest tests、production build、Electron source／packaged smoke、UI screenshot 與 `npm audit --audit-level=high`（0 vulnerabilities）全部通過；v0.75.0 EXE SHA-256 `EE19DDD3D29D0BD4267A01C09B353874F9237B451A1A3122F74D8DE92A4FAEF1`。
+
+## v0.74.0 — 2026-09-15
+
+- 新增 Main／Intro 共用的 per-instance `InsertionAudioSettings` 與 canonical `InsertionAudioPlan`；同一來源重複出現時設定互不覆蓋。
+- 照片實例預設快門 SFX 開啟；SFX／BGM 改為獨立複選。BGM 依穩定 track ID 選擇，並在連續照片／影片間延續播放位置。
+- 短 BGM 使用有界 `asplit + acrossfade` 循環；極端重複改用接點平滑並警告。SFX 以獨立 delayed track 疊加，統一 limiter 後再進入既有 Audio Processing。
+- Final 改為可复用的 MKV+FLAC 画面／基础原音 master，再以单一 post pass 混入 insertion BGM/SFX 与最终 DSP；第二阶段固定 `-c:v copy`。只改音讯或 post 失败续转不会重新编码影片，App 重开后也可复用。
+- 每專案只保留最近一份经过 size、SHA-256、duration、codec 验证的可重建 master。SSD 预估纳入其容量，转档页提供确认后单独清理；来源与既有成品不受影响。
+- Main 總體預覽、Intro proxy 預覽、Final Render 與轉出確認摘要讀取同一個 plan。摘要列出每筆 instance 與合併 BGM range。
+- manifest 升級 schema 20；遷移保留舊照片快門明確選擇，不憑空開啟 BGM；既有非安插靜音影片 auto-dub 維持，安插實例不再受兩套欄位重複處理。
+- Windows 可攜版升級 v0.74.0；內建快門素材繼續執行封裝前 hash gate 與封裝後授權說明。交付 EXE SHA-256：`56C10076E45D2FFB4BE2559B1D781FE67C47EA3D91A23C6FE7EDE762009CC016`。
+
+## v0.73.0 — 2026-09-15
+
+- 以实际 v0.72 长片输出重现 tunnel 末段右侧绿色 blurred-fill；右侧色度饱和显著异常，来源与中央前景正常。
+- 高风险的 rotated＋blurred-fill 输入固定使用 CPU decode、canonical orientation 与 planar yuv420p 后再分支；仍保留 QSV hardware encode，且未改变其他9:16或横式素材路径。
+- orientation／preview cache／clip cache／render signature 更新，避免继续使用旧错误衍生档或中继。
+- 新增 Main-owned post-success power scheduler：明确关闭预设、render／YouTube成功触发、60秒倒数与取消、固定shell-free Windows命令、busy/new-job安全取消。
+- YouTube upload 与缩图重试纳入既有防睡眠 guard；要求缩图但失败时不会把上传视为完整成功。
+- 新增电源动作、偏好迁移、成功矩阵、倒数取消、固定命令、QSV decode选择与实际 tunnel像素验证。
+
+## v0.72.0 — 2026-09-14
+
+- 修正 QSV hardware decode 不執行 FFmpeg autorotate，令 coded landscape＋Display Matrix 的直式素材在分段輸出側轉 90°。
+- 新增單一 canonical orientation resolver；所有 video input 固定 `-noautorotate`，依每支素材 matrix 在 hwdownload 後、layout 前明確且只修正一次，沒有對全部 9:16 強制旋轉。
+- Thumbnail／Proxy／Clip Proxy／Intro／Main／Shorts／Final 共用方向結果；中繼與成品 neutralize rotation metadata，Preview cache 版本更新。
+- Orientation normalizer version 納入 checkpoint request signature，v0.72 不重用舊方向策略的 completed segments。
+- 實際 tunnel 素材 QSV 修正 frame 與 software autorotate reference 完全相同；輸出 upright、rotation side data absent，來源 SHA-256 不變。
+- 驗證：65 files／413 tests、TypeScript、build、Electron／packaged smoke、npm audit 全部通過；EXE SHA-256 `58FFFD159BB2BC41F4BEF996B043899DE1AC89F553B481BBBCB55D7D4F255FA0`。
+
+## v0.71.0 — 2026-09-14
+
+- 修正字幕行寬鏈路不一致：共享/UI 已允許 60，但 manifest 載入及 Main validation 仍停在 40；現在單筆與批次統一為 6–60，預設 12／20 不變。
+- Manifest schema 19 新增 cue-specific normalized X／Y position；省略時完全沿用舊中央／全域高度。
+- 每筆字幕增加滑鼠／觸控方向控制、鍵盤 1% 微調與 Shift 5% 大步進，並在每次操作後立即原子保存；文字框與數字輸入的方向鍵不會被攔截。
+- Preview CSS 與 Final ASS 共用同一位置 resolver，覆蓋 16:9／9:16 及 1080P／1440P；timeline 重排／重新對位保留 cue identity 與位置。
+- SRT 保持標準文字／時間格式，不寫入 App 專屬位置 metadata。
+
+## v0.70.0 — 2026-09-14
+
+- 新增按需开启、私人 LAN 单一 IP 绑定的 iPhone Safari Remote Control；REST commands 与 SSE live snapshot 共用 Main render command/state authority。
+- 手机显示完整 render telemetry；Start 限 Windows prepared job，Pause 在 checkpoint-safe boundary 生效，Cancel 采用 UI + server nonce 两阶段确认。断线不会终止 render。
+- 安全层新增 fragment-only 单次 pairing、HttpOnly Strict session cookie、CSRF、exact Origin/Host、private remote address、rate/body limit、expiry、CSP 与 server stop teardown。
+- Audio Processing 改为 Proxy Video 同步试听：选择素材／当前 playhead 的约 20 秒 processed audio cache，A/B 保持播放头并以 120 ms drift gate 校正。
+- 新增 Stereo Width 与低频／人声 EQ，Preview 与 Final 共用 sanitizer/filter builder。Audio cache 采用 timeline/source/profile version key、atomic partial、cancel/debounce/latest-wins 及 2 GiB／七天 LRU。
+
+## v0.69.0 — 2026-09-14
+
+- 新增 Audio Processing 模組、實際 A/B 試聽／LUFS／Peak 分析，以及 Original 2.0、Enhanced 2.0、Virtual 5.1 中性模式。
+- Enhanced／Virtual 在既有畫面 Master 完成後獨立處理音軌，最終 MP4 以 `-c:v copy` 重新封裝，字幕、時間軸、轉場與畫面不重編。
+- FFprobe metadata 擴充 codec、channels、channel layout、sample rate、bitrate；AAC／AC-3／E-AC-3 5.1 均以實際短片驗證。
+- 無聲片段的第一首 BGM 自動套用沿用既有流程，並進入相同的最終 Audio Processing。
+- 保持原始多聲道僅在單支原生多聲道時間段可安全 bitstream preserve 時開放；不安全的混合時間線明確阻擋。
+
+## v0.68.0 — 2026-09-14
+
+- 新增 FFmpeg 實際耗時：第一個 child PID 起算，monotonic 計時跨越分段、等待與 final concat；UI 每秒刷新並與 ETA 分列。
+- checkpoint 升級 schema 2，保存本次與累積 elapsed；舊 schema 1 安全遷移為零基準。Crash／Resume 只承接最後 heartbeat，不計入 App 關閉後 downtime。
+- Main 每五分鐘及 terminal 狀態 atomic 更新 checkpoint，並保留獨立 timing NDJSON。完成、失敗、人工取消三態都有可稽核的實際耗時；取消清除 checkpoint 後 timing history 仍存在。
+- Renderer／background job／output history 顯示完成總耗時、失敗或取消本次耗時，以及 Resume 累積總耗時。
+- 驗證：TypeScript、3 files／16 focused tests、53 files／292 非媒體 tests、production build、Electron smoke、packaged smoke 與 `npm audit` 全部通過。v0.67 正式 FFmpeg 仍在執行，因此依安全要求不跑真實媒體 integration／benchmark。
+- 交付：`release/v0.68.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.68.0.exe`；SHA-256 `DF87C3894664C0707CF97C88CAA13335600C527D8EBC0F695EEAD1AC9DBC40FD`。
+
+## v0.67.0 — 2026-09-13
+
+- 新增真正 FFmpeg runtime encoder／decoder probe 與 hardware fingerprint profile；NVENC/QSV 能力不再由名稱猜測。
+- 本機實測 NVENC H.264/H.265 均因 driver API 版本不足失敗；H.264/H.265 QSV 成功，高速預設改為 H.264 QSV。
+- Codec UI 新增 NVENC、不可用原因與明確 H.265 CPU 慢速警告；render 入口禁止靜默 fallback。
+- Normal 改為動態 2→3→4，高速可從 3 起步；新增 GPU Compute/VRAM、30 秒後平滑 ETA、20 GiB/5% SSD advisory margin。
+- checkpoint segment 加入完整 render profile 欄位；保留已完成 segment 與 final-only retry。
+- 六組同專案 3 秒工具驗證以 High Speed H.264 QSV／3 jobs 最快（19.346 秒、1.179x、35.32 FPS、RAM peak 約 3.32 GiB）；60 秒為正式 profile 預設。
+
+## v0.66.0 — 2026-09-13
+
+- 證實 Normal 現有 command 已為 Intel QSV hardware encode；根因改鎖定 CPU decode/filter/transition、多層 intermediate 與重複 normalization，不以增加 RAM 冒充效能優化。
+- 新增高速模式與 QSV decode 安全嘗試／CPU fallback；1–2 jobs 起跑，依 CPU/GPU/RAM/Commit/SSD 與完成 wave 實測吞吐逐步升降至最多 4。
+- normalized reduction levels 移除重複 fps/scale/pad/audio resample；1080P 在 leaf stage 即固定，final 必要濾鏡仍正確 re-encode。
+- UI 新增 encoder/decoder、GPU encode/decode 與完整 FFmpeg/SSD/TEMP telemetry；ETA 改依觀測 `speed=x`。
+- 完整決策與驗證見 `docs/adr/0059-bottleneck-aware-high-speed-render.md` 與 `docs/VERIFICATION.md`。
+- 同專案 4K 短片段實測最快為 QSV decode＋encode／3 jobs：20.16 FPS、0.673x、CPU 29.63%、RAM peak 3.14 GiB、33.896 秒，比原 Normal 2 jobs 縮短約 32.5%；完整表見 `docs/BENCHMARK_V066.json`。
+- 驗證：58 個測試檔／347 個測試、TypeScript、production build、Electron／packaged smoke、npm audit 0 vulnerabilities。
+- 交付：`release/v0.66.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.66.0.exe`；SHA-256 `22A4A6F12B15A1FD8E0D8CFAED61ED507BF9B8D2D47401037235BD9F3AA2B34C`。
+
+## v0.65.0 — 2026-09-13
+
+- Normal Mode 改用 Total/Available RAM、CPU/GPU 負載與 Windows Commit 建立 10/14/18 GiB 階段式安全預算；24 GiB 至少保留 6 GiB，32 GiB 以上至少保留 8 GiB。
+- 單一 FFmpeg filter graph 限制為最多 10 個視覺輸入；一般模式將 RAM 用於 1–4 個獨立中繼工作，依實際 wave throughput 自動升降 concurrency。
+- 新增 CPU/GPU、聚合 FFmpeg RAM、Current Jobs、FPS、speed 與 SSD throughput 的 UI／NDJSON 診斷記錄。
+- 完整決策與驗證見 `docs/adr/0058-adaptive-normal-render-concurrency.md` 及 `docs/VERIFICATION.md`。
+- 驗證：58 個測試檔／343 個測試、TypeScript、production build、Electron／packaged smoke 及 npm audit 0 vulnerabilities。
+- 交付：`release/v0.65.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.65.0.exe`；SHA-256 `942A7A326515935ACDD721B59A193DBED28BC6AEC766E353AB07803DF39360BA`。
+
+## v0.64.0 — 2026-09-13
+
+- 以 Windows Resource-Exhaustion Event ID 2004 確認 OOM 根因為單一巨大 FFmpeg filter graph 造成 Commit exhaustion；記錄的 FFmpeg commit 峰值約 45.86 GiB，非 C 槽 74 GiB 可用容量不足或 32-bit 限制。
+- 低記憶體與一般模式皆改為動態 bounded stages，加入 RAM／Pagefile／Commit／TEMP／輸出磁碟預檢、執行中資源監測、2 GiB 低記憶體送段暫停、可理解的 OOM 建議及 warning-confirmation。
+- 新增磁碟持久 checkpoint、分段 size／duration／codec／SHA-256 驗證及 restart resume；已完成 segment 不重編，final concat 失敗只重跑 final。
+- 新增 1080P／1440P（2K）及橫式／Shorts 直式共用 Render Profile；Preview、字幕、FFmpeg 早期正規化與資源估算同步。新安裝預設 1080P。
+- 共享 UI tokens 與四層按鍵狀態改為克制的藍／紫／粉色點綴，補齊焦點、選取、載入、警告、危險與 responsive 狀態。
+- 完整決策與公式見 `docs/adr/0057-commit-safe-resumable-render-profile.md`。
+- 驗證：57 個測試檔／338 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke、A–G 資源／失敗續轉矩陣及 `npm audit` 全部通過。
+- 交付：`release/v0.64.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.64.0.exe`；SHA-256 `FD09802B53D53FD622C12E9AEF939E7A079590EAA82D6CD8B5AB8C654ACB5914`。
+
+## v0.63.0 — 2026-09-12
+
+- 串連／片頭輸出改為「低記憶體分段」與「一般轉檔」互斥選擇；低記憶體維持預設，模式只控制既有 staged 或 single-graph pipeline，不更動成片內容。
+- 預檢固定並排顯示兩種模式的 SSD 工作空間、RAM 峰值、時間、同時輸入與中繼工作數，並顯示目前磁碟及 RAM。預估改由 Main 讀取實際片段 metadata、插入素材、轉場、目標解析度／codec 與真實分段生命週期動態計算。
+- 資源接近或超出時以橘／紅色警告但仍可切換；正式開始前照所選 pipeline 重算，只有輸出磁碟無法保留 1 GiB 才阻擋。
+- 驗證：55 個測試檔／330 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke、真實 7 段雙 pipeline 時長／解析度／codec／SSIM 比對及 `npm audit` 全部通過。
+- 交付：`release/v0.63.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.63.0.exe`；SHA-256 `195219C2281D913F3536881F327164E1AA8E636ADA51AFF19B873BAF66BF2B72`。
+
+## v0.62.0 — 2026-09-12
+
+- 字幕預覽與 ASS 成片對齊同一 480p 樣式基準、精確垂直百分比、字體、外框／陰影及水平安全寬度；行寬上限提高為 60。
+- 片頭段落超出 3–22 秒只作橘色建議，不再拖曳回彈或於輸出時截短；編輯僅保留來源邊界與 0.1 秒步進，極短片段的疊化相容性由既有轉出預檢提示。
+- 網格放大預覽固定使用輸出 16:9 Canvas，直式素材套用與 FFmpeg 相同的中央等比＋同源模糊背景政策；共用 Canvas 規則同時定義 Shorts 9:16。
+- 插入影片／照片的時間由正式 Timeline plan 歸回主片段；網格同時顯示素材合計、插入量及疊化後區間，後續起點與總長不再另算。
+- 驗證：55 個測試檔／328 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke、真實直式模糊背景／插入素材／雙語字幕 FFmpeg integration 與 `npm audit` 全部通過。
+- 交付：`release/v0.62.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.62.0.exe`；SHA-256 `47D4B638490BA8E224B3A4F160E2D7E723200B98EC3EBF438A3774F32837178E`。
+
+## v0.61.0 — 2026-09-12
+
+- 串連／片頭輸出新增預設開啟的低記憶體分段模式：每個 filter graph 最多六個畫面輸入，逐層產生已驗證中繼 MP4，final stage 才套字幕／浮水印／配樂與指定成品 codec；暫存成功、失敗、取消皆清除。
+- 容量／時間預估納入分段暫存；輸出頁最上方顯示片頭＋正片串接，存在已確認片頭時預設勾選並保留提示頁 review gate。
+- 新增預設勾選的 YouTube 全自動上傳：固定走官方 API、不是兒童內容、完整發布資料檢查，60 秒取消窗口後才執行最終上傳；驗證失敗即停止，預設仍是不公開。
+- 驗證：54 個測試檔／325 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke、七段真實 FFmpeg 分段串連／暫存清理及 `npm audit` 全部通過；YouTube 自動送出採 mock API 驗證，未對真實頻道上傳。
+- 交付：`release/v0.61.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.61.0.exe`；SHA-256 `11936932A2BFCD03C161A4D1906AC7DF3D108822F70871FE575FAD2391272450`。
+
+## v0.60.0 — 2026-09-12
+
+- 每筆字幕新增獨立 6–40 字行寬視窗；沒有單筆覆寫時中文預設 12、英文或中英混合預設 20。預覽、SRT 與 ASS 燒錄共用解析規則，單筆保存立即寫入 manifest schema 18。
+- 所有影片在網格與放大預覽顯示預設勾選的無聲自動配樂。轉出前以 FFmpeg 實測各 Intro／Main 選用 IN／OUT；無音軌或最大音量 ≤ -50 dB 才使用配樂頁第一首，照片忽略，單片與整次配樂開關皆可停用。
+- 驗證：53 個測試檔／320 個測試、TypeScript、production build、Electron smoke、Windows packaged smoke、真實靜音 AAC 片段輸出、畫面快照與 `npm audit` 全部通過。
+- 交付：`release/v0.60.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.60.0.exe`；SHA-256 `0C5FE34BE879904209D4A334D8019551882B055EBA4E76FAD3910BCAA19363E6`。v0.59.0 hash 複核仍為 `21DFF2529E1E75C8F606695A970C60ECBE026DBE1EF98C5C38A16096EF48B8EF`。
+
 ## v0.59.0 — 2026-09-12
 
 - 無聲影片片段轉出時自動鋪上第一首配樂（沿用該配樂音量／淡入淡出，只鋪該片段的輸出區間）；網格卡片對無聲片顯示預設勾選的「無聲自動配音」，取消則該片段保持無聲；轉出結果會報告自動配音片段數。

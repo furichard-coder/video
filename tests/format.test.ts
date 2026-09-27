@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatMinuteSecondInput, parseMinuteSecondInput } from "../src/renderer/format";
+import { formatMinuteSecondInput, formatRenderClock, parseMinuteSecondInput } from "../src/renderer/format";
 
 describe("minute:second editing format", () => {
   it("parses total minutes, fractions, decimal commas, and optional hours", () => {
@@ -21,5 +21,11 @@ describe("minute:second editing format", () => {
     expect(formatMinuteSecondInput(65_430)).toBe("1:05.43");
     expect(formatMinuteSecondInput(3_723_250)).toBe("62:03.25");
     expect(parseMinuteSecondInput(formatMinuteSecondInput(65_430))).toBe(65_430);
+  });
+
+  it("formats render elapsed and ETA as fixed HH:MM:SS", () => {
+    expect(formatRenderClock(0)).toBe("00:00:00");
+    expect(formatRenderClock(305_999)).toBe("00:05:05");
+    expect(formatRenderClock(13_456_000)).toBe("03:44:16");
   });
 });

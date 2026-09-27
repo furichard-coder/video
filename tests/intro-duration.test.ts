@@ -65,10 +65,12 @@ describe("balanced Intro segment durations", () => {
     expect(() => normalizeIntroSegmentMaxDuration(22_001)).toThrow(/3 到 22 秒/);
   });
 
-  it("keeps the selected IN point and caps only the rendered OUT point", () => {
+  it("keeps freely selected Intro ranges unchanged for preview and render", () => {
     const raw = [segment("review", "a", 8_000, 33_000), segment("short", "b", 2_000, 9_000)];
     const output = introSegmentsForOutput(raw, 12_000);
-    expect(output).toEqual([{ ...raw[0], inMs: 8_000, outMs: 20_000 }, raw[1]]);
+    expect(output).toEqual(raw);
+    expect(output).not.toBe(raw);
+    expect(output[0]).not.toBe(raw[0]);
     expect(raw[0]).toMatchObject({ inMs: 8_000, outMs: 33_000 });
   });
 });

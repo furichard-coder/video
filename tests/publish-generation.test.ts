@@ -107,7 +107,7 @@ describe("publish generation contract", () => {
       transcriptionModel: "gpt-test",
       credentialStatus: "SAVED_ENCRYPTED",
       updatedAt: "",
-      apiKey: "sk-test",
+      apiKey: "fixture-test-key",
     });
     expect(result.model).toBe("gpt-test");
     expect(result.requestId).toBe("req-test");

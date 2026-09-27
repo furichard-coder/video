@@ -6,11 +6,13 @@ import type {
   BackgroundJobSnapshot,
   ProjectChangedEvent,
   AiStoryContext,
+  AudioTrackGates,
   AiPublishGenerationOptions,
   AiSubtitleGenerationOptions,
   MaterialSubtitleAnalysisRequest,
   ConcatRenderProgress,
   ConcatRenderRequest,
+  AudioPreviewRequest,
   ConcatRenderEstimateRequest,
   ExternalMediaTarget,
   ExternalPlayerId,
@@ -20,7 +22,10 @@ import type {
   MusicSuggestionRequest,
   BrowserUploadPlatform,
   IntroSuggestion,
+  InsertionAudioScope,
+  InsertionAudioSettings,
   MainExclusionRange,
+  MainStartCueSettings,
   ZoomSegment,
   PlacementRequest,
   ProjectColorSettings,
@@ -41,10 +46,28 @@ import type {
   ThumbnailRenderRequest,
   TransitionDurationSec,
   PublishProgress,
+  RemoteControlStatus,
+  PostSuccessPowerStatus,
 } from "../shared/domain";
 
 const api: AppApi = {
   getAppInfo: () => ipcRenderer.invoke("app:get-info"),
+  getRemoteControlStatus: () => ipcRenderer.invoke("remote-control:get-status"),
+  enableRemoteControl: () => ipcRenderer.invoke("remote-control:enable"),
+  disableRemoteControl: () => ipcRenderer.invoke("remote-control:disable"),
+  rotateRemotePairing: () => ipcRenderer.invoke("remote-control:rotate-pairing"),
+  getPostSuccessPowerStatus: () => ipcRenderer.invoke("power-action:get-status"),
+  cancelPostSuccessPower: () => ipcRenderer.invoke("power-action:cancel"),
+  onPostSuccessPowerStatus: (callback: (status: PostSuccessPowerStatus) => void) => {
+    ipcRenderer.on("power-action:status", (_event, status: PostSuccessPowerStatus) => callback(status));
+  },
+  clearPostSuccessPowerStatusListeners: () => ipcRenderer.removeAllListeners("power-action:status"),
+  prepareRemoteRender: (request: ConcatRenderRequest) => ipcRenderer.invoke("remote-control:prepare-render", request),
+  clearRemotePreparedRender: () => ipcRenderer.invoke("remote-control:clear-prepared-render"),
+  onRemoteControlStatus: (callback: (status: RemoteControlStatus) => void) => {
+    ipcRenderer.on("remote-control:status", (_event, status: RemoteControlStatus) => callback(status));
+  },
+  clearRemoteControlStatusListeners: () => ipcRenderer.removeAllListeners("remote-control:status"),
   confirmAppClose: () => ipcRenderer.send("app:confirm-close"),
   moveCursorToSafeAction: (rect) => ipcRenderer.send("app:move-cursor-to-safe-action", rect),
   onAppCloseRequested: (callback: () => void) => {
@@ -90,10 +113,15 @@ const api: AppApi = {
   setPhotoSoundEnabled: (assetId: string, enabled: boolean) =>
     ipcRenderer.invoke("source:set-photo-sound", assetId, enabled),
   setDubWithBgm: (assetId: string, enabled: boolean) => ipcRenderer.invoke("source:set-dub-with-bgm", assetId, enabled),
+  setMainAudioGates: (assetId: string, gates: AudioTrackGates) =>
+    ipcRenderer.invoke("main:set-audio-gates", assetId, gates),
+  setMainStartCue: (settings: MainStartCueSettings) => ipcRenderer.invoke("main:set-start-cue", settings),
   addMediaInsertion: (anchorVideoAssetId, insertedAssetId, atMs, sourceRange) =>
     ipcRenderer.invoke("main:add-media-insertion", anchorVideoAssetId, insertedAssetId, atMs, sourceRange),
   updateMediaInsertion: (insertionId, atMs, sourceRange) =>
     ipcRenderer.invoke("main:update-media-insertion", insertionId, atMs, sourceRange),
+  setInsertionAudio: (scope: InsertionAudioScope, instanceId: string, settings: InsertionAudioSettings) =>
+    ipcRenderer.invoke("insertion-audio:set", scope, instanceId, settings),
   removeMediaInsertion: (insertionId) => ipcRenderer.invoke("main:remove-media-insertion", insertionId),
   moveMediaInsertion: (insertionId, toIndex) => ipcRenderer.invoke("main:move-media-insertion", insertionId, toIndex),
   setVolumeSegments: (assetId: string, segments: VolumeSegment[]) =>
@@ -113,13 +141,26 @@ const api: AppApi = {
   ensurePreview: (assetId: string, variant: PreviewVariant) => ipcRenderer.invoke("preview:ensure", assetId, variant),
   ensureClipPreview: (assetId: string, inMs: number, outMs: number) =>
     ipcRenderer.invoke("preview:ensure-clip", assetId, inMs, outMs),
+  ensureIntroThumbnail: (assetId: string, inMs: number, outMs: number) =>
+    ipcRenderer.invoke("preview:ensure-intro-thumbnail", assetId, inMs, outMs),
   cancelPreview: (assetId: string, variant: PreviewVariant) => ipcRenderer.invoke("preview:cancel", assetId, variant),
   cancelClipPreview: (assetId: string, inMs: number, outMs: number) =>
     ipcRenderer.invoke("preview:cancel-clip", assetId, inMs, outMs),
   chooseConcatOutput: (suggestedName: string) => ipcRenderer.invoke("concat:choose-output", suggestedName),
   prepareConcatOutput: (suggestedName: string) => ipcRenderer.invoke("concat:prepare-output", suggestedName),
   estimateConcatRender: (request: ConcatRenderEstimateRequest) => ipcRenderer.invoke("concat:estimate", request),
+  chooseRenderTemporaryFolder: () => ipcRenderer.invoke("render-temp:choose"),
+  validateRenderTemporaryFolder: (targetPath: string) => ipcRenderer.invoke("render-temp:validate", targetPath),
+  revealRenderTemporaryFolder: () => ipcRenderer.invoke("render-temp:reveal"),
+  getRenderHardwareCapabilities: (force = false) => ipcRenderer.invoke("render-hardware:get", force),
+  runRenderPerformanceBenchmark: () => ipcRenderer.invoke("render-benchmark:run"),
   startConcatRender: (request: ConcatRenderRequest) => ipcRenderer.invoke("concat:start", request),
+  createAudioPreview: (request: AudioPreviewRequest) => ipcRenderer.invoke("audio-preview:create", request),
+  cancelAudioPreview: () => ipcRenderer.invoke("audio-preview:cancel"),
+  getConcatRenderResumeOffer: () => ipcRenderer.invoke("concat:resume-offer"),
+  resumeConcatRender: (checkpointId: string) => ipcRenderer.invoke("concat:resume", checkpointId),
+  discardConcatRenderResume: (checkpointId: string) => ipcRenderer.invoke("concat:discard-resume", checkpointId),
+  discardConcatVideoMaster: () => ipcRenderer.invoke("concat:discard-video-master"),
   cancelConcatRender: () => ipcRenderer.invoke("concat:cancel"),
   revealConcatOutput: (jobId: string) => ipcRenderer.invoke("concat:reveal", jobId),
   playConcatOutput: (jobId: string) => ipcRenderer.invoke("concat:play", jobId),

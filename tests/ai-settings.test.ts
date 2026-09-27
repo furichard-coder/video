@@ -28,7 +28,7 @@ describe("AI settings", () => {
     const dataRoot = await root();
     const store = new AiSettingsStore(dataRoot, protector);
     await store.initialize();
-    const apiKey = "sk-test-123456789012345678901234567890";
+    const apiKey = "fixture-test-1234567890123456789012345";
     const saved = await store.saveAccount({
       name: "河內 API 帳號",
       provider: "OPENAI",
@@ -51,14 +51,14 @@ describe("AI settings", () => {
   });
 
   it("uses OPENAI_API_KEY only for the default profile and reports Codex fallback availability separately", async () => {
-    const store = new AiSettingsStore(await root(), protector, "sk-env-123456789012345678901234567890", false);
+    const store = new AiSettingsStore(await root(), protector, "fixture-env-1234567890123456789012345", false);
     await store.initialize();
     expect(store.getSnapshot()).toMatchObject({
       activeAccountId: DEFAULT_AI_ACCOUNT_ID,
       codexLoginReusable: false,
       accounts: [{ credentialStatus: "ENVIRONMENT" }],
     });
-    expect(store.getRuntimeAccount().apiKey).toContain("sk-env");
+    expect(store.getRuntimeAccount().apiKey).toContain("fixture-env");
     const other = await store.saveAccount({
       name: "沒有金鑰",
       provider: "OPENAI",
@@ -78,7 +78,7 @@ describe("AI settings", () => {
       provider: "OPENAI",
       visionModel: "gpt-5.6-terra",
       transcriptionModel: "whisper-1",
-      apiKey: "sk-a-123456789012345678901234567890",
+      apiKey: "test-key-a-123456789012345678901234",
     });
     const id = first.accounts.find((item) => item.name === "A 帳號")!.id;
     expect((await store.setActiveAccount(id)).activeAccountId).toBe(id);
@@ -95,7 +95,7 @@ describe("AI settings", () => {
         provider: "OPENAI",
         visionModel: "gpt-5.6-terra",
         transcriptionModel: "gpt-4o-transcribe",
-        apiKey: "sk-no-123456789012345678901234567890",
+        apiKey: "test-key-no-123456789012345678901234",
       }),
     ).rejects.toThrow(/拒絕保存/);
   });
@@ -104,7 +104,7 @@ describe("AI settings", () => {
     const dataRoot = await root();
     const store = new AiSettingsStore(dataRoot, protector);
     await store.initialize();
-    const apiKey = "AIza-gemini-review-12345678901234567890";
+    const apiKey = "fixture-gemini-review-1234567890123456";
     const saved = await store.saveGeminiReviewSettings({ enabled: true, model: "gemini-2.5-flash", apiKey });
     expect(saved.geminiReview).toMatchObject({
       enabled: true,

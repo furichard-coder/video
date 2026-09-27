@@ -7,6 +7,8 @@ import type {
   AiPublishGenerationOptions,
   AiStoryContext,
   AiSubtitleGenerationOptions,
+  AudioPreviewRequest,
+  AudioTrackGates,
   BackgroundJobKind,
   BackgroundJobSnapshot,
   BackgroundJobStatus,
@@ -19,7 +21,10 @@ import type {
   ExternalPlayerSettingsUpdate,
   GeminiReviewSettingsUpdate,
   IntroSuggestion,
+  InsertionAudioScope,
+  InsertionAudioSettings,
   MainExclusionRange,
+  MainStartCueSettings,
   MaterialSubtitleAnalysisRequest,
   MusicSuggestionRequest,
   PlacementRequest,
@@ -62,8 +67,21 @@ import { nextAvailableOutputPath, safePreviewFileName } from "./services/output-
 import { MusicSuggestionService } from "./services/music-suggestion";
 import { AiPublishAssetsService } from "./services/ai-publish-assets";
 import { renderThumbnail } from "./services/thumbnail-render";
-import { estimateRenderOnDisk } from "./services/render-estimate";
+import { buildRenderEstimate, buildRenderEstimateWorkload } from "./services/render-estimate";
 import { RenderPowerGuard } from "./services/render-power-guard";
+import { buildRuntimeRenderPolicy, captureSystemResources, resourceWarnings } from "./services/system-resource";
+import { RenderHardwareService } from "./services/render-hardware";
+import { RenderBenchmarkService } from "./services/render-benchmark";
+import { resourceProfileFromLegacy } from "../shared/render-resource";
+import { AudioPreviewService } from "./services/audio-preview";
+import { RenderCommandState } from "./services/render-command-state";
+import { validateRenderTemporaryFolder } from "./services/render-disk-space";
+import { RemoteControlServer } from "./services/remote-control-server";
+import {
+  completedRenderQualifies,
+  completedYoutubeUploadQualifies,
+  PostSuccessPowerScheduler,
+} from "./services/post-success-power";
 
 const SORT_MODES = new Set<SortMode>([
   "MANUAL_ORDER",
@@ -73,8 +91,8 @@ const SORT_MODES = new Set<SortMode>([
   "ADDED_ORDER",
 ]);
 const PREVIEW_VARIANTS = new Set<PreviewVariant>(["THUMBNAIL", "IMAGE_PREVIEW", "VIDEO_PROXY"]);
-const RENDER_RESOLUTIONS = new Set(["360P", "480P", "720P", "4K"]);
-const RENDER_CODECS = new Set(["H265_QSV", "H264_QSV", "H265", "H264"]);
+const RENDER_RESOLUTIONS = new Set(["360P", "480P", "720P", "1080P", "1440P", "4K"]);
+const RENDER_CODECS = new Set(["H264_NVENC", "H265_NVENC", "H265_QSV", "H264_QSV", "H265", "H264"]);
 
 export function registerIpc(
   store: ProjectStore,
@@ -98,6 +116,12 @@ export function registerIpc(
   musicSuggestions: MusicSuggestionService,
   aiPublishAssets: AiPublishAssetsService,
   renderPowerGuard: RenderPowerGuard,
+  renderHardware: RenderHardwareService,
+  renderBenchmark: RenderBenchmarkService,
+  audioPreviews: AudioPreviewService,
+  renderCommands: RenderCommandState,
+  remoteControl: RemoteControlServer,
+  postSuccessPower: PostSuccessPowerScheduler,
 ): void {
   let importController: AbortController | undefined;
   let concatController: AbortController | undefined;
@@ -108,6 +132,7 @@ export function registerIpc(
   let subtitlePreviewController: AbortController | undefined;
   let voiceInputController: AbortController | undefined;
   let musicSuggestionController: AbortController | undefined;
+  let audioPreviewController: AbortController | undefined;
   let aiPublishController: AbortController | undefined;
   let youtubeAuthController: AbortController | undefined;
   let youtubeUploadController: AbortController | undefined;
@@ -116,9 +141,163 @@ export function registerIpc(
   const thumbnailTokens = new Map<string, { outputPath: string; createdAt: number; format: "jpg" | "png" }>();
   const subtitleOutputTokens = new Map<string, { outputPath: string; createdAt: number }>();
   const backgroundJobs = new Map<string, BackgroundJobSnapshot>();
+  const appWorkingSetBytes = () =>
+    app.getAppMetrics().reduce((sum, metric) => sum + Math.max(0, metric.memory?.workingSetSize ?? 0) * 1024, 0);
+
+  const estimateConcatWithSystem = async (outputPath: string, request: ConcatRenderEstimateRequest) => {
+    const configuredTemp = userPreferences.snapshot().renderDefaults.renderTemporaryFolder ?? app.getPath("temp");
+    const renderTemp = await validateRenderTemporaryFolder(configuredTemp);
+    const workload = buildRenderEstimateWorkload(
+      store.getProject().sources,
+      request.orderedAssetIds,
+      request.clipSelections,
+      request.expectedDurationMs,
+      request.transitionSeconds,
+      request.generatedInputCount,
+    );
+    const systemResources = await captureSystemResources(outputPath, {
+      appWorkingSetBytes: appWorkingSetBytes(),
+      tempPath: renderTemp.path,
+    });
+    const defaults = userPreferences.snapshot().renderDefaults;
+    const resourceProfile = resourceProfileFromLegacy(request);
+    const maximumRenderRamGiB = request.maximumRenderRamGiB ?? defaults.maximumRenderRamGiB;
+    const maximumRenderTempGiB = request.maximumRenderTempGiB ?? defaults.maximumRenderTempGiB;
+    const baselineEstimate = buildRenderEstimate(
+      outputPath,
+      systemResources.outputDriveFreeBytes,
+      request.expectedDurationMs,
+      request.resolution,
+      request.videoCodec,
+      request.lowMemorySegmented === true,
+      workload,
+      systemResources.availableRamBytes,
+      systemResources.totalRamBytes,
+      undefined,
+      undefined,
+      systemResources.outputDriveCapacityBytes,
+      renderTemp.path,
+      renderTemp.freeBytes,
+      resourceProfile,
+    );
+    const lowPolicy = buildRuntimeRenderPolicy(
+      true,
+      baselineEstimate.modeEstimates.lowMemory,
+      systemResources.totalRamBytes,
+      systemResources.availableRamBytes,
+      baselineEstimate.workload.visualInputCount,
+      systemResources,
+      false,
+      maximumRenderRamGiB,
+      maximumRenderTempGiB,
+    );
+    const normalPolicy = buildRuntimeRenderPolicy(
+      false,
+      baselineEstimate.modeEstimates.normal,
+      systemResources.totalRamBytes,
+      systemResources.availableRamBytes,
+      baselineEstimate.workload.visualInputCount,
+      systemResources,
+      false,
+      maximumRenderRamGiB,
+      maximumRenderTempGiB,
+    );
+    const highSpeedPolicy = buildRuntimeRenderPolicy(
+      false,
+      baselineEstimate.modeEstimates.highSpeed ?? baselineEstimate.modeEstimates.normal,
+      systemResources.totalRamBytes,
+      systemResources.availableRamBytes,
+      baselineEstimate.workload.visualInputCount,
+      systemResources,
+      true,
+      maximumRenderRamGiB,
+      maximumRenderTempGiB,
+    );
+    const estimate = buildRenderEstimate(
+      outputPath,
+      systemResources.outputDriveFreeBytes,
+      request.expectedDurationMs,
+      request.resolution,
+      request.videoCodec,
+      request.lowMemorySegmented === true,
+      workload,
+      systemResources.availableRamBytes,
+      systemResources.totalRamBytes,
+      {
+        lowMemory: lowPolicy.maxVisualInputsPerStage,
+        normal: normalPolicy.maxVisualInputsPerStage,
+        highSpeed: highSpeedPolicy.maxVisualInputsPerStage,
+      },
+      {
+        lowMemory: lowPolicy.maximumParallelJobs,
+        normal: normalPolicy.maximumParallelJobs,
+        highSpeed: highSpeedPolicy.maximumParallelJobs,
+      },
+      systemResources.outputDriveCapacityBytes,
+      renderTemp.path,
+      renderTemp.freeBytes,
+      resourceProfile,
+    );
+    const enrichMode = (base: typeof estimate.modeEstimates.lowMemory, policy: typeof lowPolicy) => {
+      const warnings = resourceWarnings(systemResources, base, policy);
+      if (
+        policy.maximumRenderTempBytes &&
+        (base.diskBreakdown?.peakWorkingBytes ?? base.estimatedTemporaryBytes) > policy.maximumRenderTempBytes
+      ) {
+        warnings.push(
+          `此模式預估 APP 工作檔峰值高於 TEMP 上限 ${(policy.maximumRenderTempBytes / 1024 ** 3).toFixed(0)} GB；排程器不會超限，將縮減工作或在安全邊界暫停。`,
+        );
+      }
+      const commitDanger = Boolean(
+        systemResources.commitLimitBytes &&
+        systemResources.committedBytes &&
+        systemResources.commitLimitBytes - systemResources.committedBytes < base.estimatedPeakRamBytes,
+      );
+      return {
+        mode: {
+          ...base,
+          warnings,
+          warningLevel:
+            base.warningLevel === "DANGER" || commitDanger
+              ? ("DANGER" as const)
+              : warnings.length
+                ? ("WARNING" as const)
+                : base.warningLevel,
+        },
+        policy,
+      };
+    };
+    const low = enrichMode(estimate.modeEstimates.lowDisk ?? estimate.modeEstimates.lowMemory, lowPolicy);
+    const normal = enrichMode(estimate.modeEstimates.balanced ?? estimate.modeEstimates.normal, normalPolicy);
+    const high = enrichMode(estimate.modeEstimates.highSpeed ?? estimate.modeEstimates.normal, highSpeedPolicy);
+    const selected = resourceProfile === "LOW_DISK" ? low : resourceProfile === "HIGH_SPEED" ? high : normal;
+    return {
+      ...estimate,
+      estimatedTemporaryBytes: selected.mode.estimatedTemporaryBytes,
+      estimatedRenderTimeMs: selected.mode.estimatedRenderTimeMs,
+      estimatedFreeAfterBytes: selected.mode.estimatedFreeAfterBytes,
+      canRender: selected.mode.canRender,
+      warning: selected.mode.warnings.join(" ") || undefined,
+      modeEstimates: {
+        lowMemory: low.mode,
+        normal: normal.mode,
+        lowDisk: low.mode,
+        balanced: normal.mode,
+        highSpeed: high.mode,
+      },
+      systemResources,
+      runtimePolicy: selected.policy,
+      hardwareCapabilities: await renderHardware.getCapabilities(),
+    };
+  };
   const unsubscribeProjectChanges = store.subscribe((change) => {
+    renderCommands.setProjectName(change.project.name);
     for (const window of BrowserWindow.getAllWindows())
       if (!window.isDestroyed()) window.webContents.send("project:changed", change);
+  });
+  remoteControl.setStatusListener((status) => {
+    for (const window of BrowserWindow.getAllWindows())
+      if (!window.isDestroyed()) window.webContents.send("remote-control:status", status);
   });
   const publishBackgroundJobs = () => {
     const jobs = [...backgroundJobs.values()].sort((left, right) => right.startedAt.localeCompare(left.startedAt));
@@ -154,7 +333,10 @@ export function registerIpc(
         `目前有 ${running.length} 個背景工作正在處理「${running[0].projectName ?? "目前專案"}」，完成或取消後才能切換專案。`,
       );
   };
-  const updateBackgroundJob = (id: string, patch: Pick<BackgroundJobSnapshot, "percent" | "detail">) => {
+  const updateBackgroundJob = (
+    id: string,
+    patch: Pick<BackgroundJobSnapshot, "percent" | "detail" | "attemptElapsedMs" | "cumulativeElapsedMs">,
+  ) => {
     const current = backgroundJobs.get(id);
     if (!current) return;
     backgroundJobs.set(id, { ...current, ...patch });
@@ -210,6 +392,12 @@ export function registerIpc(
   };
 
   ipcMain.handle("app:get-info", () => ({ version: app.getVersion(), productName: app.getName() }));
+  ipcMain.handle("power-action:get-status", () => postSuccessPower.status());
+  ipcMain.handle("power-action:cancel", () => postSuccessPower.cancel());
+  ipcMain.handle("remote-control:get-status", () => remoteControl.status());
+  ipcMain.handle("remote-control:enable", () => remoteControl.start());
+  ipcMain.handle("remote-control:disable", () => remoteControl.stop());
+  ipcMain.handle("remote-control:rotate-pairing", () => remoteControl.rotatePairing());
   ipcMain.handle("preferences:get", () => userPreferences.snapshot());
   ipcMain.handle("background:get-jobs", () => {
     pruneBackgroundJobs();
@@ -219,6 +407,31 @@ export function registerIpc(
     if (update?.renderDefaults?.transitionSeconds !== undefined)
       await store.setTimelineTransitionSeconds(update.renderDefaults.transitionSeconds);
     return userPreferences.update(update);
+  });
+  ipcMain.handle("render-temp:choose", async (event) => {
+    if (concatController) throw new Error("转档进行中，暂时不能切换 Render Temporary Folder。");
+    const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const current = userPreferences.snapshot().renderDefaults.renderTemporaryFolder ?? app.getPath("temp");
+    const options: Electron.OpenDialogOptions = {
+      title: "选择 Render Temporary Folder",
+      defaultPath: current,
+      properties: ["openDirectory", "createDirectory"],
+    };
+    const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
+    if (result.canceled || !result.filePaths[0]) return null;
+    const validated = await validateRenderTemporaryFolder(result.filePaths[0]);
+    await userPreferences.update({ renderDefaults: { renderTemporaryFolder: validated.path } });
+    return validated;
+  });
+  ipcMain.handle("render-temp:validate", async (_event, targetPath: string) => {
+    if (concatController) throw new Error("转档进行中，暂时不能切换 Render Temporary Folder。");
+    const validated = await validateRenderTemporaryFolder(targetPath);
+    await userPreferences.update({ renderDefaults: { renderTemporaryFolder: validated.path } });
+    return validated;
+  });
+  ipcMain.handle("render-temp:reveal", () => {
+    const target = userPreferences.snapshot().renderDefaults.renderTemporaryFolder ?? app.getPath("temp");
+    electronShell.openPath(target);
   });
   ipcMain.handle("project:get", () => store.getProject());
   ipcMain.handle("project:history-state", () => store.getHistoryState());
@@ -298,6 +511,10 @@ export function registerIpc(
   ipcMain.handle("source:set-dub-with-bgm", (_event, assetId: string, enabled: boolean) =>
     store.setDubWithBgm(assetId, enabled),
   );
+  ipcMain.handle("main:set-audio-gates", (_event, assetId: string, gates: AudioTrackGates) =>
+    store.setMainAudioGates(assetId, gates),
+  );
+  ipcMain.handle("main:set-start-cue", (_event, settings: MainStartCueSettings) => store.setMainStartCue(settings));
   ipcMain.handle(
     "main:add-media-insertion",
     (
@@ -312,6 +529,11 @@ export function registerIpc(
     "main:update-media-insertion",
     (_event, insertionId: string, atMs: number, sourceRange: { inMs: number; outMs: number }) =>
       store.updateMediaInsertion(insertionId, atMs, sourceRange),
+  );
+  ipcMain.handle(
+    "insertion-audio:set",
+    (_event, scope: InsertionAudioScope, instanceId: string, settings: InsertionAudioSettings) =>
+      store.setInsertionAudio(scope, instanceId, settings),
   );
   ipcMain.handle("main:remove-media-insertion", (_event, insertionId: string) =>
     store.removeMediaInsertion(insertionId),
@@ -374,6 +596,28 @@ export function registerIpc(
   ipcMain.handle("preview:cancel-clip", (_event, assetId: string, inMs: number, outMs: number) => {
     previewControllers.get(`${assetId}:VIDEO_CLIP_PROXY:${Math.round(inMs)}:${Math.round(outMs)}`)?.abort();
   });
+  ipcMain.handle("preview:ensure-intro-thumbnail", async (_event, assetId: string, inMs: number, outMs: number) => {
+    const key = `${assetId}:INTRO_THUMBNAIL:${Math.round(inMs)}:${Math.round(outMs)}`;
+    previewControllers.get(key)?.abort();
+    const controller = new AbortController();
+    previewControllers.set(key, controller);
+    try {
+      return await previews.ensureIntroThumbnail(assetId, inMs, outMs, controller.signal);
+    } finally {
+      if (previewControllers.get(key) === controller) previewControllers.delete(key);
+    }
+  });
+  ipcMain.handle("audio-preview:create", async (_event, request: AudioPreviewRequest) => {
+    audioPreviewController?.abort();
+    const controller = new AbortController();
+    audioPreviewController = controller;
+    try {
+      return await audioPreviews.create(request, controller.signal);
+    } finally {
+      if (audioPreviewController === controller) audioPreviewController = undefined;
+    }
+  });
+  ipcMain.handle("audio-preview:cancel", () => audioPreviewController?.abort());
   ipcMain.handle("concat:choose-output", async (event, suggestedName: string) => {
     for (const [token, item] of outputTokens) {
       if (Date.now() - item.createdAt > 30 * 60 * 1000) outputTokens.delete(token);
@@ -415,18 +659,30 @@ export function registerIpc(
       throw new Error("輸出位置授權已失效，請重新選擇儲存位置。");
     if (!RENDER_RESOLUTIONS.has(request.resolution)) throw new Error("預估解析度無效。");
     if (!RENDER_CODECS.has(request.videoCodec)) throw new Error("預估影片格式無效。");
-    return estimateRenderOnDisk(
-      selectedOutput.outputPath,
-      request.expectedDurationMs,
-      request.resolution,
-      request.videoCodec,
-    );
+    return estimateConcatWithSystem(selectedOutput.outputPath, request);
   });
-  ipcMain.handle("concat:start", async (event, request: ConcatRenderRequest) => {
+  ipcMain.handle("render-hardware:get", async (_event, force = false) =>
+    renderHardware.getCapabilities(force === true),
+  );
+  ipcMain.handle("render-benchmark:run", async () => {
+    if (concatController) throw new Error("目前已有 App 轉檔進行中，效能測試不會搶用資源。");
+    const releasePowerGuard = renderPowerGuard.acquire();
+    try {
+      return await renderBenchmark.run();
+    } finally {
+      releasePowerGuard();
+    }
+  });
+  const publishConcatProgress = (progress: import("../shared/domain").ConcatRenderProgress) => {
+    renderCommands.updateProgress(progress);
+    for (const window of BrowserWindow.getAllWindows())
+      if (!window.isDestroyed()) window.webContents.send("concat:progress", progress);
+  };
+
+  const executeConcatStart = async (request: ConcatRenderRequest) => {
     if (concatController) throw new Error("已有一個串連預覽正在產出，請先等待或取消。");
     if (!request || typeof request.outputToken !== "string") throw new Error("串連預覽要求格式無效。");
     const selectedOutput = outputTokens.get(request.outputToken);
-    outputTokens.delete(request.outputToken);
     if (!selectedOutput || Date.now() - selectedOutput.createdAt > 30 * 60 * 1000) {
       throw new Error("輸出位置授權已失效，請重新選擇儲存位置。");
     }
@@ -438,28 +694,63 @@ export function registerIpc(
       (request.videoCodec !== undefined && !RENDER_CODECS.has(request.videoCodec))
     )
       throw new Error("轉檔解析度或影片格式無效。");
-    const preflight = await estimateRenderOnDisk(
-      selectedOutput.outputPath,
-      request.estimatedDurationMs ?? 0,
-      request.resolution,
-      request.videoCodec ?? "H264",
+    const validatedRenderTemp = await validateRenderTemporaryFolder(
+      userPreferences.snapshot().renderDefaults.renderTemporaryFolder ?? app.getPath("temp"),
     );
+    request.renderTemporaryFolder = validatedRenderTemp.path;
+    const preflight = await estimateConcatWithSystem(selectedOutput.outputPath, {
+      outputToken: request.outputToken,
+      expectedDurationMs: request.estimatedDurationMs ?? 0,
+      resolution: request.resolution,
+      videoCodec: request.videoCodec ?? "H264",
+      lowMemorySegmented: request.lowMemorySegmented,
+      highSpeedMode: request.highSpeedMode,
+      resourceProfile: request.resourceProfile,
+      maximumRenderRamGiB: request.maximumRenderRamGiB,
+      maximumRenderTempGiB: request.maximumRenderTempGiB,
+      orderedAssetIds: request.orderedAssetIds,
+      clipSelections: request.clipSelections,
+      transitionSeconds: request.transitionSeconds,
+      generatedInputCount: request.mainStartCard ? 1 : 0,
+    });
     if (!preflight.canRender) throw new Error(preflight.warning ?? "輸出磁碟空間不足 1 GB，本次不會開始轉檔。");
+    const selectedProfile = resourceProfileFromLegacy(request);
+    const selectedMode =
+      selectedProfile === "LOW_DISK"
+        ? (preflight.modeEstimates.lowDisk ?? preflight.modeEstimates.lowMemory)
+        : selectedProfile === "HIGH_SPEED"
+          ? (preflight.modeEstimates.highSpeed ?? preflight.modeEstimates.normal)
+          : (preflight.modeEstimates.balanced ?? preflight.modeEstimates.normal);
+    if (selectedMode.warnings.length && request.resourceWarningAcknowledged !== true) {
+      throw new Error(`RESOURCE_WARNING_CONFIRMATION_REQUIRED\n${selectedMode.warnings.join("\n")}`);
+    }
+    outputTokens.delete(request.outputToken);
+    request.runtimePolicy = preflight.runtimePolicy;
+    request.estimatedPeakDiskBytes = selectedMode.diskBreakdown?.peakWorkingBytes ?? selectedMode.estimatedTemporaryBytes;
+    request.estimatedFinalOutputBytes = selectedMode.estimatedOutputBytes;
+    postSuccessPower.cancel("侦测到新的转档工作；已取消先前排定的电源动作。");
     const releasePowerGuard = renderPowerGuard.acquire();
     const controller = new AbortController();
     concatController = controller;
     const backgroundJobId = beginBackgroundJob("CONCAT_RENDER", "片頭／正片預覽產出");
-    const cancelIfRendererCloses = () => controller.abort();
-    event.sender.once("destroyed", cancelIfRendererCloses);
+    renderCommands.markStarting(request);
+    let successfulResult: import("../shared/domain").ConcatRenderResult | undefined;
     try {
       const result = await concatRenderer.render(request, selectedOutput.outputPath, controller.signal, (progress) => {
-        updateBackgroundJob(backgroundJobId, { percent: progress.percent, detail: progress.phase });
-        if (!event.sender.isDestroyed()) event.sender.send("concat:progress", progress);
+        updateBackgroundJob(backgroundJobId, {
+          percent: progress.percent,
+          detail: progress.currentSegment ?? progress.phase,
+          attemptElapsedMs: progress.attemptElapsedMs,
+          cumulativeElapsedMs: progress.cumulativeElapsedMs,
+        });
+        publishConcatProgress(progress);
       });
       await outputHistory.registerRender(result, store.getProject().name);
       finishBackgroundJob(backgroundJobId, result.cancelled ? "CANCELLED" : "COMPLETED", {
         detail: result.cancelled ? "使用者取消，已保留可播放結尾" : result.outputPath,
       });
+      renderCommands.markTerminal(result);
+      if (completedRenderQualifies(result)) successfulResult = result;
       return result;
     } catch (error) {
       finishBackgroundJob(
@@ -467,14 +758,101 @@ export function registerIpc(
         error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED",
         { error: error instanceof Error ? error.message : String(error) },
       );
+      renderCommands.markFailed(error);
       throw error;
     } finally {
-      event.sender.removeListener("destroyed", cancelIfRendererCloses);
       if (concatController === controller) concatController = undefined;
       releasePowerGuard();
+      if (successfulResult)
+        postSuccessPower.notifySuccess(
+          "RENDER_SUCCESS",
+          userPreferences.snapshot().renderDefaults.postSuccessPower ?? {
+            enabled: false,
+            trigger: "RENDER_SUCCESS",
+            action: "SHUTDOWN",
+          },
+        );
     }
+  };
+  ipcMain.handle("concat:start", (_event, request: ConcatRenderRequest) => executeConcatStart(request));
+  ipcMain.handle("remote-control:prepare-render", async (_event, request: ConcatRenderRequest) => {
+    if (!request || typeof request.outputToken !== "string") throw new Error("远端准备转档的要求格式无效。");
+    const selectedOutput = outputTokens.get(request.outputToken);
+    if (!selectedOutput || Date.now() - selectedOutput.createdAt > 30 * 60 * 1000)
+      throw new Error("请先在 Windows 端选择仍有效的输出位置。");
+    if (!RENDER_RESOLUTIONS.has(request.resolution)) throw new Error("转档解析度无效。");
+    return renderCommands.prepare(request, selectedOutput.outputPath);
   });
-  ipcMain.handle("concat:cancel", () => concatController?.abort());
+  ipcMain.handle("remote-control:clear-prepared-render", () => renderCommands.clearPrepared());
+  ipcMain.handle("concat:resume-offer", () => concatRenderer.getResumeOffer());
+  ipcMain.handle("concat:discard-resume", async (_event, checkpointId: string) => {
+    if (typeof checkpointId !== "string" || !/^[a-f0-9-]{8,80}$/i.test(checkpointId))
+      throw new Error("續轉識別碼無效。");
+    await concatRenderer.discardResume(checkpointId);
+  });
+  ipcMain.handle("concat:discard-video-master", () => concatRenderer.discardReusableVideoMaster());
+  const executeConcatResume = async (checkpointId: string) => {
+    if (concatController) throw new Error("已有一個串連預覽正在產出，請先等待或取消。");
+    if (typeof checkpointId !== "string" || !/^[a-f0-9-]{8,80}$/i.test(checkpointId))
+      throw new Error("續轉識別碼無效。");
+    postSuccessPower.cancel("侦测到新的续转工作；已取消先前排定的电源动作。");
+    const releasePowerGuard = renderPowerGuard.acquire();
+    const controller = new AbortController();
+    concatController = controller;
+    const backgroundJobId = beginBackgroundJob("CONCAT_RENDER", "從 checkpoint 續轉片頭／正片預覽");
+    const offer = await concatRenderer.getResumeOffer();
+    renderCommands.markResuming(offer?.mode ?? "NORMAL");
+    let successfulResult: import("../shared/domain").ConcatRenderResult | undefined;
+    try {
+      const result = await concatRenderer.resume(checkpointId, controller.signal, (progress) => {
+        updateBackgroundJob(backgroundJobId, {
+          percent: progress.percent,
+          detail: progress.currentSegment ?? progress.phase,
+          attemptElapsedMs: progress.attemptElapsedMs,
+          cumulativeElapsedMs: progress.cumulativeElapsedMs,
+        });
+        publishConcatProgress(progress);
+      });
+      await outputHistory.registerRender(result, store.getProject().name);
+      finishBackgroundJob(backgroundJobId, result.cancelled ? "CANCELLED" : "COMPLETED", {
+        detail: result.cancelled ? "使用者取消，已清除本次續轉工作" : result.outputPath,
+      });
+      renderCommands.markTerminal(result);
+      if (completedRenderQualifies(result)) successfulResult = result;
+      return result;
+    } catch (error) {
+      finishBackgroundJob(
+        backgroundJobId,
+        error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED",
+        { error: error instanceof Error ? error.message : String(error) },
+      );
+      renderCommands.markFailed(error);
+      throw error;
+    } finally {
+      if (concatController === controller) concatController = undefined;
+      releasePowerGuard();
+      if (successfulResult)
+        postSuccessPower.notifySuccess(
+          "RENDER_SUCCESS",
+          userPreferences.snapshot().renderDefaults.postSuccessPower ?? {
+            enabled: false,
+            trigger: "RENDER_SUCCESS",
+            action: "SHUTDOWN",
+          },
+        );
+    }
+  };
+  ipcMain.handle("concat:resume", (_event, checkpointId: string) => executeConcatResume(checkpointId));
+  renderCommands.setHandlers({
+    startPrepared: executeConcatStart,
+    resumeCheckpoint: async () => {
+      const offer = await concatRenderer.getResumeOffer();
+      if (!offer) throw new Error("目前没有可续转的 checkpoint。");
+      return executeConcatResume(offer.checkpointId);
+    },
+    cancel: async () => concatController?.abort("USER_CANCEL"),
+  });
+  ipcMain.handle("concat:cancel", () => concatController?.abort("USER_CANCEL"));
   ipcMain.handle("concat:reveal", async (_event, jobId: string) => {
     const output = await outputHistory.get(jobId);
     electronShell.showItemInFolder(output.outputPath);
@@ -999,23 +1377,56 @@ export function registerIpc(
     const output = request && typeof request.jobId === "string" ? await outputHistory.get(request.jobId) : undefined;
     if (!output || output.purpose === "CLIP")
       throw new Error("單一時間段預覽不可直接上傳；請選擇正片、片頭、Shorts 或已確認的既有 MP4。");
+    postSuccessPower.cancel("侦测到新的 YouTube 上传；已取消先前排定的电源动作。");
+    const releasePowerGuard = renderPowerGuard.acquire();
     const controller = new AbortController();
     youtubeUploadController = controller;
     const cancelIfRendererCloses = () => controller.abort();
     event.sender.once("destroyed", cancelIfRendererCloses);
+    let successfulUpload = false;
     try {
-      return await youtubeUpload.upload(output.outputPath, request, controller.signal, (progress) => {
+      const result = await youtubeUpload.upload(output.outputPath, request, controller.signal, (progress) => {
         if (!event.sender.isDestroyed()) event.sender.send("youtube:upload-progress", progress);
       });
+      successfulUpload = completedYoutubeUploadQualifies(result);
+      return result;
     } finally {
       event.sender.removeListener("destroyed", cancelIfRendererCloses);
       if (youtubeUploadController === controller) youtubeUploadController = undefined;
+      releasePowerGuard();
+      if (successfulUpload)
+        postSuccessPower.notifySuccess(
+          "YOUTUBE_UPLOAD_SUCCESS",
+          userPreferences.snapshot().renderDefaults.postSuccessPower ?? {
+            enabled: false,
+            trigger: "RENDER_SUCCESS",
+            action: "SHUTDOWN",
+          },
+        );
     }
   });
   ipcMain.handle("youtube:cancel-upload", () => youtubeUploadController?.abort());
-  ipcMain.handle("youtube:retry-thumbnail", async (_event, videoId: string, thumbnailPath: string) =>
-    youtubeUpload.retryThumbnail(videoId, thumbnailPath),
-  );
+  ipcMain.handle("youtube:retry-thumbnail", async (_event, videoId: string, thumbnailPath: string) => {
+    postSuccessPower.cancel("侦测到缩图重试；已取消先前排定的电源动作。");
+    const releasePowerGuard = renderPowerGuard.acquire();
+    let succeeded = false;
+    try {
+      const result = await youtubeUpload.retryThumbnail(videoId, thumbnailPath);
+      succeeded = true;
+      return result;
+    } finally {
+      releasePowerGuard();
+      if (succeeded)
+        postSuccessPower.notifySuccess(
+          "YOUTUBE_UPLOAD_SUCCESS",
+          userPreferences.snapshot().renderDefaults.postSuccessPower ?? {
+            enabled: false,
+            trigger: "RENDER_SUCCESS",
+            action: "SHUTDOWN",
+          },
+        );
+    }
+  });
   ipcMain.handle("youtube:open-video", (_event, videoId: string) => youtubeUpload.openVideo(videoId));
   ipcMain.handle("youtube:prepare-chrome-handoff", async (_event, jobId: string) => {
     const output = typeof jobId === "string" ? await outputHistory.get(jobId) : undefined;

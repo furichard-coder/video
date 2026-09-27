@@ -6,6 +6,7 @@ import type {
   BgmScopeSelection,
   MainStartCardOptions,
   MainStartCardTransition,
+  PostSuccessPowerPreference,
   PreferenceDirectoryKey,
   PreviewResolution,
   SubtitleBurnInOptions,
@@ -21,6 +22,7 @@ import type {
   YoutubePrivacyStatus,
 } from "../../shared/domain";
 import { DEFAULT_AUDIO_PROTECTION_OPTIONS, DEFAULT_MAIN_START_CARD_OPTIONS } from "../../shared/domain";
+import { sanitizeAudioProcessingOptions } from "./audio-processing";
 import { SUBTITLE_WRAP_MANUAL_MAX, SUBTITLE_WRAP_MANUAL_MIN } from "../../shared/subtitle-text";
 import { finalizePartialOutput } from "./atomic-output";
 
@@ -38,13 +40,24 @@ const DIRECTORY_KEYS = new Set<PreferenceDirectoryKey>([
 ]);
 const VIEW_MODES = new Set<ViewMode>(["GRID", "LIST"]);
 const TRANSITIONS = new Set<TransitionDurationSec>([0.3, 0.5, 0.7]);
-const RESOLUTIONS = new Set<PreviewResolution>(["360P", "480P", "720P", "4K"]);
+const RESOLUTIONS = new Set<PreviewResolution>(["360P", "480P", "720P", "1080P", "1440P", "4K"]);
 const PRIVACY = new Set<YoutubePrivacyStatus>(["unlisted", "private"]);
 const VOICE_LANGUAGES = new Set<VoiceInputLanguage>(["zh-TW", "en-US"]);
 const SUBTITLE_LANGUAGES = new Set<SubtitleRenderLanguage>(["zh-TW", "en", "zh-CN", "ja", "ko"]);
 const SUBTITLE_POSITIONS = new Set<SubtitleRenderPosition>(["TOP", "MIDDLE", "BOTTOM"]);
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const MAIN_START_TRANSITIONS = new Set<MainStartCardTransition>(["DISSOLVE", "FADE_BLACK", "HARD_CUT"]);
+
+export function sanitizePostSuccessPowerPreference(value: unknown): PostSuccessPowerPreference {
+  const candidate = value && typeof value === "object" ? (value as Partial<PostSuccessPowerPreference>) : {};
+  return {
+    // Opt-in must be the literal boolean true. Old settings never gain power
+    // behavior merely because a new version introduces this preference.
+    enabled: candidate.enabled === true,
+    trigger: candidate.trigger === "YOUTUBE_UPLOAD_SUCCESS" ? "YOUTUBE_UPLOAD_SUCCESS" : "RENDER_SUCCESS",
+    action: candidate.action === "HIBERNATE" || candidate.action === "SLEEP" ? candidate.action : "SHUTDOWN",
+  };
+}
 
 export function sanitizeAudioProtectionOptions(value: unknown): AudioProtectionOptions {
   const fallback = DEFAULT_AUDIO_PROTECTION_OPTIONS;
@@ -219,14 +232,23 @@ function defaults(): UserPreferences {
     viewMode: "GRID",
     renderDefaults: {
       transitionSeconds: 0.3,
-      resolution: "480P",
-      videoCodec: "H265_QSV",
+      resolution: "1080P",
+      videoCodec: "H264_QSV",
       includeWatermark: true,
       audioProtection: sanitizeAudioProtectionOptions(undefined),
+      audioProcessing: sanitizeAudioProcessingOptions(undefined),
       mainBgmScopes: sanitizeBgmScopeSelection(undefined),
       youtubeHandoffMode: "CHROME_DRAG_DROP",
       prependIntro: true,
       autoUpload: true,
+      lowMemorySegmented: true,
+      highSpeedMode: false,
+      resourceProfile: "LOW_DISK",
+      maximumRenderRamGiB: 8,
+      maximumRenderTempGiB: 100,
+      youtubeFullAutoUpload: true,
+      postSuccessPower: sanitizePostSuccessPowerPreference(undefined),
+      renderTemporaryFolder: undefined,
       introPreviewIncludeBgm: false,
       mainPreviewIncludeBgm: true,
       mainStartCard: sanitizeMainStartCardOptions(undefined),
@@ -270,6 +292,8 @@ function sanitize(value: unknown): UserPreferences {
       videoCodec:
         render?.videoCodec === "H264" ||
         render?.videoCodec === "H265" ||
+        render?.videoCodec === "H264_NVENC" ||
+        render?.videoCodec === "H265_NVENC" ||
         render?.videoCodec === "H264_QSV" ||
         render?.videoCodec === "H265_QSV"
           ? render.videoCodec
@@ -279,6 +303,7 @@ function sanitize(value: unknown): UserPreferences {
           ? render.includeWatermark
           : fallback.renderDefaults.includeWatermark,
       audioProtection: sanitizeAudioProtectionOptions(render?.audioProtection),
+      audioProcessing: sanitizeAudioProcessingOptions(render?.audioProcessing),
       mainBgmScopes: sanitizeBgmScopeSelection(render?.mainBgmScopes),
       youtubeHandoffMode:
         render?.youtubeHandoffMode === "OFFICIAL_API" || render?.youtubeHandoffMode === "CHROME_DRAG_DROP"
@@ -287,6 +312,39 @@ function sanitize(value: unknown): UserPreferences {
       prependIntro:
         typeof render?.prependIntro === "boolean" ? render.prependIntro : fallback.renderDefaults.prependIntro,
       autoUpload: typeof render?.autoUpload === "boolean" ? render.autoUpload : fallback.renderDefaults.autoUpload,
+      lowMemorySegmented:
+        typeof render?.lowMemorySegmented === "boolean"
+          ? render.lowMemorySegmented
+          : fallback.renderDefaults.lowMemorySegmented,
+      highSpeedMode:
+        typeof render?.highSpeedMode === "boolean" ? render.highSpeedMode : fallback.renderDefaults.highSpeedMode,
+      resourceProfile:
+        render?.resourceProfile === "LOW_DISK" || render?.resourceProfile === "BALANCED" || render?.resourceProfile === "HIGH_SPEED"
+          ? render.resourceProfile
+          : render?.highSpeedMode === true
+            ? "HIGH_SPEED"
+            : render?.lowMemorySegmented === false
+              ? "BALANCED"
+              : fallback.renderDefaults.resourceProfile,
+      maximumRenderRamGiB:
+        Number.isFinite(render?.maximumRenderRamGiB) && Number(render?.maximumRenderRamGiB) >= 4 && Number(render?.maximumRenderRamGiB) <= 64
+          ? Number(render?.maximumRenderRamGiB)
+          : fallback.renderDefaults.maximumRenderRamGiB,
+      maximumRenderTempGiB:
+        render?.maximumRenderTempGiB === "AUTO"
+          ? "AUTO"
+          : Number.isFinite(render?.maximumRenderTempGiB) && Number(render?.maximumRenderTempGiB) >= 20 && Number(render?.maximumRenderTempGiB) <= 4096
+            ? Number(render?.maximumRenderTempGiB)
+            : fallback.renderDefaults.maximumRenderTempGiB,
+      youtubeFullAutoUpload:
+        typeof render?.youtubeFullAutoUpload === "boolean"
+          ? render.youtubeFullAutoUpload
+          : fallback.renderDefaults.youtubeFullAutoUpload,
+      postSuccessPower: sanitizePostSuccessPowerPreference(render?.postSuccessPower),
+      renderTemporaryFolder:
+        typeof render?.renderTemporaryFolder === "string" && path.isAbsolute(render.renderTemporaryFolder)
+          ? path.resolve(render.renderTemporaryFolder)
+          : undefined,
       introPreviewIncludeBgm:
         typeof render?.introPreviewIncludeBgm === "boolean"
           ? render.introPreviewIncludeBgm
@@ -380,6 +438,8 @@ export class UserPreferencesStore {
           if (
             render.videoCodec !== "H265" &&
             render.videoCodec !== "H264" &&
+            render.videoCodec !== "H264_NVENC" &&
+            render.videoCodec !== "H265_NVENC" &&
             render.videoCodec !== "H265_QSV" &&
             render.videoCodec !== "H264_QSV"
           )
@@ -390,6 +450,8 @@ export class UserPreferencesStore {
           next.renderDefaults.includeWatermark = Boolean(render.includeWatermark);
         if (render.audioProtection !== undefined)
           next.renderDefaults.audioProtection = sanitizeAudioProtectionOptions(render.audioProtection);
+        if (render.audioProcessing !== undefined)
+          next.renderDefaults.audioProcessing = sanitizeAudioProcessingOptions(render.audioProcessing);
         if (render.mainBgmScopes !== undefined)
           next.renderDefaults.mainBgmScopes = sanitizeBgmScopeSelection(render.mainBgmScopes);
         if (render.youtubeHandoffMode !== undefined) {
@@ -399,6 +461,34 @@ export class UserPreferencesStore {
         }
         if (render.prependIntro !== undefined) next.renderDefaults.prependIntro = Boolean(render.prependIntro);
         if (render.autoUpload !== undefined) next.renderDefaults.autoUpload = Boolean(render.autoUpload);
+        if (render.lowMemorySegmented !== undefined)
+          next.renderDefaults.lowMemorySegmented = Boolean(render.lowMemorySegmented);
+        if (render.highSpeedMode !== undefined) next.renderDefaults.highSpeedMode = Boolean(render.highSpeedMode);
+        if (render.resourceProfile !== undefined) {
+          if (render.resourceProfile !== "LOW_DISK" && render.resourceProfile !== "BALANCED" && render.resourceProfile !== "HIGH_SPEED")
+            throw new Error("轉檔資源模式無效。");
+          next.renderDefaults.resourceProfile = render.resourceProfile;
+        }
+        if (render.maximumRenderRamGiB !== undefined) {
+          const value = Number(render.maximumRenderRamGiB);
+          if (!Number.isFinite(value) || value < 4 || value > 64) throw new Error("最大轉檔 RAM 必須介於 4–64 GB。");
+          next.renderDefaults.maximumRenderRamGiB = value;
+        }
+        if (render.maximumRenderTempGiB !== undefined) {
+          const value = render.maximumRenderTempGiB;
+          if (value !== "AUTO" && (!Number.isFinite(Number(value)) || Number(value) < 20 || Number(value) > 4096))
+            throw new Error("最大 Render TEMP 必須為 Auto 或 20–4096 GB。");
+          next.renderDefaults.maximumRenderTempGiB = value === "AUTO" ? "AUTO" : Number(value);
+        }
+        if (render.youtubeFullAutoUpload !== undefined)
+          next.renderDefaults.youtubeFullAutoUpload = Boolean(render.youtubeFullAutoUpload);
+        if (render.postSuccessPower !== undefined)
+          next.renderDefaults.postSuccessPower = sanitizePostSuccessPowerPreference(render.postSuccessPower);
+        if (render.renderTemporaryFolder !== undefined) {
+          if (typeof render.renderTemporaryFolder !== "string" || !path.isAbsolute(render.renderTemporaryFolder))
+            throw new Error("Render Temporary Folder 必須是絕對路徑。");
+          next.renderDefaults.renderTemporaryFolder = path.resolve(render.renderTemporaryFolder);
+        }
         if (render.introPreviewIncludeBgm !== undefined)
           next.renderDefaults.introPreviewIncludeBgm = Boolean(render.introPreviewIncludeBgm);
         if (render.mainPreviewIncludeBgm !== undefined)

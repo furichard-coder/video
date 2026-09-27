@@ -53,4 +53,12 @@ describe("render video codec", () => {
       "high",
     ]);
   });
+
+  it("preserves the proven H.264 QSV quality-mode base master encode", () => {
+    const args = buildVideoCodecArgs("H264_QSV");
+    expect(args).toEqual(expect.arrayContaining(["-c:v", "h264_qsv", "-global_quality", "25", "-profile:v", "high"]));
+    expect(args).not.toContain("-b:v");
+    expect(args).not.toContain("-maxrate");
+    expect(args).not.toContain("-bufsize");
+  });
 });

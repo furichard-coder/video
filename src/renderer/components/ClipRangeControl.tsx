@@ -7,6 +7,7 @@ interface ClipRangeControlProps {
   range: PreviewRange;
   compact?: boolean;
   showTimeFields?: boolean;
+  minimumRangeMs?: number;
   onChange: (range: PreviewRange, changed: "IN" | "OUT") => void;
   onCommit?: (range: PreviewRange) => void;
 }
@@ -16,10 +17,11 @@ export function ClipRangeControl({
   range,
   compact = false,
   showTimeFields = false,
+  minimumRangeMs,
   onChange,
   onCommit,
 }: ClipRangeControlProps) {
-  const minGap = Math.min(1_000, Math.max(100, durationMs / 10));
+  const minGap = minimumRangeMs ?? Math.min(1_000, Math.max(100, durationMs / 10));
   const safeDuration = Math.max(durationMs, minGap);
   const inPercent = (range.inMs / safeDuration) * 100;
   const outPercent = (range.outMs / safeDuration) * 100;

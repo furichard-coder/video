@@ -14,6 +14,7 @@ import {
   DEFAULT_INTRO_SEGMENT_MAX_DURATION_MS,
   DEFAULT_INTRO_TARGET_DURATION_MS,
   INTRO_DURATION_WARNING_MS,
+  INTRO_EDIT_MIN_SEGMENT_MS,
   INTRO_MAX_SEGMENT_MS,
   INTRO_MAX_SEGMENTS,
   INTRO_MIN_SEGMENT_MS,
@@ -23,11 +24,13 @@ import {
 import { formatDuration, formatMinuteSecondInput, parseMinuteSecondInput } from "../format";
 import { ClipRangeControl } from "./ClipRangeControl";
 import { ConcatRenderModal } from "./ConcatRenderModal";
-import { SafeDefaultButton } from "./SafeDefaultButton";
 import { COLOR_PRESETS, colorPreset } from "../../shared/color-presets";
 import { introSegmentsForOutput } from "../../shared/intro-duration";
 import { SharedIntroPreviewHistory } from "./SharedIntroPreviewHistory";
 import { ShortsStudio } from "./ShortsStudio";
+import { InsertionAudioControls } from "./InsertionAudioControls";
+import { buildInsertionAudioPlan } from "../../shared/insertion-audio-plan";
+import { PHOTO_SOUND_PREVIEW_URL } from "../../shared/domain";
 
 interface IntroStudioProps {
   project: ProjectManifest;
@@ -40,6 +43,15 @@ interface IntroStudioProps {
 interface IntroPreviewMedia {
   url: string;
   mode: "ORIGINAL" | "CLIP_PROXY" | "IMAGE";
+}
+
+interface IntroThumbnailState {
+  signature: string;
+  url: string;
+}
+
+function introThumbnailSignature(item: IntroSuggestion): string {
+  return `${item.assetId}:${Math.round(item.inMs)}:${Math.round(item.outMs)}`;
 }
 
 function phaseLabel(progress?: IntroAnalysisProgress): string {
@@ -113,7 +125,6 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
   const [notice, setNotice] = useState<string>();
   const [showOutput, setShowOutput] = useState(false);
   const [showShorts, setShowShorts] = useState(false);
-  const [showOverLimitConfirm, setShowOverLimitConfirm] = useState(false);
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [previewCurrentMs, setPreviewCurrentMs] = useState(0);
   const [loopMode, setLoopMode] = useState<"ALL" | "SINGLE">("ALL");
@@ -125,16 +136,91 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
   const [previewHistoryRevision, setPreviewHistoryRevision] = useState(0);
   const [draggingSuggestionId, setDraggingSuggestionId] = useState<string>();
   const [dragTargetSuggestionId, setDragTargetSuggestionId] = useState<string>();
+  const [introThumbnails, setIntroThumbnails] = useState<Record<string, IntroThumbnailState>>({});
+  const [thumbnailErrors, setThumbnailErrors] = useState<Record<string, true>>({});
+  const [thumbnailReloadRevision, setThumbnailReloadRevision] = useState(0);
+  const [expandedSegmentId, setExpandedSegmentId] = useState<string>();
+  const [moreMenuSegmentId, setMoreMenuSegmentId] = useState<string>();
+  const thumbnailNodesRef = useRef(new Map<string, HTMLElement>());
+  const thumbnailObserverRef = useRef<IntersectionObserver | undefined>(undefined);
+  const thumbnailRequestsRef = useRef(new Set<string>());
   const videoRef = useRef<HTMLVideoElement>(null);
+  const insertionSfxRef = useRef<HTMLAudioElement>(null);
+  const insertionBgmRef = useRef<HTMLAudioElement>(null);
+  const previousInsertionBgmRef = useRef<string | undefined>(undefined);
   const bgmPreviewRef = useRef<HTMLVideoElement>(null);
   const advancingRef = useRef(false);
   const projectRef = useRef(project);
   const introDragOrderRef = useRef<IntroSuggestion[] | undefined>(undefined);
   const introDraggedIdRef = useRef<string | undefined>(undefined);
 
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const api = window.sourceApp as typeof window.sourceApp & {
+      ensureIntroThumbnail?: (assetId: string, inMs: number, outMs: number) => Promise<{ url: string }>;
+    };
+    const ensureIntroThumbnail = api.ensureIntroThumbnail;
+    if (!ensureIntroThumbnail) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          const segmentId = (entry.target as HTMLElement).dataset.segmentId;
+          const item = suggestions.find((candidate) => candidate.id === segmentId);
+          if (!item) return;
+          const signature = introThumbnailSignature(item);
+          if (introThumbnails[item.id]?.signature === signature || thumbnailRequestsRef.current.has(signature)) return;
+          observer.unobserve(entry.target);
+          thumbnailRequestsRef.current.add(signature);
+          setThumbnailErrors((current) => {
+            if (!current[item.id]) return current;
+            const next = { ...current };
+            delete next[item.id];
+            return next;
+          });
+          void ensureIntroThumbnail(item.assetId, item.inMs, item.outMs).then((result) => {
+            setIntroThumbnails((current) => ({ ...current, [item.id]: { signature, url: result.url } }));
+          }).catch(() => {
+            setThumbnailErrors((current) => ({ ...current, [item.id]: true }));
+          }).finally(() => {
+            thumbnailRequestsRef.current.delete(signature);
+          });
+        });
+      },
+      { rootMargin: "160px 0px" },
+    );
+    thumbnailObserverRef.current = observer;
+    thumbnailNodesRef.current.forEach((node) => observer.observe(node));
+    return () => observer.disconnect();
+  }, [suggestions, introThumbnails, thumbnailReloadRevision]);
+
+  const registerThumbnailNode = (segmentId: string, node: HTMLElement | null) => {
+    const previous = thumbnailNodesRef.current.get(segmentId);
+    if (previous && previous !== node) thumbnailObserverRef.current?.unobserve(previous);
+    if (node) {
+      node.dataset.segmentId = segmentId;
+      thumbnailNodesRef.current.set(segmentId, node);
+      thumbnailObserverRef.current?.observe(node);
+    } else thumbnailNodesRef.current.delete(segmentId);
+  };
+
   const selected = suggestions.find((item) => item.id === selectedId);
   const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const selectedAsset = selected ? assetById.get(selected.assetId) : undefined;
+  const insertionAudioPlan = useMemo(
+    () => buildInsertionAudioPlan({ ...project, sources: assets, introSegments: suggestions }, { purpose: "INTRO" }),
+    [project, assets, suggestions],
+  );
+  const insertionAudioByInstance = useMemo(
+    () => new Map(insertionAudioPlan.items.map((item) => [item.instanceId, item])),
+    [insertionAudioPlan],
+  );
+  const selectedInsertionAudio = selected
+    ? insertionAudioPlan.items.find((item) => item.instanceId === selected.id)
+    : undefined;
+  const selectedInsertionBgm = selectedInsertionAudio?.bgmTrackId
+    ? project.bgmTracks.find((track) => track.id === selectedInsertionAudio.bgmTrackId)
+    : undefined;
   const selectedDisplayWidth = selectedAsset?.mediaInfo?.displayWidth ?? selectedAsset?.mediaInfo?.width ?? 16;
   const selectedDisplayHeight = selectedAsset?.mediaInfo?.displayHeight ?? selectedAsset?.mediaInfo?.height ?? 9;
   const selectedActiveZoom = selectedAsset?.zoomSegments?.find(
@@ -150,11 +236,13 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
     [suggestions, outputSegmentMaxMs],
   );
   const outputTotalDurationMs = outputSuggestions.reduce((sum, item) => sum + item.outMs - item.inMs, 0);
-  const overLimitSuggestions = suggestions.filter((item) => item.outMs - item.inMs > outputSegmentMaxMs);
+  const warningSuggestions = suggestions.filter((item) => {
+    const durationMs = item.outMs - item.inMs;
+    return durationMs < INTRO_MIN_SEGMENT_MS || durationMs > outputSegmentMaxMs;
+  });
   const hasInvalidSegmentDuration = suggestions.some((item) => {
     const durationMs = item.outMs - item.inMs;
-    const asset = assetById.get(item.assetId);
-    return durationMs < INTRO_MIN_SEGMENT_MS || (asset?.kind === "IMAGE" && durationMs > MAX_IMAGE_DURATION_MS);
+    return durationMs < INTRO_EDIT_MIN_SEGMENT_MS;
   });
   const introLimitExceeded =
     suggestions.length > INTRO_MAX_SEGMENTS ||
@@ -172,6 +260,14 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
     project.subtitleCues.some((cue) => (cue.timelineScope ?? "MAIN") === "INTRO") &&
     (project.introSubtitleReviewRevision ?? project.subtitleTimelineRevision) !==
       (project.introTimelineRevision ?? project.timelineRevision);
+
+  useEffect(() => {
+    const closeMoreMenu = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMoreMenuSegmentId(undefined);
+    };
+    window.addEventListener("keydown", closeMoreMenu);
+    return () => window.removeEventListener("keydown", closeMoreMenu);
+  }, []);
 
   useEffect(() => {
     window.sourceApp.onIntroAnalysisProgress(setProgress);
@@ -513,8 +609,10 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
   const changeSegmentSeconds = (item: IntroSuggestion, rawSeconds: number) => {
     if (!Number.isFinite(rawSeconds)) return;
     const asset = assetById.get(item.assetId);
-    const maximum = asset?.kind === "IMAGE" ? 7 : Math.max(3, (asset?.mediaInfo?.durationMs ?? item.outMs) / 1000);
-    const desiredMs = Math.round(Math.max(3, Math.min(maximum, rawSeconds)) * 1000);
+    const sourceMaximum = asset?.kind === "VIDEO" ? (asset.mediaInfo?.durationMs ?? item.outMs) / 1000 : rawSeconds;
+    const desiredMs = Math.round(
+      Math.max(INTRO_EDIT_MIN_SEGMENT_MS / 1000, Math.min(sourceMaximum, rawSeconds)) * 1000,
+    );
     if (asset?.kind === "IMAGE") updateSuggestion(item.id, 0, desiredMs);
     else {
       const sourceEndMs = asset?.mediaInfo?.durationMs ?? item.outMs;
@@ -571,6 +669,33 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
     imageLoopCycle,
     suggestions,
   ]);
+
+  useEffect(() => {
+    const sfx = insertionSfxRef.current;
+    if (!sfx || !previewPlaying || !selectedInsertionAudio?.sfxEnabled) return;
+    const volume = selected?.insertionAudio?.sfxVolumePercent ?? 70;
+    sfx.volume = Math.max(0, Math.min(1, volume / 100));
+    sfx.currentTime = 0;
+    void sfx.play().catch(() => undefined);
+  }, [selected?.id, selectedInsertionAudio?.sfxEnabled, previewPlaying, imageLoopCycle, preview?.url]);
+
+  useEffect(() => {
+    const bgm = insertionBgmRef.current;
+    if (!bgm) return;
+    if (!previewPlaying || !selectedInsertionBgm || !selectedInsertionAudio?.bgmEnabled) {
+      bgm.pause();
+      return;
+    }
+    const continuous =
+      previousInsertionBgmRef.current === selectedInsertionBgm.id && selectedInsertionAudio.continuousWithPrevious;
+    bgm.volume = Math.max(0, Math.min(1, (selected?.insertionAudio?.bgmVolumePercent ?? 28) / 100));
+    if (!continuous) {
+      try { bgm.currentTime = (selectedInsertionAudio.bgmSourcePositionMs ?? selectedInsertionBgm.sourceInMs) / 1000; }
+      catch { /* metadata is still loading */ }
+    }
+    previousInsertionBgmRef.current = selectedInsertionBgm.id;
+    void bgm.play().catch(() => undefined);
+  }, [selected?.id, selectedInsertionAudio?.bgmEnabled, selectedInsertionAudio?.continuousWithPrevious, selectedInsertionBgm?.id, previewPlaying, preview?.url]);
 
   const moveSuggestion = async (index: number, offset: -1 | 1) => {
     const target = index + offset;
@@ -648,6 +773,23 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     }
+  };
+
+  const reloadIntroThumbnail = (id: string) => {
+    setIntroThumbnails((current) => {
+      if (!current[id]) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setThumbnailErrors((current) => {
+      if (!current[id]) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setThumbnailReloadRevision((current) => current + 1);
+    setMoreMenuSegmentId(undefined);
   };
 
   const saveColorSettings = async (introPresetId: ColorPresetId, applyToMain = project.colorSettings.applyToMain) => {
@@ -968,22 +1110,31 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
               <ol className="suggestion-list">
                 {suggestions.map((item, index) => {
                   const asset = assetById.get(item.assetId);
+                  const thumbnailSignature = introThumbnailSignature(item);
+                  const thumbnailState = introThumbnails[item.id];
+                  const thumbnailUrl = thumbnailState?.signature === thumbnailSignature ? thumbnailState.url : undefined;
+                  const audioState = insertionAudioByInstance.get(item.id);
+                  const detailsExpanded = expandedSegmentId === item.id;
+                  const moreOpen = moreMenuSegmentId === item.id;
                   const durationMs =
                     asset?.kind === "IMAGE" ? MAX_IMAGE_DURATION_MS : (asset?.mediaInfo?.durationMs ?? item.outMs);
-                  const exceedsOutputMaximum = item.outMs - item.inMs > outputSegmentMaxMs;
+                  const durationWarning =
+                    item.outMs - item.inMs < INTRO_MIN_SEGMENT_MS || item.outMs - item.inMs > outputSegmentMaxMs;
                   return (
                     <li
                       key={item.id}
-                      className={[
+                      ref={(node) => registerThumbnailNode(item.id, node)}
+                      data-segment-id={item.id}
+                      className={`intro-segment-card ${[
                         item.id === selectedId ? "is-selected" : "",
-                        exceedsOutputMaximum ? "is-over-duration-limit" : "",
+                        durationWarning ? "is-over-duration-limit" : "",
                         item.id === draggingSuggestionId ? "is-dragging" : "",
                         draggingSuggestionId && item.id === dragTargetSuggestionId && item.id !== draggingSuggestionId
                           ? "is-drag-target"
                           : "",
                       ]
                         .filter(Boolean)
-                        .join(" ")}
+                        .join(" ")}`}
                       onDragEnter={(event) => dragSuggestionOver(event, item.id)}
                       onDragOver={(event) => dragSuggestionOver(event, item.id)}
                       onDrop={(event) => {
@@ -991,90 +1142,211 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                         void finishSuggestionDrag();
                       }}
                     >
-                      <button
-                        className="suggestion-select"
-                        type="button"
-                        draggable
-                        aria-label={`選擇並拖曳片頭第 ${index + 1} 段 ${item.fileName}`}
-                        onClick={() => setSelectedId(item.id)}
-                        onDragStart={(event) => beginSuggestionDrag(event, item.id)}
-                        onDragEnd={() => void finishSuggestionDrag()}
-                      >
-                        <span className="intro-drag-handle" aria-hidden="true">
-                          ⠿
-                        </span>
-                        <span className="intro-order-number">{String(index + 1).padStart(2, "0")}</span>
-                        <div>
-                          <strong title={item.fileName}>{item.fileName}</strong>
-                          <small>
-                            {item.origin === "MANUAL" ? "手動片段" : `精彩分數 ${item.score}`}
-                            {item.storyRelevanceScore !== undefined
-                              ? ` · 故事相關 ${item.storyRelevanceScore}`
-                              : ""} · {item.reasons.join("／")}
-                          </small>
-                        </div>
-                      </button>
-                      {asset?.kind === "VIDEO" && (
-                        <ClipRangeControl
-                          compact
-                          showTimeFields
-                          durationMs={durationMs}
-                          range={{ inMs: item.inMs, outMs: item.outMs }}
-                          onChange={(range, changed) => updateSuggestion(item.id, range.inMs, range.outMs, changed)}
-                          onCommit={(range) => void persistSuggestionRange(item.id, range.inMs, range.outMs)}
-                        />
-                      )}
-                      <label className="intro-segment-seconds">
-                        <span>{asset?.kind === "IMAGE" ? "照片顯示秒數" : "檢看片段秒數"}</span>
-                        <input
-                          aria-label={`${item.fileName}片段秒數`}
-                          type="number"
-                          min="3"
-                          max={
-                            asset?.kind === "IMAGE"
-                              ? 7
-                              : Math.max(3, (asset?.mediaInfo?.durationMs ?? item.outMs) / 1000)
-                          }
-                          step="0.1"
-                          value={((item.outMs - item.inMs) / 1000).toFixed(1)}
-                          onChange={(event) => changeSegmentSeconds(item, Number(event.target.value))}
-                          onBlur={() => void persistSuggestionRange(item.id, item.inMs, item.outMs)}
-                        />
-                        <small>
-                          {asset?.kind === "IMAGE" ? "照片可選 3–7 秒" : "拉桿可選來源內任意範圍"}；輸出每段最多{" "}
-                          {formatDuration(outputSegmentMaxMs)}
-                        </small>
-                      </label>
-                      {exceedsOutputMaximum && (
-                        <p className="intro-segment-over-limit" role="status">
-                          目前檢看片段為 {formatDuration(item.outMs - item.inMs)}
-                          ，超過輸出上限；仍可完整預覽，轉出時將由 IN 起取 {formatDuration(outputSegmentMaxMs)}。
-                        </p>
-                      )}
-                      <div className="suggestion-actions">
-                        <button type="button" disabled={index === 0} onClick={() => void moveSuggestion(index, -1)}>
-                          ↑ 往前
-                        </button>
+                      <div className="intro-segment-rail">
                         <button
+                          className="intro-segment-thumbnail"
                           type="button"
-                          disabled={index === suggestions.length - 1}
-                          onClick={() => void moveSuggestion(index, 1)}
+                          data-tooltip="預覽片段｜在右側開啟這一段"
+                          title="預覽片段｜在右側開啟這一段"
+                          aria-label={`預覽片頭第 ${index + 1} 段 ${item.fileName}`}
+                          onClick={() => setSelectedId(item.id)}
                         >
-                          ↓ 往後
+                          {thumbnailUrl ? (
+                            <img
+                              src={thumbnailUrl}
+                              alt={`片頭第 ${index + 1} 段 ${item.fileName} 第一幀縮圖`}
+                              loading="lazy"
+                              decoding="async"
+                              onError={() => setThumbnailErrors((current) => ({ ...current, [item.id]: true }))}
+                            />
+                          ) : thumbnailErrors[item.id] ? (
+                            <span className="intro-thumbnail-error" role="status" aria-label={`片頭第 ${index + 1} 段縮圖載入失敗`}>
+                              !
+                            </span>
+                          ) : (
+                            <span role="status" aria-label={`正在載入片頭第 ${index + 1} 段第一幀縮圖`}>
+                              ▧
+                            </span>
+                          )}
+                          <span className="intro-thumbnail-duration" aria-hidden="true">
+                            {formatDuration(item.outMs - item.inMs)}
+                          </span>
                         </button>
-                        {onOpenMaterialAnalysis && asset && (
-                          <button type="button" onClick={() => onOpenMaterialAnalysis(asset)}>
-                            ✦ 影像分析字幕
+                      </div>
+                      <div className="intro-segment-body">
+                        <div className="intro-segment-header">
+                          <button
+                            className="suggestion-select"
+                            type="button"
+                            draggable
+                            title={`選擇／預覽片頭第 ${index + 1} 段`}
+                            aria-label={`選擇並拖曳片頭第 ${index + 1} 段 ${item.fileName}`}
+                            onClick={() => setSelectedId(item.id)}
+                            onDragStart={(event) => beginSuggestionDrag(event, item.id)}
+                            onDragEnd={() => void finishSuggestionDrag()}
+                          >
+                            <span className="intro-drag-handle" aria-hidden="true">
+                              ⠿
+                            </span>
+                            <span className="intro-order-number">{String(index + 1).padStart(2, "0")}</span>
+                            <div>
+                              <strong title={item.fileName}>{item.fileName}</strong>
+                              <small>
+                                {item.origin === "MANUAL" ? "手動片段" : `精彩分數 ${item.score}`}
+                                {item.storyRelevanceScore !== undefined
+                                  ? ` · 故事相關 ${item.storyRelevanceScore}`
+                                  : ""} · {item.reasons.join("／")}
+                              </small>
+                            </div>
                           </button>
+                          <span className="intro-segment-duration" title="片段長度">
+                            {formatDuration(item.outMs - item.inMs)}
+                          </span>
+                        </div>
+                        <div className="intro-segment-toolbar" role="toolbar" aria-label={`片頭第 ${index + 1} 段快速操作`}>
+                          <button
+                            className={`intro-icon-action ${item.id === selectedId ? "is-selected" : ""}`}
+                            type="button"
+                            data-tooltip="預覽片段｜在右側開啟並播放此片段"
+                            aria-label={`預覽片頭第 ${index + 1} 段 ${item.fileName}`}
+                            aria-pressed={item.id === selectedId}
+                            onClick={() => setSelectedId(item.id)}
+                          >
+                            <span aria-hidden="true">▶</span>
+                          </button>
+                          <button
+                            className={`intro-icon-action ${detailsExpanded ? "is-selected" : ""}`}
+                            type="button"
+                            data-tooltip="裁切與長度｜調整片段起訖與顯示秒數"
+                            aria-label={`調整片頭第 ${index + 1} 段裁切與長度`}
+                            aria-expanded={detailsExpanded}
+                            aria-controls={`intro-details-${item.id}`}
+                            onClick={() => {
+                              setSelectedId(item.id);
+                              setExpandedSegmentId(detailsExpanded ? undefined : item.id);
+                            }}
+                          >
+                            <span aria-hidden="true">✂</span>
+                          </button>
+                          <button
+                            className={`intro-icon-action ${audioState?.hasSourceAudio && audioState.gates.original ? "is-enabled" : "is-disabled"}`}
+                            type="button"
+                            data-tooltip={audioState?.hasSourceAudio ? "原始音訊｜開啟設定並確認此片段原音" : "原始音訊｜此素材沒有可用原音"}
+                            aria-label={`${item.fileName} 原始音訊${audioState?.hasSourceAudio && audioState.gates.original ? "已開啟" : "未開啟"}`}
+                            disabled={!audioState?.hasSourceAudio}
+                            onClick={() => setExpandedSegmentId(item.id)}
+                          >
+                            <span aria-hidden="true">◉</span>
+                          </button>
+                          <button
+                            className={`intro-icon-action ${audioState?.bgmEnabled ? "is-enabled" : "is-disabled"}`}
+                            type="button"
+                            data-tooltip={`背景音樂｜${audioState?.bgmEnabled ? `已使用 ${audioState.bgmTrackName ?? "BGM"}` : "開啟設定或選擇 BGM"}`}
+                            aria-label={`${item.fileName} 背景音樂${audioState?.bgmEnabled ? "已開啟" : "未開啟"}`}
+                            onClick={() => setExpandedSegmentId(item.id)}
+                          >
+                            <span aria-hidden="true">♫</span>
+                          </button>
+                          <button
+                            className={`intro-icon-action ${audioState?.sfxEnabled ? "is-enabled" : "is-disabled"}`}
+                            type="button"
+                            data-tooltip={asset?.kind === "IMAGE" ? `效果音｜${audioState?.sfxEnabled ? "相機快門已開啟" : "開啟設定以使用快門聲"}` : "效果音｜影片片段目前沒有照片快門 SFX"}
+                            aria-label={`${item.fileName} 效果音${audioState?.sfxEnabled ? "已開啟" : "未開啟"}`}
+                            disabled={asset?.kind !== "IMAGE"}
+                            onClick={() => setExpandedSegmentId(item.id)}
+                          >
+                            <span aria-hidden="true">✦</span>
+                          </button>
+                          <button
+                            className="intro-icon-action intro-remove-button"
+                            type="button"
+                            data-tooltip="刪除片段｜只從片頭移除，不刪除來源檔"
+                            aria-label={`從片頭移除 ${item.fileName} ${formatDuration(item.inMs)} 到 ${formatDuration(item.outMs)}；不刪除來源檔`}
+                            onClick={() => void removeSuggestion(item.id)}
+                          >
+                            <span aria-hidden="true">⌫</span>
+                          </button>
+                          <div className="intro-more-menu-wrap">
+                            <button
+                              className={`intro-icon-action ${moreOpen ? "is-selected" : ""}`}
+                              type="button"
+                              data-tooltip="更多設定｜排序、分析與重新載入縮圖"
+                              aria-label={`片頭第 ${index + 1} 段更多設定`}
+                              aria-expanded={moreOpen}
+                              aria-controls={`intro-more-${item.id}`}
+                              onClick={() => setMoreMenuSegmentId(moreOpen ? undefined : item.id)}
+                            >
+                              <span aria-hidden="true">⋯</span>
+                            </button>
+                            {moreOpen && (
+                              <div id={`intro-more-${item.id}`} className="intro-more-menu" role="menu">
+                                <button role="menuitem" type="button" disabled={index === 0} onClick={() => { setMoreMenuSegmentId(undefined); void moveSuggestion(index, -1); }}>
+                                  ↑ 往前一個順位
+                                </button>
+                                <button role="menuitem" type="button" disabled={index === suggestions.length - 1} onClick={() => { setMoreMenuSegmentId(undefined); void moveSuggestion(index, 1); }}>
+                                  ↓ 往後一個順位
+                                </button>
+                                {onOpenMaterialAnalysis && asset && (
+                                  <button role="menuitem" type="button" onClick={() => { setMoreMenuSegmentId(undefined); onOpenMaterialAnalysis(asset); }}>
+                                    ✦ 影像分析與字幕
+                                  </button>
+                                )}
+                                <button role="menuitem" type="button" onClick={() => reloadIntroThumbnail(item.id)}>
+                                  ↻ 重新載入縮圖
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {detailsExpanded && (
+                          <div className="intro-segment-details" id={`intro-details-${item.id}`}>
+                            {asset?.kind === "VIDEO" && (
+                              <ClipRangeControl
+                                compact
+                                showTimeFields
+                                minimumRangeMs={INTRO_EDIT_MIN_SEGMENT_MS}
+                                durationMs={durationMs}
+                                range={{ inMs: item.inMs, outMs: item.outMs }}
+                                onChange={(range, changed) => updateSuggestion(item.id, range.inMs, range.outMs, changed)}
+                                onCommit={(range) => void persistSuggestionRange(item.id, range.inMs, range.outMs)}
+                              />
+                            )}
+                            <label className="intro-segment-seconds">
+                              <span>{asset?.kind === "IMAGE" ? "照片顯示秒數" : "檢看片段秒數"}</span>
+                              <input
+                                aria-label={`${item.fileName}片段秒數`}
+                                type="number"
+                                min={INTRO_EDIT_MIN_SEGMENT_MS / 1000}
+                                max={asset?.kind === "VIDEO" ? (asset.mediaInfo?.durationMs ?? item.outMs) / 1000 : undefined}
+                                step="0.1"
+                                value={((item.outMs - item.inMs) / 1000).toFixed(1)}
+                                onChange={(event) => changeSegmentSeconds(item, Number(event.target.value))}
+                                onBlur={() => void persistSuggestionRange(item.id, item.inMs, item.outMs)}
+                              />
+                              <small>
+                                可自由設定；建議每段 {formatDuration(INTRO_MIN_SEGMENT_MS)}–
+                                {formatDuration(outputSegmentMaxMs)}
+                              </small>
+                            </label>
+                            {asset && (
+                              <InsertionAudioControls
+                                project={projectRef.current}
+                                scope="INTRO"
+                                instanceId={item.id}
+                                asset={asset}
+                                value={item.insertionAudio}
+                                onProjectUpdated={applyProject}
+                                compact
+                              />
+                            )}
+                          </div>
                         )}
-                        <button
-                          className="intro-remove-button"
-                          type="button"
-                          aria-label={`從片頭移除 ${item.fileName} ${formatDuration(item.inMs)} 到 ${formatDuration(item.outMs)}`}
-                          onClick={() => void removeSuggestion(item.id)}
-                        >
-                          從片頭移除
-                        </button>
+                        {durationWarning && (
+                          <p className="intro-segment-over-limit" role="status">
+                            目前為 {formatDuration(item.outMs - item.inMs)}
+                            ，超出建議範圍；只顯示提醒，不會限制、拉回或截短成片。
+                          </p>
+                        )}
                       </div>
                     </li>
                   );
@@ -1180,6 +1452,28 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                       } as React.CSSProperties
                     }
                   >
+                    {selectedInsertionAudio?.sfxEnabled && selectedAsset.kind === "IMAGE" && (
+                      <audio ref={insertionSfxRef} src={PHOTO_SOUND_PREVIEW_URL} preload="auto" />
+                    )}
+                    {selectedInsertionBgm && selectedInsertionAudio?.bgmEnabled && (
+                      <audio
+                        ref={insertionBgmRef}
+                        src={`preview-media://bgm/${encodeURIComponent(selectedInsertionBgm.id)}`}
+                        preload="auto"
+                        onLoadedMetadata={(event) => {
+                          event.currentTarget.currentTime =
+                            (selectedInsertionAudio.bgmSourcePositionMs ?? selectedInsertionBgm.sourceInMs) / 1000;
+                        }}
+                        onTimeUpdate={(event) => {
+                          if (event.currentTarget.currentTime >= selectedInsertionBgm.sourceOutMs / 1000 - 0.03)
+                            event.currentTarget.currentTime = selectedInsertionBgm.sourceInMs / 1000;
+                        }}
+                        onEnded={(event) => {
+                          event.currentTarget.currentTime = selectedInsertionBgm.sourceInMs / 1000;
+                          if (previewPlaying) void event.currentTarget.play().catch(() => undefined);
+                        }}
+                      />
+                    )}
                     {selectedAsset.kind === "VIDEO" && (
                       <>
                         <video
@@ -1187,6 +1481,7 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                           key={`${preview.url}:${selected.id}`}
                           ref={videoRef}
                           src={preview.url}
+                          muted={selectedInsertionAudio?.gates.original === false}
                           autoPlay
                           preload="metadata"
                           aria-label={`片頭素材預覽 ${selected.fileName}`}
@@ -1370,15 +1665,15 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                   <strong>Intro 預覽輸出</strong>
                   <span>
                     {suggestions.length
-                      ? `${suggestions.length} / ${INTRO_MAX_SEGMENTS} 段 · 檢看 ${formatDuration(totalDurationMs)} · 實際輸出約 ${formatDuration(outputTotalDurationMs)} / ${formatDuration(effectiveTargetDurationMs)} · 每段最高 ${formatDuration(outputSegmentMaxMs)}`
+                      ? `${suggestions.length} / ${INTRO_MAX_SEGMENTS} 段 · 檢看與實際輸出約 ${formatDuration(outputTotalDurationMs)} / ${formatDuration(effectiveTargetDurationMs)} · 建議每段 ${formatDuration(INTRO_MIN_SEGMENT_MS)}–${formatDuration(outputSegmentMaxMs)}`
                       : "請先分析或手動加入至少一段"}
                   </span>
                   <small className="four-k-note">
                     輸出頁可選真正 3840 × 2160 MP4；低於 4K 的來源只能等比例升頻，不能恢復原本不存在的細節。
                   </small>
-                  {overLimitSuggestions.length > 0 && (
+                  {warningSuggestions.length > 0 && (
                     <small className="segment-cap-warning-text">
-                      有 {overLimitSuggestions.length} 段超過每段輸出上限；檢看不截短，輸出前會再次確認。
+                      有 {warningSuggestions.length} 段超出建議長度；只以橘色提醒，預覽與輸出都保留所選時間。
                     </small>
                   )}
                   {introDurationWarning && (
@@ -1387,7 +1682,7 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                   {introLimitExceeded && (
                     <small>
                       {hasInvalidSegmentDuration
-                        ? `每段至少 3 秒；照片仍限 3–7 秒。`
+                        ? `片段必須大於 0 秒；目前最小編輯步進為 ${INTRO_EDIT_MIN_SEGMENT_MS / 1000} 秒。`
                         : suggestions.length > INTRO_MAX_SEGMENTS
                           ? `超過 ${INTRO_MAX_SEGMENTS} 段上限。`
                           : "依每段上限截取後，仍超過目前設定的片頭目標時間。"}
@@ -1407,7 +1702,7 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                     className="primary-button"
                     type="button"
                     disabled={!suggestions.length || introLimitExceeded || parsedTargetDurationMs === undefined}
-                    onClick={() => (overLimitSuggestions.length ? setShowOverLimitConfirm(true) : setShowOutput(true))}
+                    onClick={() => setShowOutput(true)}
                   >
                     產出 Intro 預覽
                   </button>
@@ -1422,45 +1717,9 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
           </div>
         )}
       </section>
-      {showOverLimitConfirm && (
-        <div className="modal-backdrop" role="presentation">
-          <section
-            className="confirm-remove-modal intro-over-limit-confirm"
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="intro-over-limit-title"
-          >
-            <span className="eyebrow">INTRO OUTPUT LIMIT</span>
-            <h2 id="intro-over-limit-title">有片段超過每段輸出上限</h2>
-            <p>
-              目前有 <strong>{overLimitSuggestions.length}</strong> 段的檢看範圍超過{" "}
-              {formatDuration(outputSegmentMaxMs)}。您仍可保留完整範圍繼續預覽；若現在產出，每段會保留所選{" "}
-              <strong>IN 起點</strong>，並最多轉出 {formatDuration(outputSegmentMaxMs)}，超出的尾端不會進入成品。
-            </p>
-            <footer>
-              <SafeDefaultButton
-                className="secondary-button"
-                type="button"
-                onClick={() => setShowOverLimitConfirm(false)}
-              >
-                返回調整
-              </SafeDefaultButton>
-              <button
-                className="primary-button"
-                type="button"
-                onClick={() => {
-                  setShowOverLimitConfirm(false);
-                  setShowOutput(true);
-                }}
-              >
-                是，以 {formatDuration(outputSegmentMaxMs)} 上限產出
-              </button>
-            </footer>
-          </section>
-        </div>
-      )}
       {showOutput && (
         <ConcatRenderModal
+          project={projectRef.current}
           purpose="INTRO"
           assets={assets}
           introClips={suggestions}
