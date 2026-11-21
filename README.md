@@ -1,8 +1,30 @@
 # SceneryWalker 素材整理 App
 
-這是剪接 App 的可驗收垂直切片。它負責選擇、排列及預覽影片／照片，並可產生串連或 Intro 預覽；不建立正式 Master、不做多軌 Timeline 剪輯，也不改寫或刪除來源檔。完成的正片或僅片頭預覽可由使用者確認後以 Chrome 拖放或 YouTube 官方 API 上傳到已核對的頻道；正片也可安全交接到 BiliBili／TikTok 官方投稿頁。只有使用者主動執行 AI 時，才會送出低解析故事板與故事背景；字幕的素材語音分析預設關閉，只有另行勾選才建立及送出短音訊。
+這是 Windows 剪接、預覽與轉檔 App。它可選擇及排列影片／照片、建立片頭與正片預覽、輸出最終影片並管理續轉資料；來源檔不會因預覽或字幕分析而改寫或刪除。YouTube 等上傳功能需使用者確認。只有使用者主動啟動 AI 分析時，才會送出取樣影格與背景文字；字幕視覺分析使用另外設定的服務憑證，不會自動執行付費長片分析。
 
-目前版本：v0.80.0。
+目前版本：v0.88.0。字幕 Review 支援目前範圍內跨影片／照片接續播放、依精確時間顯示目前草稿、左側固定焦點跟隨及右側固定預覽；Space 暫停／續播不影響文字輸入。新增可選的 AI 逐筆 KEEP/EDIT 提案與人工確認、既有 SRT 獨立匯入，以及正式 SRT 明確匯出前的備份。完整回歸 96 files／585 tests、Windows 封裝及封裝啟動檢查通過；可攜版位於 `release/v0.88.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.88.0.exe`，完整驗收見 `docs/V088_SUBTITLE_REVIEW_REPORT.md`。單筆真實 OpenAI 圖片 review 受 billing/quota 429 阻擋，尚無成功 AI 提案，不能把模擬測試當作 live 成功。片頭→正片跨範圍自動接續未完成；Proxy review 採 cut 接續，不是 Final xfade 合成預覽。歷史 v0.87.0 與更早 release 保留。
+
+v0.87.0 的字幕捲動、VIDEO_FIRST、動態模型與真實取樣紀錄見 `docs/V087_SUBTITLE_RECOVERY_REPORT.md`、`docs/VERIFICATION.md`。
+
+以下 v0.84.0 起的段落為歷史版本紀錄；涉及當時狀態的限制與測試數值，不代表 v0.88.0 的現況。
+
+v0.84.0 修正 v0.83「確認搬移後只重新分析、不開始續轉」的控制流程。TEMP 復原精靈會列出需要搬移的個別檔案及來源／目的地，支援手動搬移後掃描已登錄 TEMP、驗證媒體與 SHA、更新獨立 checkpoint、重新計算容量；通過後可自動呼叫續轉。若在 E:／C: 同時找到副本，只會提示重複，不會自行刪除舊檔。既有 10 個 4K level-1 MKV（約 67.547 GiB）仍保留，本版沒有實際搬動或啟動長片續轉；下游的 Base Master 及音訊處理仍屬必要步驟。實際盤點與限制見 `docs/V084_RESUME_STORAGE_RECOVERY_REPORT.md`。
+
+已知限制：App 自動搬移大型資料尚無逐位元組速度／ETA 與只取消複製的控制；手動複製而非移動時，也尚無 App 內經確認刪除 E: 舊副本的流程，因此 E: 空間不會因保留雙份而增加。使用者應優先依精靈列出的檔案做手動搬移，並在 App 驗證及重新量測後續轉。
+
+v0.84.0 Windows 可攜版：`release/v0.84.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.84.0.exe`。EXE SHA-256：`FFD0B56900E9C569E4C2A99A7E20F1A62CAAE61AA56AF5AFCF5909750350BE7F`。完整回歸 78 files／498 tests、TypeScript、build、source／packaged smoke 通過；production dependencies audit 0 vulnerabilities，開發依賴仍有 1 個 moderate `undici`。v0.83 可攜版與正在執行的視窗未覆蓋。
+
+v0.83.0 將新安裝的主要 E: TEMP 預設 Soft Reserve 改為 1 GiB、C: 備援 TEMP 改為 2 GiB；每槽可在轉檔頁修改並保存。從 v0.81／v0.82 標準路徑繼承的 20／30 GiB 預設值會轉成新預設，其他自訂值維持。Soft Reserve 是容量提醒而非 FFmpeg `-28`；Runtime Hard Safety 另外依新工作的預估寫入、即時磁碟空間與可寫狀態判斷。低餘量的轉檔仍有估算誤差與 Windows／Pagefile 風險，不能保證只留 1／2 GiB 就一定安全。
+
+按「繼續上次轉檔」前會分析 E/C 容量、已完成片段與剩餘同時峰值。若 E: 無法接下一個工作而 C: 可容納，未開始的新工作改寫 C:；否則可產生最少必要的完成片段搬移提案，須使用者確認。搬移時只處理已驗證片段，先複製並檢查 size／ffprobe／SHA、保存目前 checkpoint 與內容指紋位置索引，再刪來源；碰到目的地同名檔或空間不足會拒絕，來源保留。舊 checkpoint JSON 不被改寫。轉檔頁將 App 主動安全暫停與 FFmpeg 真正 `ENOSPC -28` 分開顯示。
+
+舊版暫存分析只在已設定與已知的 SceneryWalker TEMP 位置作有界盤點。此次本機盤點中，E: 的 10 個 MKV（67.547 GiB）仍是目前 v0.82 checkpoint 必需資料；沒有證據可安全刪除。舊版 quickbench／可重建 cache 候選也保守保留，未知檔與 partial 不可刪。本版不會自動清理舊版資料，且沒有執行任何實際搬移或刪除。54.1 GiB 舊錯誤的計算與假設搬移範例見 `docs/V083_STORAGE_RECOVERY_REPORT.md`；完整長片 Resume 仍須使用者確認空間後另行實測。
+
+v0.83.0 Windows 可攜版：`release/v0.83.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.83.0.exe`。EXE SHA-256：`00A6BA6366C533DC56EF29FC92557D02AA458297D90D7A414C995BDD30F51F24`。完整回歸 78 files／496 tests、TypeScript、build、source／packaged smoke 通過；production dependencies audit 為 0 vulnerabilities，開發依賴 audit 有 1 個 moderate `undici`。v0.82 可攜版與其正在執行的視窗未覆蓋。
+
+v0.82.0 調查舊 v0.80 checkpoint 時，發現舊 Resume 閘門同時要求 picture/base signature 與 `projectUpdatedAt` 相符；本案兩項比較均不符。舊 checkpoint 沒有完整 Project snapshot，因此整體 VIDEO、TIMELINE、BASE_AUDIO 相容性仍為 UNKNOWN。92 筆 clip selection（Intro 25、Main 67）及 0.7 秒 transition 符合目前 manifest；59/59 個來源檔案的即時 size／mtime 與目前 manifest 一致，且修改時間均不晚於 checkpoint 建立時間。唯讀 analyzer 對照 10 個 legacy level-one ID，並通過加強後的媒體參數與 SHA 驗證，確認 10/10 段可重用（8,976,508 ms、72,527,956,978 bytes），可跳過這些首層 segments 的重編。因沒有 base partial 或 audio master，後續 Base picture、audio、mux 階段仍須執行；不能宣稱完整二十多小時成果已全部免重跑。TEMP 位置曾被舊 picture signature 納入，是相容性風險但不是本案唯一拒絕原因；YouTube 上傳設定分離於 render hash。逐欄差異與更多證據見 `docs/RESUME_COMPAT_DIFF.json` 與 `docs/V082_RESUME_RECOVERY_REPORT.md`。
+
+v0.82.0 Windows 可攜版：`release/v0.82.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.82.0.exe`，EXE SHA-256：`200227FC9F4115BBE9A32447479B74DF8E55163C8FBB3194C84513E44D03F6CA`，`resources/app.asar` SHA-256：`69295BCF91D4E2EBC6E5AF292331CDE34038FD1D1AE614D52238B9DD65E1DE49`。完整回歸 76 files／484 tests、後續介面安全修改的 focused 10/10、TypeScript、production build、source／packaged smoke 全部通過，npm audit 0 vulnerabilities。尚未啟動原專案的完整長片續轉。
 
 v0.80.0 完成一次唯讀、copy-on-write 的舊 checkpoint 恢復驗證：可讀取並重用 10 個 level-1 segments（合計約 67.547 GiB、媒體時間約 8976.718 秒），不重編這 10 段；Base Master 仍需重跑。跨 group xfade、ASS 字幕與浮水印使這 10 段不能直接以 `-c copy` 串接，最後 audio mux 則固定沿用 `-c:v copy`。舊版已刪除的 `base.partial.mkv` 不可恢復。
 
@@ -11,7 +33,9 @@ v0.80.0 完成一次唯讀、copy-on-write 的舊 checkpoint 恢復驗證：可�
 本版紀錄的 74 files／459 tests、typecheck、production build、audit 與 source／packaged smokes 均通過；若日後重跑，數字與結果仍以新產出的證據為準。
 Windows 可攜版位於 `release/v0.80.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.80.0.exe`，SHA-256：`2445347DC1F96D24A4B463C6CB669F0C0BEF9FA2607BA27D0E40E6BD853B93FC`。
 
-續轉空間預估不會再把舊版已完成的 67.547 GiB 片段重複算成待寫入；但此案保守估計仍需新增約 182 GiB 才能同時保存 Base Master 與最終成品，相對 E: 當時約 144.45 GiB 可用，尚缺約 38 GiB，另需考慮安全餘量。真正開始前會重新測量磁碟，不會在空間不足時清除舊片段或冒險長時間轉檔。
+v0.81.0 的新轉檔預設優先使用 E: 的 Render TEMP；E: 無法容納下一個完整工作、不可寫或離線時，才改用 C: 使用者 TEMP 下的 SceneryWalker 資料夾。兩槽均可在轉檔設定中改位置與優先順位；E: 至少保留 20 GiB、C: 至少保留 30 GiB。切換只影響尚未開始的工作，完成片段記錄各自絕對路徑，可從 E:／C: 混合讀取並續轉；不搬移或鏡像既有片段。Proxy、字幕與音效試聽新快取也依同一順位選址，舊 App Data 快取仍可讀。成品位置始終獨立指定，若與 TEMP 同磁碟，預檢會合計兩者需求。舊 v0.79 恢復資料維持唯讀，v0.80 完成成果可用獨立 checkpoint 沿用；改 TEMP 不應觸發畫面重編。短片跨 E/C 串接與換槽續轉已驗證；尚未以完整 1 小時 40 分專案跑完，長片峰值與所需空間仍以實際轉檔監測為準。
+
+v0.81.0 Windows 可攜版：`release/v0.81.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.81.0.exe`，SHA-256：`1042FECB2A3FB52F16A4B812F1D81EB6F9941DE6D4EED83BDF5734DD5F0875C6`。首次長片轉檔前，請在「產出串連預覽／轉檔前預估」確認兩個 TEMP 位置和成品磁碟的即時可用容量；C: 約 75 GiB 可用時，扣除 30 GiB 系統保留後，只有約 45 GiB 可供備援工作，不能把 E+C 當成單一超大暫存磁碟。
 
 v0.79.0 修正「產出串連預覽」選擇 Render TEMP 後沒有真正保存的問題。選擇或驗證可寫資料夾後，偏好會原子保存；重開 App、轉檔前估算與新建立的 render work root 都會讀取同一路徑。已存在的 checkpoint 仍保留原 work root，不會在切換 TEMP 時搬移或失效。
 

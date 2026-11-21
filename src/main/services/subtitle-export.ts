@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { rm, writeFile } from "node:fs/promises";
+import { copyFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { SubtitleCue, SubtitleExportResult } from "../../shared/domain";
 import { validateSubtitleCues } from "../../shared/editing-rules";
@@ -22,6 +22,21 @@ export function serializeSrt(cues: SubtitleCue[]): string {
         `${index + 1}\r\n${srtTimestamp(cue.startMs)} --> ${srtTimestamp(cue.endMs)}\r\n${wrapSubtitleText(cue.text, resolveCueSubtitleWrapLimit(cue.lineWidthChars, undefined, cue.text)).join("\r\n")}`,
     )
     .join("\r\n\r\n")}\r\n`;
+}
+
+export async function backupExistingSubtitleOutput(outputPath: string): Promise<string | undefined> {
+  try {
+    const existing = await stat(outputPath);
+    if (!existing.isFile()) throw new Error("字幕輸出位置不是一般檔案，無法建立安全備份。");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+  const parsed = path.parse(outputPath);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = path.join(parsed.dir, `${parsed.name}.backup_${stamp}_${randomUUID().slice(0, 8)}${parsed.ext}`);
+  await copyFile(outputPath, backupPath, 1);
+  return backupPath;
 }
 
 export async function exportSrt(

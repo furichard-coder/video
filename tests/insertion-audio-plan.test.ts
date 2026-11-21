@@ -89,24 +89,33 @@ function fixture(): ProjectManifest {
       sha256: "0AC71ECABF302784F5FFB9483C2939C46B1784AA0D016A322CB6D1A0ECA07B93",
       volumePercent: 70,
     },
-    bgmTracks: [{
-      id: "music",
-      sourcePath: "C:/music.mp3",
-      fileName: "music.mp3",
-      sizeBytes: 1,
-      durationMs: 5_000,
-      sourceInMs: 0,
-      sourceOutMs: 5_000,
-      timelineInMs: 0,
-      timelineOutMs: 5_000,
-      fadeInMs: 0,
-      fadeOutMs: 0,
-      volumePercent: 35,
-      sourcePolicy: "READ_ONLY",
-      addedAt: "",
-    }],
+    bgmTracks: [
+      {
+        id: "music",
+        sourcePath: "C:/music.mp3",
+        fileName: "music.mp3",
+        sizeBytes: 1,
+        durationMs: 5_000,
+        sourceInMs: 0,
+        sourceOutMs: 5_000,
+        timelineInMs: 0,
+        timelineOutMs: 5_000,
+        fadeInMs: 0,
+        fadeOutMs: 0,
+        volumePercent: 35,
+        sourcePolicy: "READ_ONLY",
+        addedAt: "",
+      },
+    ],
     sourceAudioVolumePercent: 100,
-    aiStoryContext: { topic: "", locations: [], people: [], storySummary: "", audiencePromise: "", subtitleLanguage: "zh-TW" },
+    aiStoryContext: {
+      topic: "",
+      locations: [],
+      people: [],
+      storySummary: "",
+      audiencePromise: "",
+      subtitleLanguage: "zh-TW",
+    },
     subtitleCues: [],
     timelineRevision: 1,
     subtitleTimelineRevision: 1,
@@ -116,10 +125,22 @@ function fixture(): ProjectManifest {
 
 describe("canonical insertion audio plan", () => {
   it("supports all four independent SFX/BGM combinations", () => {
-    expect(normalizeInsertionAudioSettings(audio(undefined, false), "IMAGE")).toMatchObject({ sfxEnabled: false, bgmTrackId: undefined });
-    expect(normalizeInsertionAudioSettings(audio(undefined, true), "IMAGE")).toMatchObject({ sfxEnabled: true, bgmTrackId: undefined });
-    expect(normalizeInsertionAudioSettings(audio("music", false), "IMAGE", new Set(["music"]))).toMatchObject({ sfxEnabled: false, bgmTrackId: "music" });
-    expect(normalizeInsertionAudioSettings(audio("music", true), "IMAGE", new Set(["music"]))).toMatchObject({ sfxEnabled: true, bgmTrackId: "music" });
+    expect(normalizeInsertionAudioSettings(audio(undefined, false), "IMAGE")).toMatchObject({
+      sfxEnabled: false,
+      bgmTrackId: undefined,
+    });
+    expect(normalizeInsertionAudioSettings(audio(undefined, true), "IMAGE")).toMatchObject({
+      sfxEnabled: true,
+      bgmTrackId: undefined,
+    });
+    expect(normalizeInsertionAudioSettings(audio("music", false), "IMAGE", new Set(["music"]))).toMatchObject({
+      sfxEnabled: false,
+      bgmTrackId: "music",
+    });
+    expect(normalizeInsertionAudioSettings(audio("music", true), "IMAGE", new Set(["music"]))).toMatchObject({
+      sfxEnabled: true,
+      bgmTrackId: "music",
+    });
   });
 
   it("merges A3+B4+C6+D3 into one continuous 16 second range without transitions", () => {
@@ -127,7 +148,11 @@ describe("canonical insertion audio plan", () => {
     const inserted = plan.items.filter((item) => item.instanceId.startsWith("i-"));
     expect(inserted).toHaveLength(4);
     expect(plan.bgmRanges).toHaveLength(1);
-    expect(plan.bgmRanges[0]).toMatchObject({ durationMs: 16_000, memberInstanceIds: ["i-a", "i-b", "i-c", "i-d"], usesLoop: true });
+    expect(plan.bgmRanges[0]).toMatchObject({
+      durationMs: 16_000,
+      memberInstanceIds: ["i-a", "i-b", "i-c", "i-d"],
+      usesLoop: true,
+    });
     expect(plan.bgmRanges[0].loopStrategy).toBe("CROSSFADE");
     expect(inserted.map((item) => item.continuousWithPrevious)).toEqual([false, true, true, true]);
     expect(inserted.map((item) => item.bgmSourcePositionMs)).toEqual([0, 3_000, 2_120, 3_240]);
@@ -154,7 +179,10 @@ describe("canonical insertion audio plan", () => {
   it("keeps one configured BGM playhead across a clip-level silent gate", () => {
     const project = fixture();
     project.mediaInsertions[1].insertionAudio = audio("music", true, {
-      original: true, voice: true, bgm: false, sfx: true,
+      original: true,
+      voice: true,
+      bgm: false,
+      sfx: true,
     });
     const plan = buildInsertionAudioPlan(project, { purpose: "CONCAT", transitionSeconds: 0, prependIntro: false });
     const inserted = plan.items.filter((item) => item.instanceId.startsWith("i-"));
@@ -167,8 +195,26 @@ describe("canonical insertion audio plan", () => {
   it("keeps repeated Intro occurrences of one asset independent", () => {
     const project = fixture();
     project.introSegments = [
-      { id: "intro-a", assetId: "a", fileName: "a", inMs: 0, outMs: 3_000, score: 1, reasons: [], insertionAudio: audio("music", true) },
-      { id: "intro-b", assetId: "a", fileName: "a", inMs: 0, outMs: 3_000, score: 1, reasons: [], insertionAudio: audio(undefined, false) },
+      {
+        id: "intro-a",
+        assetId: "a",
+        fileName: "a",
+        inMs: 0,
+        outMs: 3_000,
+        score: 1,
+        reasons: [],
+        insertionAudio: audio("music", true),
+      },
+      {
+        id: "intro-b",
+        assetId: "a",
+        fileName: "a",
+        inMs: 0,
+        outMs: 3_000,
+        score: 1,
+        reasons: [],
+        insertionAudio: audio(undefined, false),
+      },
     ];
     const plan = buildInsertionAudioPlan(project, { purpose: "INTRO", transitionSeconds: 0 });
     expect(plan.items.map((item) => [item.instanceId, item.sfxEnabled, item.bgmEnabled])).toEqual([
@@ -185,15 +231,27 @@ describe("canonical insertion audio plan", () => {
       transitionSeconds: 0 as const,
       prependIntro: true,
       mainStartCard: {
-        durationSeconds: 4, line1: "漫步風光", line2: "旅程開始", line1FontSize1080p: 114,
-        line2FontSize1080p: 90, lineGap1080p: 122, overlayOpacityPercent: 62, transitionStyle: "HARD_CUT" as const,
+        durationSeconds: 4,
+        line1: "漫步風光",
+        line2: "旅程開始",
+        line1FontSize1080p: 114,
+        line2FontSize1080p: 90,
+        lineGap1080p: 122,
+        overlayOpacityPercent: 62,
+        transitionStyle: "HARD_CUT" as const,
       },
     };
     const plan = buildInsertionAudioPlan(project, options);
     expect(plan.sfxEvents.find((event) => event.sfxId === "SCENERYWALKER_MAIN_START_CHIME_V1")).toMatchObject({
-      scope: "MAIN", durationMs: 650, source: "SYNTHETIC_MAIN_CUE",
+      scope: "MAIN",
+      durationMs: 650,
+      source: "SYNTHETIC_MAIN_CUE",
     });
-    expect(plan.items.find((item) => item.assetId === "anchor")?.gates).toMatchObject({ voice: false, bgm: false, sfx: false });
+    expect(plan.items.find((item) => item.assetId === "anchor")?.gates).toMatchObject({
+      voice: false,
+      bgm: false,
+      sfx: false,
+    });
     const duration = plan.timelineDurationMs;
     project.mainStartCue.enabled = false;
     const withoutCue = buildInsertionAudioPlan(project, options);

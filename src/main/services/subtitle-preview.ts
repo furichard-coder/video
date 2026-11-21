@@ -19,6 +19,11 @@ interface PreviewMarker {
   createdAt: string;
 }
 
+export interface SubtitlePreviewPlacement {
+  readRoots(): readonly string[];
+  chooseWriteRoot(): Promise<string>;
+}
+
 async function isFile(filePath: string): Promise<boolean> {
   try {
     return (await stat(filePath)).isFile();
@@ -32,6 +37,7 @@ export class SubtitlePreviewService {
     readonly cacheRoot: string,
     private readonly store: ProjectStore,
     private readonly renderer: ConcatRenderService,
+    private readonly placement?: SubtitlePreviewPlacement,
   ) {}
 
   async initialize(): Promise<void> {
@@ -90,12 +96,11 @@ export class SubtitlePreviewService {
         }),
       )
       .digest("hex");
-    const directory = assertWithinRoot(this.cacheRoot, path.join(this.cacheRoot, cacheKey));
     const outputFileName = includeBgm ? "intro-bgm-subtitle-preview-480p.mp4" : "intro-subtitle-preview-480p.mp4";
-    const outputPath = assertWithinRoot(directory, path.join(directory, outputFileName));
-    const markerPath = assertWithinRoot(directory, path.join(directory, "marker.json"));
-    await mkdir(directory, { recursive: true });
-    if ((await isFile(outputPath)) && (await isFile(markerPath))) {
+    for (const directory of this.cacheDirectories(cacheKey)) {
+      const outputPath = assertWithinRoot(directory, path.join(directory, outputFileName));
+      const markerPath = assertWithinRoot(directory, path.join(directory, "marker.json"));
+      if (!(await isFile(outputPath)) || !(await isFile(markerPath))) continue;
       try {
         const marker = JSON.parse(await readFile(markerPath, "utf8")) as PreviewMarker;
         if (
@@ -124,6 +129,11 @@ export class SubtitlePreviewService {
         /* stale marker: rebuild */
       }
     }
+    const root = path.resolve(this.placement ? await this.placement.chooseWriteRoot() : this.cacheRoot);
+    const directory = assertWithinRoot(root, path.join(root, cacheKey));
+    const outputPath = assertWithinRoot(directory, path.join(directory, outputFileName));
+    const markerPath = assertWithinRoot(directory, path.join(directory, "marker.json"));
+    await mkdir(directory, { recursive: true });
     await rm(outputPath, { force: true });
     const result = await this.renderer.render(
       {
@@ -179,21 +189,33 @@ export class SubtitlePreviewService {
 
   async resolveExisting(cacheKey: string): Promise<string> {
     assertSafeHexId(cacheKey, "Subtitle preview cache key");
-    const directory = assertWithinRoot(this.cacheRoot, path.join(this.cacheRoot, cacheKey));
-    const markerPath = assertWithinRoot(directory, path.join(directory, "marker.json"));
-    let outputFileName = "intro-subtitle-preview-480p.mp4";
-    try {
-      const marker = JSON.parse(await readFile(markerPath, "utf8")) as PreviewMarker;
+    for (const directory of this.cacheDirectories(cacheKey)) {
+      const markerPath = assertWithinRoot(directory, path.join(directory, "marker.json"));
+      const marker = await readFile(markerPath, "utf8")
+        .then((value) => JSON.parse(value) as PreviewMarker)
+        .catch(() => undefined);
       if (
-        marker.outputFileName === "intro-bgm-subtitle-preview-480p.mp4" ||
-        marker.outputFileName === "intro-subtitle-preview-480p.mp4"
+        marker?.cacheKey !== cacheKey ||
+        marker.previewerVersion !== SUBTITLE_INTRO_PREVIEWER_VERSION ||
+        !Number.isFinite(marker.durationMs) ||
+        marker.durationMs <= 0
       )
-        outputFileName = marker.outputFileName;
-    } catch {
-      /* Older valid caches use the original filename. */
+        continue;
+      const outputFileName =
+        marker.outputFileName === "intro-bgm-subtitle-preview-480p.mp4"
+          ? marker.outputFileName
+          : "intro-subtitle-preview-480p.mp4";
+      const outputPath = assertWithinRoot(directory, path.join(directory, outputFileName));
+      if (await isFile(outputPath)) return outputPath;
     }
-    const outputPath = assertWithinRoot(directory, path.join(directory, outputFileName));
-    if (!(await isFile(outputPath))) throw new Error("480P 片頭字幕預覽尚未建立或已失效。");
-    return outputPath;
+    throw new Error("480P 片頭字幕預覽尚未建立或已失效。");
+  }
+
+  private cacheDirectories(cacheKey: string): string[] {
+    const safeKey = assertSafeHexId(cacheKey, "Subtitle preview cache key");
+    const roots = [this.cacheRoot, ...(this.placement?.readRoots() ?? [])];
+    return [...new Set(roots.map((root) => path.resolve(root)))].map((root) =>
+      assertWithinRoot(root, path.join(root, safeKey)),
+    );
   }
 }

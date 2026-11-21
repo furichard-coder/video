@@ -19,11 +19,15 @@ function bounded(value: unknown, minimum: number, maximum: number, fallback: num
 export function sanitizeAudioProcessingOptions(value: unknown): AudioProcessingOptions {
   const fallback = DEFAULT_AUDIO_PROCESSING_OPTIONS;
   const candidate = value && typeof value === "object" ? (value as Partial<AudioProcessingOptions>) : {};
-  const codec = AUDIO_CODECS.has(candidate.codec as SurroundAudioCodec) ? (candidate.codec as SurroundAudioCodec) : fallback.codec;
+  const codec = AUDIO_CODECS.has(candidate.codec as SurroundAudioCodec)
+    ? (candidate.codec as SurroundAudioCodec)
+    : fallback.codec;
   const defaultBitrate = codec === "AAC" ? 384 : codec === "AC3" ? 448 : 640;
   return {
     mode: AUDIO_MODES.has(candidate.mode ?? "") ? (candidate.mode as AudioProcessingOptions["mode"]) : fallback.mode,
-    preset: PRESETS.has(candidate.preset ?? "") ? (candidate.preset as AudioProcessingOptions["preset"]) : fallback.preset,
+    preset: PRESETS.has(candidate.preset ?? "")
+      ? (candidate.preset as AudioProcessingOptions["preset"])
+      : fallback.preset,
     codec,
     bitrateKbps: bounded(candidate.bitrateKbps, 128, codec === "EAC3" ? 1024 : 640, defaultBitrate, 8),
     sampleRate: 48_000,
@@ -64,7 +68,9 @@ export function buildAudioProcessingFilter(optionsInput: AudioProcessingOptions)
     return { filter: undefined, channels: 2, layout: "stereo" };
   }
   if (options.mode === "ENHANCED_STEREO") {
-    const sideLevel = (options.preset === "WIDE" ? 1.22 : options.preset === "CINEMA" ? 1.16 : 1.1) * ((options.stereoWidthPercent ?? 100) / 100);
+    const sideLevel =
+      (options.preset === "WIDE" ? 1.22 : options.preset === "CINEMA" ? 1.16 : 1.1) *
+      ((options.stereoWidthPercent ?? 100) / 100);
     const bass = options.preset === "CINEMA" ? 1.2 : 0.8;
     return {
       channels: 2,
@@ -101,7 +107,8 @@ export function buildAudioProcessingFilter(optionsInput: AudioProcessingOptions)
     channels: 6,
     layout: "5.1(side)",
     // This is a conservative compatibility audition, not HRTF/binaural rendering.
-    monitoringFilter: "pan=stereo|c0=0.70*FL+0.50*FC+0.35*SL+0.20*LFE|c1=0.70*FR+0.50*FC+0.35*SR+0.20*LFE,alimiter=limit=0.891251",
+    monitoringFilter:
+      "pan=stereo|c0=0.70*FL+0.50*FC+0.35*SL+0.20*LFE|c1=0.70*FR+0.50*FC+0.35*SR+0.20*LFE,alimiter=limit=0.891251",
   };
 }
 
@@ -125,7 +132,12 @@ export function buildAudioRemuxArguments(
     args.push("-map", "0:a:0", "-af", plan.filter ?? "anull", ...audioCodecArgs(options, 2));
   }
   args.push("-metadata:s:a:0", `title=${options.mode}`, "-movflags", "+faststart", "-shortest", outputPath);
-  return { args, filterScript: plan.channels === 6 ? plan.filter : undefined, channels: plan.channels, layout: plan.layout };
+  return {
+    args,
+    filterScript: plan.channels === 6 ? plan.filter : undefined,
+    channels: plan.channels,
+    layout: plan.layout,
+  };
 }
 
 export function canPreserveNativeMultichannel(info: BasicMediaInfo | undefined): boolean {
@@ -147,7 +159,8 @@ export function parseEbur128Summary(stderr: string): AudioMeterReading {
   const clipping = (truePeakDb ?? Math.max(...channelPeaksDb, -Infinity)) > -0.1;
   const warnings: string[] = [];
   if (clipping) warnings.push("偵測到接近或超過 0 dBFS 的峰值，正式輸出將套用 Peak Protection。");
-  if (integratedLufs !== undefined && integratedLufs > -13) warnings.push("整體響度偏高，可能造成平台正規化或聽感疲勞。");
+  if (integratedLufs !== undefined && integratedLufs > -13)
+    warnings.push("整體響度偏高，可能造成平台正規化或聽感疲勞。");
   if (integratedLufs !== undefined && integratedLufs < -24) warnings.push("整體響度偏低，請確認來源或配樂音量。");
   return { integratedLufs, truePeakDb, channelPeaksDb, clipping, warnings };
 }

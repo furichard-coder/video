@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-02",
+  "scope": "Synthetic 30-second 1920x1080 testsrc2; one JPEG per second; no user media and no provider request",
+  "sourceBytes": 58127211,
+  "results": {
+    "720p": {
+      "frames": 30,
+      "elapsedMs": 1076,
+      "jpegBytes": 1308172
+    },
+    "1080p": {
+      "frames": 30,
+      "elapsedMs": 1203,
+      "jpegBytes": 2410285
+    }
+  },
+  "observation": "In this bounded extraction test, 1080p took about 11.8% longer and produced about 84.2% more JPEG bytes. This measures extraction and payload size only, not recognition accuracy or token cost.",
+  "decision": "Use low-detail 720p representatives by default. Escalate only selected low-confidence or fine-detail frames to 1080p; do not generate mass 4K PNGs.",
+  "limitations": [
+    "Synthetic imagery is not a substitute for a representative travel-scene accuracy evaluation.",
+    "No live OpenAI or Gemini call was made, so quality and billed-token differences remain unverified."
+  ]
+}

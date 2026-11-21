@@ -18,7 +18,15 @@ interface Props {
   compact?: boolean;
 }
 
-export function InsertionAudioControls({ project, scope, instanceId, asset, value, onProjectUpdated, compact = false }: Props) {
+export function InsertionAudioControls({
+  project,
+  scope,
+  instanceId,
+  asset,
+  value,
+  onProjectUpdated,
+  compact = false,
+}: Props) {
   const trackIds = useMemo(() => new Set(project.bgmTracks.map((track) => track.id)), [project.bgmTracks]);
   const settings = normalizeInsertionAudioSettings(value, asset.kind, trackIds, asset.photoSoundEnabled !== false);
   const [busy, setBusy] = useState(false);
@@ -48,14 +56,21 @@ export function InsertionAudioControls({ project, scope, instanceId, asset, valu
           const labels = { original: "原音", voice: "配音", bgm: "BGM", sfx: "SFX" } as const;
           const unavailableVoice = key === "voice";
           return (
-            <label key={key} title={unavailableVoice ? "目前專案沒有獨立配音軌；开关已保存供未来配音使用，不会影响素材原音。" : undefined}>
+            <label
+              key={key}
+              title={
+                unavailableVoice ? "目前專案沒有獨立配音軌；开关已保存供未来配音使用，不会影响素材原音。" : undefined
+              }
+            >
               <input
                 type="checkbox"
                 checked={settings.trackGates?.[key] !== false}
-                onChange={(event) => void save({
-                  ...settings,
-                  trackGates: { ...settings.trackGates!, [key]: event.target.checked },
-                })}
+                onChange={(event) =>
+                  void save({
+                    ...settings,
+                    trackGates: { ...settings.trackGates!, [key]: event.target.checked },
+                  })
+                }
               />
               {labels[key]}
             </label>
@@ -63,7 +78,9 @@ export function InsertionAudioControls({ project, scope, instanceId, asset, valu
         })}
       </div>
       <small className="audio-track-status">
-        原音 {settings.trackGates?.original !== false ? "✓" : "–"}　配音 {settings.trackGates?.voice !== false ? "✓" : "–"}　BGM {settings.trackGates?.bgm !== false ? "✓" : "–"}　SFX {settings.trackGates?.sfx !== false ? "✓" : "–"}
+        原音 {settings.trackGates?.original !== false ? "✓" : "–"}　配音{" "}
+        {settings.trackGates?.voice !== false ? "✓" : "–"}　BGM {settings.trackGates?.bgm !== false ? "✓" : "–"}　SFX{" "}
+        {settings.trackGates?.sfx !== false ? "✓" : "–"}
       </small>
       {asset.kind === "IMAGE" && (
         <label>
@@ -98,7 +115,8 @@ export function InsertionAudioControls({ project, scope, instanceId, asset, valu
           <option value="">不使用背景音樂</option>
           {project.bgmTracks.map((track, index) => (
             <option key={track.id} value={track.id} disabled={track.resolutionStatus === "NEEDS_LOCAL_FILE"}>
-              第 {index + 1} 首 · {track.fileName}{track.resolutionStatus === "NEEDS_LOCAL_FILE" ? "（尚未指定本機檔）" : ""}
+              第 {index + 1} 首 · {track.fileName}
+              {track.resolutionStatus === "NEEDS_LOCAL_FILE" ? "（尚未指定本機檔）" : ""}
             </option>
           ))}
         </select>
@@ -106,7 +124,7 @@ export function InsertionAudioControls({ project, scope, instanceId, asset, valu
       <div className="insertion-audio-levels">
         {asset.kind === "IMAGE" && (
           <label>
-          SFX
+            SFX
             <input
               type="number"
               min="0"

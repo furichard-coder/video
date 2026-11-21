@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { AiStoryContext } from "../../shared/domain";
+import { AiModelCatalogService, getAiModelCatalogRoot } from "./ai-model-catalog";
 import type { StoryFrameAnalysis } from "./openai-provider";
 
 type FetchLike = typeof fetch;
@@ -19,7 +20,26 @@ function score(value: unknown): number {
 }
 
 export class GeminiMaterialAnalysisProvider {
-  constructor(private readonly fetcher: FetchLike = fetch) {}
+  private readonly modelCatalog: AiModelCatalogService;
+
+  constructor(
+    private readonly fetcher: FetchLike = fetch,
+    catalogRootDir = getAiModelCatalogRoot(),
+  ) {
+    this.modelCatalog = new AiModelCatalogService(catalogRootDir, fetcher);
+  }
+
+  private async resolveModel(model: string, apiKey: string): Promise<string> {
+    if (model.trim().toLowerCase() !== "auto") return model;
+    try {
+      return await this.modelCatalog.resolve("GEMINI", apiKey, model);
+    } catch {
+      const result = await this.modelCatalog.test("GEMINI", apiKey, "auto");
+      if (!result.ok || !result.modelId)
+        throw new Error(result.message || "Auto 找不到通過圖片與結構化輸出測試的 Gemini 模型。");
+      return result.modelId;
+    }
+  }
 
   async analyze(
     framePath: string,
@@ -27,6 +47,7 @@ export class GeminiMaterialAnalysisProvider {
     settings: { model: string; apiKey: string },
     signal?: AbortSignal,
   ): Promise<StoryFrameAnalysis> {
+    const model = await this.resolveModel(settings.model, settings.apiKey);
     const prompt = [
       "你是旅遊與自然紀錄影片的圖片辨識及繁體中文字幕編輯。請實際查看附圖，辨識畫面中可見的物種、物品、場景與可由證據支持的地點線索，再簡化成一段適合畫面的短字幕。",
       "物種名稱要使用常見繁體中文名；若無法確認到種，改用較安全的科、類群或『疑似』，不得因專案主題或檔名猜測。沒有動物就把 animalSpecies 留空。植物、菇菌或其他自然物可寫入 visualSummary 與 suggestedSubtitle。",
@@ -43,7 +64,7 @@ export class GeminiMaterialAnalysisProvider {
     ].join("\n\n");
     const image = (await readFile(framePath)).toString("base64");
     const response = await this.fetcher(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.model)}:generateContent`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": settings.apiKey },

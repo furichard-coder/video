@@ -1,5 +1,11 @@
 import { useState } from "react";
-import type { IntroSuggestion, MainStartCardOptions, MainStartCardTransition, MainStartCueSettings, SourceAsset } from "../../shared/domain";
+import type {
+  IntroSuggestion,
+  MainStartCardOptions,
+  MainStartCardTransition,
+  MainStartCueSettings,
+  SourceAsset,
+} from "../../shared/domain";
 import { formatDuration } from "../format";
 import {
   MAIN_START_CUE_BASE_GAINS,
@@ -51,7 +57,9 @@ export function MainStartCardModal({
   const selectedAsset = selectedIntro ? assets.find((asset) => asset.id === selectedIntro.assetId) : undefined;
   const selectedBackgroundName = selectedIntro?.fileName ?? backgroundFileName ?? "正片第一個素材";
   const previewCue = () => {
-    const AudioContextCtor = window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    const AudioContextCtor =
+      window.AudioContext ??
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextCtor || !cueDraft.enabled) return;
     const context = new AudioContextCtor();
     const cue = mainStartCueSpec(cueDraft.durationMs);
@@ -250,10 +258,12 @@ export function MainStartCardModal({
                   step="0.05"
                   value={(cueDraft.durationMs / 1000).toFixed(2)}
                   disabled={!cueDraft.enabled}
-                  onChange={(event) => setCueDraft((current) => ({
-                    ...current,
-                    durationMs: Math.max(100, Math.min(3_000, Math.round(Number(event.target.value) * 1000))),
-                  }))}
+                  onChange={(event) =>
+                    setCueDraft((current) => ({
+                      ...current,
+                      durationMs: Math.max(100, Math.min(3_000, Math.round(Number(event.target.value) * 1000))),
+                    }))
+                  }
                 />
                 秒
               </label>

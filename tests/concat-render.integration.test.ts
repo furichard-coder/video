@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { copyFile, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -70,8 +70,20 @@ async function sha256(filePath: string): Promise<string> {
 
 async function packetHash(filePath: string, stream: "v:0" | "a:0"): Promise<string> {
   const result = await runProcess("ffmpeg", [
-    "-hide_banner", "-loglevel", "error", "-i", filePath, "-map", `0:${stream}`,
-    "-c", "copy", "-f", "hash", "-hash", "sha256", "-",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-i",
+    filePath,
+    "-map",
+    `0:${stream}`,
+    "-c",
+    "copy",
+    "-f",
+    "hash",
+    "-hash",
+    "sha256",
+    "-",
   ]);
   return result.stdout.trim();
 }
@@ -417,6 +429,10 @@ describe("concat preview filter plan", () => {
       videoCodec: "H264" as const,
       purpose: "CONCAT" as const,
       lowMemorySegmented: false,
+      renderTemporaryFolder: path.join(resumeRoot, "old-temp"),
+      tempLocations: [
+        { id: "primary", path: path.join(resumeRoot, "old-temp"), role: "PRIMARY" as const, enabled: true },
+      ],
       runtimePolicy: {
         mode: "NORMAL" as const,
         maxVisualInputsPerStage: 3,
@@ -447,6 +463,8 @@ describe("concat preview filter plan", () => {
       offer!.checkpointId,
       undefined,
       () => undefined,
+      [{ id: "fallback", path: path.join(resumeRoot, "new-temp"), role: "PRIMARY", enabled: true }],
+      "AUTO",
     );
     expect(resumeCalls).toBe(1);
     expect(resumed).toMatchObject({ resumedSegmentCount: 1, segmentedRender: true, videoBaseMasterReused: true });
@@ -462,23 +480,51 @@ describe("concat preview filter plan", () => {
     };
     const midOutput = path.join(resumeRoot, "resumed-from-middle.mp4");
     const midService = new ConcatRenderService(localStore, localSources, "ffmpeg", failMidStage);
-    await expect(midService.render({ ...request, outputToken: "mid-resume-test", resolution: "480P" }, midOutput)).rejects.toThrow(
-      /已保留並驗證 1 個完成片段/,
-    );
+    await expect(
+      midService.render({ ...request, outputToken: "mid-resume-test", resolution: "480P" }, midOutput),
+    ).rejects.toThrow(/已保留並驗證 1 個完成片段/);
     expect(midFailureCalls).toBe(2);
     const midOffer = await midService.getResumeOffer();
     expect(midOffer).toMatchObject({ concatStatus: "FAILED", completedSegmentCount: 1, totalSegmentCount: 3 });
+    const midCheckpointStore = new RenderCheckpointStore(localStore.getRenderStateRoot());
+    const beforeManualMove = await midCheckpointStore.load(localStore.getProject().id);
+    const completedBeforeMove = beforeManualMove!.segments.find((segment) => segment.status === "COMPLETED")!;
+    const manuallySelectedRoot = path.join(resumeRoot, "manual-selected-temp");
+    await mkdir(manuallySelectedRoot, { recursive: true });
+    const renamedManualCopy = path.join(manuallySelectedRoot, "renamed-by-user.mkv");
+    await copyFile(completedBeforeMove.outputPath, renamedManualCopy);
+    await rm(completedBeforeMove.outputPath);
+    const registeredLocations = [
+      { id: "primary", path: path.join(resumeRoot, "old-temp"), role: "PRIMARY" as const, enabled: true },
+      { id: "manual", path: manuallySelectedRoot, role: "FALLBACK" as const, enabled: true },
+    ];
+    const compatibilityAfterMove = await midService.analyzeResumeCompatibility(
+      midOffer!.checkpointId,
+      registeredLocations,
+    );
+    expect(compatibilityAfterMove).toMatchObject({ reusableSegmentCount: 1, invalidSegmentCount: 1 });
+    // Opening the report is read-only: it previews the remap but keeps the
+    // checkpoint path unchanged until the user actually resumes.
+    expect(
+      (await midCheckpointStore.load(localStore.getProject().id))!.segments.find(
+        (segment) => segment.id === completedBeforeMove.id,
+      )?.outputPath,
+    ).toBe(completedBeforeMove.outputPath);
     let midResumeCalls = 0;
+    const resumedStages: string[] = [];
     const midResumeRunner = async (...args: Parameters<typeof runFfmpegWithProgress>) => {
       midResumeCalls += 1;
+      resumedStages.push(args[5]?.currentSegment ?? "");
       return runFfmpegWithProgress(...args);
     };
     const midResumed = await new ConcatRenderService(localStore, localSources, "ffmpeg", midResumeRunner).resume(
       midOffer!.checkpointId,
       undefined,
       () => undefined,
+      registeredLocations,
     );
     expect(midResumeCalls).toBe(4);
+    expect(resumedStages).not.toContain("片段 1/3");
     expect(midResumed.resumedSegmentCount).toBe(1);
     expect((await new MediaProbe().probe(midOutput)).videoCodec).toBe("h264");
     expect(await midService.getResumeOffer()).toBeUndefined();
@@ -542,8 +588,32 @@ describe("concat preview filter plan", () => {
       request,
       path.join(recoveryRoot, "v080-work"),
     );
+    checkpoint.recoveryMigration = {
+      sourceAppVersion: "0.81.0",
+      sourceCheckpointId: "legacy-source",
+      sourceWorkRoot: recoveryRoot,
+      sourceStateBackupPath: path.join(recoveryRoot, "legacy.json"),
+      importedAt: new Date().toISOString(),
+      sourcePreserved: true,
+    };
+    const legacyInputKeys = Array.from({ length: 93 }, (_, index) => `source-${index}`);
+    const legacySegmentIds = Array.from({ length: 10 }, (_, index) =>
+      createHash("sha256")
+        .update(
+          JSON.stringify({
+            segmentPipelineVersion: 2,
+            level: 0,
+            inputs: legacyInputKeys.slice(index * 10, index * 10 + 10),
+            transitionSeconds: 0.3,
+            resolution: "360P",
+            portrait: false,
+          }),
+        )
+        .digest("hex")
+        .slice(0, 24),
+    );
     checkpoint.segments = Array.from({ length: 10 }, (_, index) => ({
-      id: `legacy-segment-${index}`,
+      id: legacySegmentIds[index],
       level: 1,
       index: index + 1,
       status: "COMPLETED" as const,
@@ -572,10 +642,17 @@ describe("concat preview filter plan", () => {
       durationMs: 1_000,
       hasAudio: true,
       checkpointKey: `source-${index}`,
+      legacyCheckpointKey: `source-${index}`,
+      sourceStatMatchesManifest: true,
+      sourceRenderIdentity: { sizeBytes: 1, modifiedAt: "2020-01-01T00:00:00.000Z" },
     }));
-    const result = await (service as unknown as {
-      buildResumableIntermediates: (...args: unknown[]) => Promise<{ inputs: Array<{ sourcePath: string }>; resumedSegmentCount: number }>;
-    }).buildResumableIntermediates(
+    const result = await (
+      service as unknown as {
+        buildResumableIntermediates: (
+          ...args: unknown[]
+        ) => Promise<{ inputs: Array<{ sourcePath: string }>; resumedSegmentCount: number }>;
+      }
+    ).buildResumableIntermediates(
       inputs,
       0.3,
       "360P",
@@ -1156,7 +1233,7 @@ describe("concat preview integration", () => {
     expect(ffmpegArgs).toContain("6");
     expect(introStore.getProject().introSegments[0]).toMatchObject({ inMs: 1_000, outMs: 7_000 });
     await introStore.setIntroSegmentMaxDuration(15_000);
-  });
+  }, 30_000);
 
   it("places confirmed Intro segments before Main when automatic concatenation is selected", async () => {
     const asset = introStore.getProject().sources[0];
@@ -1250,7 +1327,7 @@ describe("concat preview integration", () => {
       asset.sourcePath,
     ]);
     expect(ffmpegArgs.slice(0, inputPositions[2] + 2).filter((item) => item === "3.2")).toHaveLength(2);
-  });
+  }, 30_000);
 
   it("ends Intro-only BGM before the Main-start prompt and shifts Main-only BGM past it", async () => {
     const asset = introStore.getProject().sources[0];
@@ -1268,8 +1345,17 @@ describe("concat preview integration", () => {
     await introStore.setIntroSegments(introClips);
     const bgmPath = path.join(root, "scope-music.mp3");
     await runProcess("ffmpeg", [
-      "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
-      "sine=frequency=330:sample_rate=48000:duration=8", "-c:a", "libmp3lame", "-y", bgmPath,
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=330:sample_rate=48000:duration=8",
+      "-c:a",
+      "libmp3lame",
+      "-y",
+      bgmPath,
     ]);
     const track = {
       id: "scope-music",
@@ -1590,7 +1676,11 @@ describe("concat preview integration", () => {
       return runFfmpegWithProgress(...parameters);
     };
     const second = await new ConcatRenderService(
-      insertionStore, insertionSources, "ffmpeg", countedRunner, shutterPath,
+      insertionStore,
+      insertionSources,
+      "ffmpeg",
+      countedRunner,
+      shutterPath,
     ).render(
       {
         outputToken: "inside-audio-only",

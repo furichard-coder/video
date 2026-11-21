@@ -168,7 +168,8 @@ export function buildRuntimeRenderPolicy(
   maximumRenderRamGiB?: number,
   maximumRenderTempGiB?: number | "AUTO",
 ): RenderRuntimePolicy {
-  const resourceProfile = selectedEstimate.resourceProfile ?? (lowMemoryMode ? "LOW_DISK" : highSpeedMode ? "HIGH_SPEED" : "BALANCED");
+  const resourceProfile =
+    selectedEstimate.resourceProfile ?? (lowMemoryMode ? "LOW_DISK" : highSpeedMode ? "HIGH_SPEED" : "BALANCED");
   const profile = RENDER_RESOURCE_PROFILES[resourceProfile];
   lowMemoryMode = resourceProfile === "LOW_DISK";
   highSpeedMode = resourceProfile === "HIGH_SPEED";
@@ -193,7 +194,10 @@ export function buildRuntimeRenderPolicy(
   const explicitRamCap = Number.isFinite(maximumRenderRamGiB)
     ? Math.max(4, Math.min(64, Number(maximumRenderRamGiB))) * GIB
     : Infinity;
-  const renderRamBudgetBytes = Math.max(1 * GIB, Math.min(safeTotalBudget, safeAvailableBudget, tierCap, explicitRamCap));
+  const renderRamBudgetBytes = Math.max(
+    1 * GIB,
+    Math.min(safeTotalBudget, safeAvailableBudget, tierCap, explicitRamCap),
+  );
   const estimatedVariableRam = Math.max(256 * 1024 ** 2, selectedEstimate.estimatedPeakRamBytes - 384 * 1024 ** 2);
   const estimatedPerInputBytes = estimatedVariableRam / Math.max(1, visualInputCount);
   const budgetInputCount = Math.max(

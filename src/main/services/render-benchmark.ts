@@ -15,7 +15,10 @@ const MODES = new Set<RenderBenchmarkResult["mode"]>([
 export class RenderBenchmarkService {
   private readonly profilePath: string;
 
-  constructor(dataRoot: string, private readonly scriptPath: string) {
+  constructor(
+    dataRoot: string,
+    private readonly scriptPath: string,
+  ) {
     this.profilePath = path.join(dataRoot, "performance", "render-performance-profile.json");
   }
 
@@ -38,26 +41,28 @@ export class RenderBenchmarkService {
       if (!item || typeof item !== "object") return [];
       const row = item as Record<string, unknown>;
       if (typeof row.mode !== "string" || !MODES.has(row.mode as RenderBenchmarkResult["mode"])) return [];
-      return [{
-        mode: row.mode as RenderBenchmarkResult["mode"],
-        jobs: number(row.jobs) ?? 1,
-        encoder: String(row.encoder ?? "unknown"),
-        decoder: String(row.decoder ?? "unknown"),
-        processingSeconds: number(row.processingSeconds),
-        fps: number(row.fps),
-        speed: number(row.speed),
-        cpuAveragePercent: number(row.cpuPercent),
-        gpuEncodeAveragePercent: number(row.gpuEncodePercent),
-        gpuDecodeAveragePercent: number(row.gpuDecodePercent),
-        gpuComputeAveragePercent: number(row.gpuComputePercent),
-        ramPeakBytes: number(row.ramPeakBytes),
-        vramPeakBytes: number(row.vramPeakBytes),
-        ssdTemporaryPeakBytes: number(row.ssdTemporaryPeakBytes),
-        finalFileSizeBytes: number(row.finalFileSizeBytes),
-        oom: /cannot allocate memory|error code:\s*-12/i.test(String(row.failure ?? "")),
-        status: row.status === "PASS" ? "PASS" : "FAILED_SAFE",
-        ...(row.failure ? { failureReason: String(row.failure) } : {}),
-      }];
+      return [
+        {
+          mode: row.mode as RenderBenchmarkResult["mode"],
+          jobs: number(row.jobs) ?? 1,
+          encoder: String(row.encoder ?? "unknown"),
+          decoder: String(row.decoder ?? "unknown"),
+          processingSeconds: number(row.processingSeconds),
+          fps: number(row.fps),
+          speed: number(row.speed),
+          cpuAveragePercent: number(row.cpuPercent),
+          gpuEncodeAveragePercent: number(row.gpuEncodePercent),
+          gpuDecodeAveragePercent: number(row.gpuDecodePercent),
+          gpuComputeAveragePercent: number(row.gpuComputePercent),
+          ramPeakBytes: number(row.ramPeakBytes),
+          vramPeakBytes: number(row.vramPeakBytes),
+          ssdTemporaryPeakBytes: number(row.ssdTemporaryPeakBytes),
+          finalFileSizeBytes: number(row.finalFileSizeBytes),
+          oom: /cannot allocate memory|error code:\s*-12/i.test(String(row.failure ?? "")),
+          status: row.status === "PASS" ? "PASS" : "FAILED_SAFE",
+          ...(row.failure ? { failureReason: String(row.failure) } : {}),
+        },
+      ];
     });
     if (results.length !== 6) throw new Error("效能測試未完成全部六種安全情境。");
     const profile: RenderPerformanceProfile = {

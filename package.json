@@ -1,6 +1,6 @@
 {
   "name": "scenerywalker-source-organizer",
-  "version": "0.80.0",
+  "version": "0.88.0",
   "private": true,
   "engines": {
     "node": ">=22"
@@ -24,6 +24,7 @@
     "typecheck": "tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.main.json --noEmit"
   },
   "dependencies": {
+    "jpeg-js": "^0.4.4",
     "qrcode": "^1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8"

@@ -23,7 +23,10 @@ const MAX_FADE_MS = 1_000;
 const MAX_LOOP_CROSSFADE_MS = 500;
 export const MAX_BGM_CROSSFADE_REPEATS = 32;
 
-export function defaultInsertionAudioSettings(kind: SourceAsset["kind"], legacyPhotoSfx = true): InsertionAudioSettings {
+export function defaultInsertionAudioSettings(
+  kind: SourceAsset["kind"],
+  legacyPhotoSfx = true,
+): InsertionAudioSettings {
   return {
     trackGates: { ...DEFAULT_AUDIO_TRACK_GATES },
     sfxEnabled: kind === "IMAGE" && legacyPhotoSfx,
@@ -60,28 +63,17 @@ export function normalizeInsertionAudioSettings(
   const fallback = defaultInsertionAudioSettings(kind, legacyPhotoSfx);
   const input = value && typeof value === "object" ? (value as Partial<InsertionAudioSettings>) : {};
   const candidateTrackId = typeof input.bgmTrackId === "string" && input.bgmTrackId ? input.bgmTrackId : undefined;
-  const bgmTrackId = candidateTrackId && (!validBgmTrackIds || validBgmTrackIds.has(candidateTrackId))
-    ? candidateTrackId
-    : undefined;
+  const bgmTrackId =
+    candidateTrackId && (!validBgmTrackIds || validBgmTrackIds.has(candidateTrackId)) ? candidateTrackId : undefined;
   return {
     trackGates: normalizeAudioTrackGates(input.trackGates),
     sfxEnabled: kind === "IMAGE" && (typeof input.sfxEnabled === "boolean" ? input.sfxEnabled : fallback.sfxEnabled),
     ...(kind === "IMAGE" ? { sfxId: DUNES_SHUTTER_EFFECT_ID } : {}),
-    sfxVolumePercent: numberInRange(
-      input.sfxVolumePercent,
-      fallback.sfxVolumePercent,
-      0,
-      300,
-    ),
+    sfxVolumePercent: numberInRange(input.sfxVolumePercent, fallback.sfxVolumePercent, 0, 300),
     bgmTrackId,
     bgmVolumePercent: numberInRange(input.bgmVolumePercent, fallback.bgmVolumePercent, 0, 300),
     fadeMs: numberInRange(input.fadeMs, fallback.fadeMs, 0, MAX_FADE_MS),
-    loopCrossfadeMs: numberInRange(
-      input.loopCrossfadeMs,
-      fallback.loopCrossfadeMs,
-      0,
-      MAX_LOOP_CROSSFADE_MS,
-    ),
+    loopCrossfadeMs: numberInRange(input.loopCrossfadeMs, fallback.loopCrossfadeMs, 0, MAX_LOOP_CROSSFADE_MS),
   };
 }
 
@@ -129,13 +121,18 @@ export function buildInsertionAudioPlan(
   project: ProjectManifest,
   options: BuildInsertionAudioPlanOptions,
 ): InsertionAudioPlan {
-  const transitionMs = Math.max(0, Math.round((options.transitionSeconds ?? project.timelineTransitionSeconds) * 1_000));
+  const transitionMs = Math.max(
+    0,
+    Math.round((options.transitionSeconds ?? project.timelineTransitionSeconds) * 1_000),
+  );
   const validTrackIds = new Set(project.bgmTracks.map((track) => track.id));
   const assetById = new Map(project.sources.map((asset) => [asset.id, asset]));
   const insertionById = new Map(project.mediaInsertions.map((item) => [item.id, item]));
   const occurrences: PlannedOccurrence[] = [];
   const intro = introSegmentsForOutput(project.introSegments, project.introSegmentMaxDurationMs);
-  const includeIntro = options.purpose === "INTRO" || (options.purpose === "CONCAT" && options.prependIntro) ||
+  const includeIntro =
+    options.purpose === "INTRO" ||
+    (options.purpose === "CONCAT" && options.prependIntro) ||
     (options.purpose === "SHORTS" && options.shortsSource !== "MAIN");
   const includeMain = options.purpose === "CONCAT" || (options.purpose === "SHORTS" && options.shortsSource === "MAIN");
   if (includeIntro) {
@@ -170,28 +167,30 @@ export function buildInsertionAudioPlan(
       const insertion = clip.mediaInsertionId ? insertionById.get(clip.mediaInsertionId) : undefined;
       const asset = assetById.get(clip.assetId);
       occurrences.push({
-        ...(asset ? {
-          instanceId: insertion?.id ?? `MAIN:${clip.assetId}:${clip.inMs}:${clip.outMs}`,
-          scope: "MAIN" as const,
-          assetId: clip.assetId,
-          ...(insertion ? { mediaInsertionId: insertion.id } : {}),
-          settings: insertion
-            ? normalizeInsertionAudioSettings(
-                insertion.insertionAudio,
-                asset.kind,
-                validTrackIds,
-                asset.photoSoundEnabled !== false,
-              )
-            : normalizeInsertionAudioSettings(
-                {
-                  ...defaultInsertionAudioSettings(asset.kind, asset.photoSoundEnabled !== false),
-                  trackGates: normalizeAudioTrackGates(asset.mainAudioGates),
-                },
-                asset.kind,
-                validTrackIds,
-                asset.photoSoundEnabled !== false,
-              ),
-        } : {}),
+        ...(asset
+          ? {
+              instanceId: insertion?.id ?? `MAIN:${clip.assetId}:${clip.inMs}:${clip.outMs}`,
+              scope: "MAIN" as const,
+              assetId: clip.assetId,
+              ...(insertion ? { mediaInsertionId: insertion.id } : {}),
+              settings: insertion
+                ? normalizeInsertionAudioSettings(
+                    insertion.insertionAudio,
+                    asset.kind,
+                    validTrackIds,
+                    asset.photoSoundEnabled !== false,
+                  )
+                : normalizeInsertionAudioSettings(
+                    {
+                      ...defaultInsertionAudioSettings(asset.kind, asset.photoSoundEnabled !== false),
+                      trackGates: normalizeAudioTrackGates(asset.mainAudioGates),
+                    },
+                    asset.kind,
+                    validTrackIds,
+                    asset.photoSoundEnabled !== false,
+                  ),
+            }
+          : {}),
         durationMs: Math.max(0, clip.outMs - clip.inMs),
         sourceInMs: clip.inMs,
         sourceOutMs: clip.outMs,
@@ -209,50 +208,57 @@ export function buildInsertionAudioPlan(
     const asset = assetById.get(occurrence.assetId);
     if (!asset) return [];
     const settings = occurrence.settings;
-    const track = options.includeBgm === false
-      ? undefined
-      : settings.bgmTrackId
-        ? project.bgmTracks.find((item) => item.id === settings.bgmTrackId)
-        : undefined;
+    const track =
+      options.includeBgm === false
+        ? undefined
+        : settings.bgmTrackId
+          ? project.bgmTracks.find((item) => item.id === settings.bgmTrackId)
+          : undefined;
     if (options.includeBgm !== false && settings.bgmTrackId && !track)
       warnings.push(`「${asset.fileName}」指定的背景音樂已不存在，這次按不使用背景音樂處理。`);
     const trackIndex = track ? project.bgmTracks.findIndex((item) => item.id === track.id) + 1 : undefined;
-    return [{
-      instanceId: occurrence.instanceId,
-      scope: occurrence.scope,
-      assetId: asset.id,
-      fileName: asset.fileName,
-      kind: asset.kind,
-      timelineStartMs: starts[occurrenceIndex],
-      timelineEndMs: starts[occurrenceIndex] + occurrence.durationMs,
-      durationMs: occurrence.durationMs,
-      hasSourceAudio: asset.kind === "VIDEO" && Boolean(asset.mediaInfo?.audioCodec),
-      sourceInMs: occurrence.sourceInMs ?? 0,
-      sourceOutMs: occurrence.sourceOutMs ?? occurrence.durationMs,
-      gates: normalizeAudioTrackGates(settings.trackGates),
-      sfxEnabled: asset.kind === "IMAGE" && settings.sfxEnabled && normalizeAudioTrackGates(settings.trackGates).sfx,
-      ...(asset.kind === "IMAGE" && settings.sfxEnabled && normalizeAudioTrackGates(settings.trackGates).sfx ? {
-        sfxName: project.photoSoundEffect.displayName,
-        sfxVolumePercent: settings.sfxVolumePercent,
-      } : {}),
-      bgmEnabled: Boolean(track) && normalizeAudioTrackGates(settings.trackGates).bgm,
-      ...(track ? {
-        bgmTrackId: track.id,
-        bgmTrackIndex: trackIndex,
-        bgmTrackName: track.fileName,
-        bgmTimelineStartMs: starts[occurrenceIndex],
-        bgmTimelineEndMs: starts[occurrenceIndex] + occurrence.durationMs,
-        bgmPlayDurationMs: occurrence.durationMs,
-        bgmVolumePercent: settings.bgmVolumePercent,
-      } : {}),
-      continuousWithPrevious: false,
-      usesLoop: false,
-      fadeMs: settings.fadeMs,
-    }];
+    return [
+      {
+        instanceId: occurrence.instanceId,
+        scope: occurrence.scope,
+        assetId: asset.id,
+        fileName: asset.fileName,
+        kind: asset.kind,
+        timelineStartMs: starts[occurrenceIndex],
+        timelineEndMs: starts[occurrenceIndex] + occurrence.durationMs,
+        durationMs: occurrence.durationMs,
+        hasSourceAudio: asset.kind === "VIDEO" && Boolean(asset.mediaInfo?.audioCodec),
+        sourceInMs: occurrence.sourceInMs ?? 0,
+        sourceOutMs: occurrence.sourceOutMs ?? occurrence.durationMs,
+        gates: normalizeAudioTrackGates(settings.trackGates),
+        sfxEnabled: asset.kind === "IMAGE" && settings.sfxEnabled && normalizeAudioTrackGates(settings.trackGates).sfx,
+        ...(asset.kind === "IMAGE" && settings.sfxEnabled && normalizeAudioTrackGates(settings.trackGates).sfx
+          ? {
+              sfxName: project.photoSoundEffect.displayName,
+              sfxVolumePercent: settings.sfxVolumePercent,
+            }
+          : {}),
+        bgmEnabled: Boolean(track) && normalizeAudioTrackGates(settings.trackGates).bgm,
+        ...(track
+          ? {
+              bgmTrackId: track.id,
+              bgmTrackIndex: trackIndex,
+              bgmTrackName: track.fileName,
+              bgmTimelineStartMs: starts[occurrenceIndex],
+              bgmTimelineEndMs: starts[occurrenceIndex] + occurrence.durationMs,
+              bgmPlayDurationMs: occurrence.durationMs,
+              bgmVolumePercent: settings.bgmVolumePercent,
+            }
+          : {}),
+        continuousWithPrevious: false,
+        usesLoop: false,
+        fadeMs: settings.fadeMs,
+      },
+    ];
   });
 
   const occurrenceIndexByInstanceId = new Map(
-    occurrences.flatMap((item, index) => item.instanceId ? [[item.instanceId, index] as const] : []),
+    occurrences.flatMap((item, index) => (item.instanceId ? [[item.instanceId, index] as const] : [])),
   );
   const bgmRanges: InsertionAudioPlan["bgmRanges"] = [];
   for (const item of items) {
@@ -260,7 +266,9 @@ export function buildInsertionAudioPlan(
     const occurrenceIndex = occurrenceIndexByInstanceId.get(item.instanceId)!;
     const previous = bgmRanges.at(-1);
     const previousLastInstance = previous?.memberInstanceIds.at(-1);
-    const previousOccurrenceIndex = previousLastInstance ? occurrenceIndexByInstanceId.get(previousLastInstance) : undefined;
+    const previousOccurrenceIndex = previousLastInstance
+      ? occurrenceIndexByInstanceId.get(previousLastInstance)
+      : undefined;
     const continuous = Boolean(
       previous &&
       previous.scope === item.scope &&
@@ -300,15 +308,11 @@ export function buildInsertionAudioPlan(
   for (const range of bgmRanges) {
     range.usesLoop = range.durationMs > range.sourceSpanMs;
     if (range.usesLoop) {
-      const effectiveCrossfadeMs = Math.min(
-        range.loopCrossfadeMs,
-        Math.max(0, Math.floor(range.sourceSpanMs / 4)),
-      );
+      const effectiveCrossfadeMs = Math.min(range.loopCrossfadeMs, Math.max(0, Math.floor(range.sourceSpanMs / 4)));
       const repeatPeriodMs = Math.max(1, range.sourceSpanMs - effectiveCrossfadeMs);
       const repeatCount = Math.ceil(Math.max(0, range.durationMs - effectiveCrossfadeMs) / repeatPeriodMs);
-      range.loopStrategy = repeatCount <= MAX_BGM_CROSSFADE_REPEATS && effectiveCrossfadeMs > 0
-        ? "CROSSFADE"
-        : "BOUNDED_DECLICK_FALLBACK";
+      range.loopStrategy =
+        repeatCount <= MAX_BGM_CROSSFADE_REPEATS && effectiveCrossfadeMs > 0 ? "CROSSFADE" : "BOUNDED_DECLICK_FALLBACK";
       if (range.loopStrategy === "BOUNDED_DECLICK_FALLBACK") {
         warnings.push(
           `配樂「${range.bgmTrackName}」需要循環 ${repeatCount} 次，已改用有界接點平滑，避免建立過大的音訊濾鏡圖。`,
@@ -320,24 +324,27 @@ export function buildInsertionAudioPlan(
     for (const instanceId of range.memberInstanceIds) {
       const item = items.find((candidate) => candidate.instanceId === instanceId)!;
       item.usesLoop = range.usesLoop;
-      const loopPeriodMs = range.usesLoop && range.loopStrategy === "CROSSFADE"
-        ? Math.max(1, range.sourceSpanMs - Math.min(range.loopCrossfadeMs, Math.floor(range.sourceSpanMs / 4)))
-        : range.sourceSpanMs;
+      const loopPeriodMs =
+        range.usesLoop && range.loopStrategy === "CROSSFADE"
+          ? Math.max(1, range.sourceSpanMs - Math.min(range.loopCrossfadeMs, Math.floor(range.sourceSpanMs / 4)))
+          : range.sourceSpanMs;
       item.bgmSourcePositionMs = range.sourceInMs + ((item.timelineStartMs - range.timelineStartMs) % loopPeriodMs);
     }
   }
   const sfxEvents: InsertionAudioPlan["sfxEvents"] = items.flatMap((item) => {
     if (!item.sfxEnabled) return [];
     const settings = occurrences[occurrenceIndexByInstanceId.get(item.instanceId)!].settings!;
-    return [{
-      instanceId: item.instanceId,
-      scope: item.scope,
-      timelineStartMs: item.timelineStartMs,
-      sfxId: DUNES_SHUTTER_EFFECT_ID,
-      displayName: project.photoSoundEffect.displayName,
-      volumePercent: settings.sfxVolumePercent,
-      source: "PACKAGED_SHUTTER" as const,
-    }];
+    return [
+      {
+        instanceId: item.instanceId,
+        scope: item.scope,
+        timelineStartMs: item.timelineStartMs,
+        sfxId: DUNES_SHUTTER_EFFECT_ID,
+        displayName: project.photoSoundEffect.displayName,
+        volumePercent: settings.sfxVolumePercent,
+        source: "PACKAGED_SHUTTER" as const,
+      },
+    ];
   });
   const mainStartIndex = occurrences.findIndex((item) => item.mainStartCue);
   const mainStartCue = project.mainStartCue ?? DEFAULT_MAIN_START_CUE_SETTINGS;

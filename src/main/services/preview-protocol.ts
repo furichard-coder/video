@@ -9,6 +9,7 @@ import path from "node:path";
 import type { SubtitlePreviewService } from "./subtitle-preview";
 import type { OutputHistoryStore } from "./output-history";
 import type { AudioPreviewService } from "./audio-preview";
+import { resolveSubtitleVideo } from "./standalone-subtitle-store";
 
 const VARIANTS: Record<string, PreviewVariant> = {
   thumbnail: "THUMBNAIL",
@@ -62,12 +63,17 @@ function sourceMimeType(filePath: string): string {
 
 function audioMimeType(filePath: string): string {
   switch (path.extname(filePath).toLowerCase()) {
-    case ".mp3": return "audio/mpeg";
+    case ".mp3":
+      return "audio/mpeg";
     case ".m4a":
-    case ".aac": return "audio/mp4";
-    case ".wav": return "audio/wav";
-    case ".flac": return "audio/flac";
-    default: return "application/octet-stream";
+    case ".aac":
+      return "audio/mp4";
+    case ".wav":
+      return "audio/wav";
+    case ".flac":
+      return "audio/flac";
+    default:
+      return "application/octet-stream";
   }
 }
 
@@ -91,7 +97,11 @@ export function registerPreviewProtocol(
         if (range)
           return new Response(streamBody(filePath, range.start, range.end), {
             status: 206,
-            headers: { ...headers, "Content-Range": `bytes ${range.start}-${range.end}/${fileStat.size}`, "Content-Length": String(range.end - range.start + 1) },
+            headers: {
+              ...headers,
+              "Content-Range": `bytes ${range.start}-${range.end}/${fileStat.size}`,
+              "Content-Length": String(range.end - range.start + 1),
+            },
           });
         return new Response(streamBody(filePath), { headers: { ...headers, "Content-Length": String(fileStat.size) } });
       }
@@ -270,6 +280,27 @@ export function registerPreviewProtocol(
     try {
       const url = new URL(request.url);
       const assetId = url.pathname.split("/").filter(Boolean)[0];
+      if (url.hostname === "subtitle" && assetId && /^[a-f0-9]{64}$/i.test(assetId)) {
+        const videoPath = resolveSubtitleVideo(assetId);
+        if (!videoPath) return new Response("Not found", { status: 404 });
+        const file = await stat(videoPath);
+        const range = parseRange(request.headers.get("range"), file.size);
+        const headers = {
+          "Accept-Ranges": "bytes",
+          "Content-Type": sourceMimeType(videoPath),
+          "Cache-Control": "private, no-store",
+        };
+        return range
+          ? new Response(streamBody(videoPath, range.start, range.end), {
+              status: 206,
+              headers: {
+                ...headers,
+                "Content-Range": `bytes ${range.start}-${range.end}/${file.size}`,
+                "Content-Length": String(range.end - range.start + 1),
+              },
+            })
+          : new Response(streamBody(videoPath), { headers: { ...headers, "Content-Length": String(file.size) } });
+      }
       if (url.hostname !== "asset" || !assetId || !/^[a-f0-9]{64}$/i.test(assetId))
         return new Response("Not found", { status: 404 });
       const asset = store.getAsset(assetId);

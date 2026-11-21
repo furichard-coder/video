@@ -399,9 +399,9 @@ export class AiStoryAnalysisService {
         text,
         timelineScope: candidate.timelineScope,
         origin: candidate.origin,
-        // AI suggestions are immediately usable for preview/export. The user can
-        // still move any cue back to DRAFT or reject it in SubtitleStudio.
-        reviewStatus: "CONFIRMED",
+        // Vision output is always a non-destructive draft. It becomes eligible
+        // for the official SRT/export path only after explicit human review.
+        reviewStatus: "DRAFT",
         speaker: candidate.speaker,
         sourceAssetId: candidate.sourceAsset.id,
         sourceInMs: candidate.sourceStartMs,

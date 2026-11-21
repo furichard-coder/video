@@ -60,9 +60,20 @@ describe("subtitle Intro preview cache", () => {
         purpose: "INTRO",
       };
     });
-    const service = new SubtitlePreviewService(path.join(root, "cache"), store, {
-      render,
-    } as unknown as ConcatRenderService);
+    const firstRoot = path.join(root, "temp-e", "cache", "subtitle-preview");
+    const secondRoot = path.join(root, "temp-c", "cache", "subtitle-preview");
+    let nextRoot = firstRoot;
+    const service = new SubtitlePreviewService(
+      path.join(root, "cache"),
+      store,
+      {
+        render,
+      } as unknown as ConcatRenderService,
+      {
+        readRoots: () => [firstRoot, secondRoot],
+        chooseWriteRoot: async () => nextRoot,
+      },
+    );
     await service.initialize();
     const progress: number[] = [];
     const first = await service.ensureIntro480p(false, undefined, (item) => progress.push(item.percent));
@@ -74,12 +85,15 @@ describe("subtitle Intro preview cache", () => {
       url: expect.stringMatching(/^preview-media:\/\/subtitle\/[a-f0-9]{64}$/),
     });
     expect(progress).toContain(50);
+    expect(first.outputPath).toContain(firstRoot);
     expect(await service.resolveExisting(first.cacheKey)).toMatch(/intro-subtitle-preview-480p\.mp4$/);
+    nextRoot = secondRoot;
     const second = await service.ensureIntro480p();
     expect(second).toMatchObject({ cacheKey: first.cacheKey, cacheStatus: "HIT" });
     expect(render).toHaveBeenCalledTimes(1);
     const withBgm = await service.ensureIntro480p(true);
     expect(withBgm).toMatchObject({ cacheStatus: "CREATED", bgmIncluded: true });
+    expect(withBgm.outputPath).toContain(secondRoot);
     expect(withBgm.cacheKey).not.toBe(first.cacheKey);
     expect(await service.resolveExisting(withBgm.cacheKey)).toMatch(/intro-bgm-subtitle-preview-480p\.mp4$/);
     expect(render).toHaveBeenLastCalledWith(

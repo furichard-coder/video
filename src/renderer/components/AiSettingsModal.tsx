@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
   AiAccountProfile,
+  AiVisionTestResult,
+  AiModelCatalog,
   AiSettingsSnapshot,
   AiStoryContext,
   ProjectManifest,
@@ -16,7 +18,6 @@ interface Props {
 }
 
 const NEW_ACCOUNT = "__NEW__";
-const VISION_MODELS = ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"];
 const TRANSCRIPTION_MODELS = ["gpt-4o-transcribe-diarize", "gpt-4o-transcribe", "whisper-1"];
 
 function splitList(value: string): string[] {
@@ -29,7 +30,7 @@ function splitList(value: string): string[] {
 function profileForm(account?: AiAccountProfile) {
   return {
     name: account?.name ?? "新的 OpenAI API 帳號",
-    visionModel: account?.visionModel ?? "gpt-5.6-terra",
+    visionModel: account?.visionModel ?? "auto",
     transcriptionModel: account?.transcriptionModel ?? "gpt-4o-transcribe-diarize",
     apiKey: "",
   };
@@ -37,6 +38,7 @@ function profileForm(account?: AiAccountProfile) {
 
 export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
   const [snapshot, setSnapshot] = useState<AiSettingsSnapshot>();
+  const [visionTestResult, setVisionTestResult] = useState<AiVisionTestResult>();
   const [selectedId, setSelectedId] = useState(NEW_ACCOUNT);
   const [form, setForm] = useState(profileForm());
   const [context, setContext] = useState<AiStoryContext>(() => structuredClone(project.aiStoryContext));
@@ -44,6 +46,12 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
   const [peopleText, setPeopleText] = useState(project.aiStoryContext.people.join("、"));
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [modelCatalog, setModelCatalog] = useState<AiModelCatalog>();
+  const [catalogBusy, setCatalogBusy] = useState(false);
+  const [visionTesting, setVisionTesting] = useState(false);
+  const [geminiCatalog, setGeminiCatalog] = useState<AiModelCatalog>();
+  const [geminiCatalogBusy, setGeminiCatalogBusy] = useState(false);
+  const [geminiVisionTesting, setGeminiVisionTesting] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [voiceLanguage, setVoiceLanguage] = useState<VoiceInputLanguage>("zh-TW");
@@ -97,6 +105,86 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
     setForm(profileForm(snapshot?.accounts.find((account) => account.id === id)));
     setError(undefined);
     setNotice(undefined);
+    setModelCatalog(undefined);
+  };
+
+  const refreshModels = async (provider: "OPENAI" | "GEMINI") => {
+    const refresh = window.sourceApp.refreshAiModels;
+    if (!refresh) {
+      setError("目前版本尚未提供模型清單功能。");
+      return;
+    }
+    if (provider === "OPENAI" && !selected) {
+      setError("請先保存這個 OpenAI API 帳號，再讀取模型清單。");
+      return;
+    }
+    provider === "OPENAI" ? setCatalogBusy(true) : setGeminiCatalogBusy(true);
+    setError(undefined);
+    try {
+      const catalog = await refresh(provider, provider === "OPENAI" ? selected?.id : undefined);
+      if (provider === "OPENAI") setModelCatalog(catalog);
+      else setGeminiCatalog(catalog);
+      setNotice(
+        `已更新 ${provider === "OPENAI" ? "OpenAI" : "Gemini"} 模型清單；候選模型仍需實際測試後才會標記為可用。`,
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      provider === "OPENAI" ? setCatalogBusy(false) : setGeminiCatalogBusy(false);
+    }
+  };
+
+  const testVision = async (provider: "OPENAI" | "GEMINI") => {
+    const testModel = window.sourceApp.testAiVision;
+    if (!testModel) {
+      setError("目前版本尚未提供圖片模型測試功能。");
+      return;
+    }
+    if (provider === "OPENAI" && !selected) {
+      setError("請先保存這個 OpenAI API 帳號，再測試模型。");
+      return;
+    }
+    provider === "OPENAI" ? setVisionTesting(true) : setGeminiVisionTesting(true);
+    setError(undefined);
+    try {
+      const result = await testModel(
+        provider,
+        provider === "OPENAI" ? selected?.id : undefined,
+        provider === "OPENAI" ? form.visionModel : geminiModel,
+      );
+      setVisionTestResult(result);
+      if (result.ok && provider === "OPENAI" && modelCatalog)
+        setModelCatalog({
+          ...modelCatalog,
+          models: modelCatalog.models.map((model) =>
+            model.id === result.modelId
+              ? {
+                  ...model,
+                  capability: result.ok ? "READY" : "UNSUPPORTED",
+                  reason: result.ok ? undefined : result.message,
+                }
+              : model,
+          ),
+        });
+      if (result.ok && provider === "GEMINI" && geminiCatalog)
+        setGeminiCatalog({
+          ...geminiCatalog,
+          models: geminiCatalog.models.map((model) =>
+            model.id === result.modelId
+              ? {
+                  ...model,
+                  capability: result.ok ? "READY" : "UNSUPPORTED",
+                  reason: result.ok ? undefined : result.message,
+                }
+              : model,
+          ),
+        });
+      setNotice(result.message);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      provider === "OPENAI" ? setVisionTesting(false) : setGeminiVisionTesting(false);
+    }
   };
 
   const saveAccount = async () => {
@@ -404,11 +492,57 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                           }))
                         }
                       >
-                        {VISION_MODELS.map((model) => (
-                          <option key={model}>{model}</option>
+                        <option value="auto">Auto（依已測試結果選擇）</option>
+                        {[...(modelCatalog?.models ?? [])].map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.id}
+                            {model.capability === "READY"
+                              ? " · 已測試"
+                              : model.capability === "UNSUPPORTED"
+                                ? " · 不支援"
+                                : " · 候選"}
+                          </option>
                         ))}
+                        {form.visionModel !== "auto" &&
+                          !modelCatalog?.models.some((model) => model.id === form.visionModel) && (
+                            <option value={form.visionModel}>{form.visionModel} · 未列於最新清單</option>
+                          )}
                       </select>
                     </label>
+                    <div className="ai-form-actions">
+                      <button
+                        type="button"
+                        disabled={catalogBusy || !selected}
+                        onClick={() => void refreshModels("OPENAI")}
+                      >
+                        {catalogBusy ? "讀取中…" : "重新整理模型清單"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={visionTesting || !selected}
+                        onClick={() => void testVision("OPENAI")}
+                      >
+                        {visionTesting ? "圖片測試中…" : "測試圖片與 JSON 輸出"}
+                      </button>
+                    </div>
+                    <small className="ai-live-test-note">
+                      清單只是 API 可見的候選模型。只有送出最小圖片與結構化 JSON 請求成功後，才會標記為已測試；Auto
+                      會優先採用已測試的相容模型。這裡的畫面分析使用 OpenAI API；ChatGPT 網站或 Codex 登入不等於 API
+                      金鑰與 API 額度。
+                      {modelCatalog && <span> 最後更新：{new Date(modelCatalog.updatedAt).toLocaleString()}。</span>}
+                      更換模型後請保存帳號，正式分析才會使用新選擇。
+                    </small>
+                    {visionTestResult && (
+                      <div role="status" className="ai-live-test-note">
+                        {visionTestResult.provider}｜模型 {visionTestResult.modelId ?? "未選出"}｜延遲{" "}
+                        {visionTestResult.latencyMs} ms
+                        <br />
+                        認證 {visionTestResult.authentication ? "✓" : "本次未驗證"}｜模型存取{" "}
+                        {visionTestResult.modelAccess ? "✓" : "本次未驗證"}｜圖片{" "}
+                        {visionTestResult.visionSupported ? "✓" : "本次未驗證"}｜JSON{" "}
+                        {visionTestResult.structuredOutputSupported ? "✓" : "本次未驗證"}
+                      </div>
+                    )}
                     <label>
                       語音轉錄模型
                       <select
@@ -506,7 +640,22 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                   </label>
                   <label>
                     Gemini 模型
-                    <input value={geminiModel} onChange={(event) => setGeminiModel(event.target.value)} />
+                    <select value={geminiModel} onChange={(event) => setGeminiModel(event.target.value)}>
+                      <option value="auto">Auto（依已測試結果選擇）</option>
+                      {(geminiCatalog?.models ?? []).map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.id}
+                          {model.capability === "READY"
+                            ? " · 已測試"
+                            : model.capability === "UNSUPPORTED"
+                              ? " · 不支援"
+                              : " · 候選"}
+                        </option>
+                      ))}
+                      {geminiModel !== "auto" && !geminiCatalog?.models.some((model) => model.id === geminiModel) && (
+                        <option value={geminiModel}>{geminiModel} · 未列於最新清單</option>
+                      )}
+                    </select>
                   </label>
                   <label>
                     Gemini API Key
@@ -523,6 +672,12 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                     />
                   </label>
                   <div className="ai-form-actions">
+                    <button type="button" disabled={geminiCatalogBusy} onClick={() => void refreshModels("GEMINI")}>
+                      {geminiCatalogBusy ? "讀取中…" : "重新整理 Gemini 模型清單"}
+                    </button>
+                    <button type="button" disabled={geminiVisionTesting} onClick={() => void testVision("GEMINI")}>
+                      {geminiVisionTesting ? "圖片測試中…" : "測試圖片與 JSON 輸出"}
+                    </button>
                     <button
                       type="button"
                       disabled={

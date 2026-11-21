@@ -10,6 +10,12 @@ import type {
   AiPublishGenerationOptions,
   AiSubtitleGenerationOptions,
   MaterialSubtitleAnalysisRequest,
+  SubtitleVisualAnalysisOptions,
+  SubtitleVisualCueRegenerateRequest,
+  SubtitleVisualAnalysisProgress,
+  SubtitleAiCheckAction,
+  SubtitleAiCheckProgress,
+  SubtitleAiCheckRequest,
   ConcatRenderProgress,
   ConcatRenderRequest,
   AudioPreviewRequest,
@@ -48,9 +54,22 @@ import type {
   PublishProgress,
   RemoteControlStatus,
   PostSuccessPowerStatus,
+  RenderTempLocationConfig,
+  RenderTempLocationStatus,
+  ExecuteResumeStoragePlanRequest,
+  ExecuteTemporaryArtifactActionsRequest,
 } from "../shared/domain";
 
-const api: AppApi = {
+const api: AppApi & {
+  listRenderTempLocations(): Promise<RenderTempLocationStatus[]>;
+  chooseRenderTempLocation(): Promise<{
+    path: string;
+    volume: string;
+    freeBytes: number;
+    capacityBytes: number;
+  } | null>;
+  setRenderTempLocations(locations: RenderTempLocationConfig[]): Promise<RenderTempLocationConfig[]>;
+} = {
   getAppInfo: () => ipcRenderer.invoke("app:get-info"),
   getRemoteControlStatus: () => ipcRenderer.invoke("remote-control:get-status"),
   enableRemoteControl: () => ipcRenderer.invoke("remote-control:enable"),
@@ -152,14 +171,31 @@ const api: AppApi = {
   chooseRenderTemporaryFolder: () => ipcRenderer.invoke("render-temp:choose"),
   validateRenderTemporaryFolder: (targetPath: string) => ipcRenderer.invoke("render-temp:validate", targetPath),
   revealRenderTemporaryFolder: () => ipcRenderer.invoke("render-temp:reveal"),
+  revealRegisteredRenderTempPath: (targetPath: string) =>
+    ipcRenderer.invoke("render-temp:reveal-registered", targetPath),
+  listRenderTempLocations: () => ipcRenderer.invoke("render-temp:list"),
+  chooseRenderTempLocation: () => ipcRenderer.invoke("render-temp:choose-location"),
+  setRenderTempLocations: (locations) => ipcRenderer.invoke("render-temp:set-locations", locations),
   getRenderHardwareCapabilities: (force = false) => ipcRenderer.invoke("render-hardware:get", force),
   runRenderPerformanceBenchmark: () => ipcRenderer.invoke("render-benchmark:run"),
   startConcatRender: (request: ConcatRenderRequest) => ipcRenderer.invoke("concat:start", request),
   createAudioPreview: (request: AudioPreviewRequest) => ipcRenderer.invoke("audio-preview:create", request),
   cancelAudioPreview: () => ipcRenderer.invoke("audio-preview:cancel"),
   getConcatRenderResumeOffer: () => ipcRenderer.invoke("concat:resume-offer"),
+  analyzeConcatRenderResume: (checkpointId: string) => ipcRenderer.invoke("concat:analyze-resume", checkpointId),
+  analyzeConcatRenderStorage: (checkpointId: string) =>
+    ipcRenderer.invoke("concat:analyze-resume-storage", checkpointId),
+  executeConcatRenderStoragePlan: (request: ExecuteResumeStoragePlanRequest) =>
+    ipcRenderer.invoke("concat:execute-resume-storage-plan", request),
+  scanAndRemapConcatRenderArtifacts: (checkpointId: string) =>
+    ipcRenderer.invoke("concat:scan-remap-artifacts", checkpointId),
+  analyzeTemporaryArtifacts: () => ipcRenderer.invoke("render-temp:analyze-artifacts"),
+  executeTemporaryArtifactActions: (request: ExecuteTemporaryArtifactActionsRequest) =>
+    ipcRenderer.invoke("render-temp:execute-artifact-actions", request),
   resumeConcatRender: (checkpointId: string) => ipcRenderer.invoke("concat:resume", checkpointId),
   discardConcatRenderResume: (checkpointId: string) => ipcRenderer.invoke("concat:discard-resume", checkpointId),
+  remapConcatRenderResume: (request: import("../shared/domain").RenderCheckpointRemapRequest) =>
+    ipcRenderer.invoke("concat:remap-resume", request),
   discardConcatVideoMaster: () => ipcRenderer.invoke("concat:discard-video-master"),
   cancelConcatRender: () => ipcRenderer.invoke("concat:cancel"),
   revealConcatOutput: (jobId: string) => ipcRenderer.invoke("concat:reveal", jobId),
@@ -196,9 +232,48 @@ const api: AppApi = {
   },
   clearPublishProgressListeners: () => ipcRenderer.removeAllListeners("publish:progress"),
   generateAiSubtitles: (options: AiSubtitleGenerationOptions) => ipcRenderer.invoke("subtitle:ai-generate", options),
+  getSubtitleAnalysisVideo: () => ipcRenderer.invoke("subtitle:analysis-video:get"),
+  getSubtitleVisualPreflight: (options: SubtitleVisualAnalysisOptions) =>
+    ipcRenderer.invoke("subtitle:visual-preflight", options),
+  refreshAiModels: (provider: "OPENAI" | "GEMINI", accountId?: string) =>
+    ipcRenderer.invoke("ai:models:refresh", provider, accountId),
+  testAiVision: (provider: "OPENAI" | "GEMINI", accountId?: string, modelId?: string) =>
+    ipcRenderer.invoke("ai:vision:test", provider, accountId, modelId),
+  getStandaloneSubtitleWorkspace: () => ipcRenderer.invoke("subtitle:workspace:get"),
+  importStandaloneSubtitleWorkspaceFromSrt: () => ipcRenderer.invoke("subtitle:workspace:import-srt"),
+  saveStandaloneSubtitleWorkspace: (id: string, cues: SubtitleCue[]) =>
+    ipcRenderer.invoke("subtitle:workspace:save", id, cues),
+  exportStandaloneSubtitleWorkspace: (id: string, token: string) =>
+    ipcRenderer.invoke("subtitle:workspace:export", id, token),
+  getSubtitleEvidenceFrame: (id: string, time: number) => ipcRenderer.invoke("subtitle:workspace:frame", id, time),
+  getSubtitleAiCheckJob: () => ipcRenderer.invoke("subtitle:ai-check:get"),
+  prepareProjectSubtitleAiCheck: () => ipcRenderer.invoke("subtitle:project-ai-check:prepare"),
+  startSubtitleAiCheck: (request: SubtitleAiCheckRequest) => ipcRenderer.invoke("subtitle:ai-check:start", request),
+  pauseSubtitleAiCheck: () => ipcRenderer.invoke("subtitle:ai-check:pause"),
+  resumeSubtitleAiCheck: () => ipcRenderer.invoke("subtitle:ai-check:resume"),
+  stopSubtitleAiCheck: () => ipcRenderer.invoke("subtitle:ai-check:stop"),
+  applySubtitleAiCheckAction: (action: SubtitleAiCheckAction) => ipcRenderer.invoke("subtitle:ai-check:action", action),
+  onSubtitleAiCheckProgress: (callback: (progress: SubtitleAiCheckProgress) => void) => {
+    ipcRenderer.on("subtitle:ai-check:progress", (_event, progress: SubtitleAiCheckProgress) => callback(progress));
+  },
+  clearSubtitleAiCheckProgressListeners: () => ipcRenderer.removeAllListeners("subtitle:ai-check:progress"),
+  chooseSubtitleAnalysisVideo: () => ipcRenderer.invoke("subtitle:analysis-video:choose"),
   analyzeMaterialForSubtitles: (request: MaterialSubtitleAnalysisRequest) =>
     ipcRenderer.invoke("subtitle:material-analyze", request),
   cancelMaterialSubtitleAnalysis: () => ipcRenderer.invoke("subtitle:material-cancel"),
+  startSubtitleVisualAnalysis: (options: SubtitleVisualAnalysisOptions) =>
+    ipcRenderer.invoke("subtitle:visual-job:start", options),
+  pauseSubtitleVisualAnalysis: () => ipcRenderer.invoke("subtitle:visual-job:pause"),
+  resumeSubtitleVisualAnalysis: () => ipcRenderer.invoke("subtitle:visual-job:resume"),
+  cancelSubtitleVisualAnalysis: () => ipcRenderer.invoke("subtitle:visual-job:cancel"),
+  regenerateSubtitleVisualCue: (request: SubtitleVisualCueRegenerateRequest) =>
+    ipcRenderer.invoke("subtitle:visual-cue:regenerate", request),
+  onSubtitleVisualAnalysisProgress: (callback: (progress: SubtitleVisualAnalysisProgress) => void) => {
+    ipcRenderer.on("subtitle:visual-job:progress", (_event, progress: SubtitleVisualAnalysisProgress) =>
+      callback(progress),
+    );
+  },
+  clearSubtitleVisualAnalysisProgressListeners: () => ipcRenderer.removeAllListeners("subtitle:visual-job:progress"),
   buildSubtitleIntroPreview: (includeBgm = false) => ipcRenderer.invoke("subtitle:build-intro-preview", includeBgm),
   cancelSubtitleIntroPreview: () => ipcRenderer.invoke("subtitle:cancel-intro-preview"),
   cancelAiSubtitles: () => ipcRenderer.invoke("subtitle:ai-cancel"),
@@ -228,6 +303,10 @@ const api: AppApi = {
   setSubtitleCues: (cues: SubtitleCue[]) => ipcRenderer.invoke("subtitle:set-cues", cues),
   chooseSubtitleInput: () => ipcRenderer.invoke("subtitle:choose-input"),
   chooseSubtitleOutput: (suggestedName: string) => ipcRenderer.invoke("subtitle:choose-output", suggestedName),
+  saveSubtitleAiDraft: (outputToken: string, scopes?: SubtitleTimelineScope[]) =>
+    ipcRenderer.invoke("subtitle:save-ai-draft", outputToken, scopes),
+  promoteSubtitleAiDraft: (outputToken: string, choice: "BACKUP" | "OVERWRITE" | "CANCEL") =>
+    ipcRenderer.invoke("subtitle:promote-ai-draft", outputToken, choice),
   exportSubtitles: (outputToken: string, scopes?: SubtitleTimelineScope[]) =>
     ipcRenderer.invoke("subtitle:export", outputToken, scopes),
   cancelSubtitleExport: () => ipcRenderer.invoke("subtitle:cancel-export"),

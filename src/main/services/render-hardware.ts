@@ -12,9 +12,7 @@ import { ProcessFailure, runProcess } from "./process-runner";
 
 type ProcessRunner = typeof runProcess;
 
-const ENCODERS: Array<
-  Pick<RenderEncoderCapability, "videoCodec" | "ffmpegEncoder" | "backend" | "codec">
-> = [
+const ENCODERS: Array<Pick<RenderEncoderCapability, "videoCodec" | "ffmpegEncoder" | "backend" | "codec">> = [
   { videoCodec: "H264_NVENC", ffmpegEncoder: "h264_nvenc", backend: "NVIDIA_NVENC", codec: "H264" },
   { videoCodec: "H265_NVENC", ffmpegEncoder: "hevc_nvenc", backend: "NVIDIA_NVENC", codec: "H265" },
   { videoCodec: "H264_QSV", ffmpegEncoder: "h264_qsv", backend: "INTEL_QSV", codec: "H264" },
@@ -49,17 +47,24 @@ function compactFailure(error: unknown): string {
 }
 
 function firstVersionLine(text: string): string {
-  return text.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "unknown FFmpeg";
+  return (
+    text
+      .split(/\r?\n/)
+      .find((line) => line.trim())
+      ?.trim() ?? "unknown FFmpeg"
+  );
 }
 
 function parseGpuAdapters(raw: string): Array<{ name: string; driverVersion?: string }> {
   try {
     const value = JSON.parse(raw.trim()) as
-      | { Name?: string; DriverVersion?: string }
-      | Array<{ Name?: string; DriverVersion?: string }>;
+      { Name?: string; DriverVersion?: string } | Array<{ Name?: string; DriverVersion?: string }>;
     return (Array.isArray(value) ? value : [value])
       .filter((item) => typeof item.Name === "string" && item.Name.trim())
-      .map((item) => ({ name: item.Name!.trim(), ...(item.DriverVersion ? { driverVersion: item.DriverVersion } : {}) }));
+      .map((item) => ({
+        name: item.Name!.trim(),
+        ...(item.DriverVersion ? { driverVersion: item.DriverVersion } : {}),
+      }));
   } catch {
     return [];
   }
@@ -146,7 +151,8 @@ export class RenderHardwareService {
     if (this.cached?.fingerprint === fingerprint) return structuredClone(this.cached);
     try {
       const value = JSON.parse(await readFile(this.profilePath, "utf8")) as RenderHardwareCapabilities;
-      if (value.schemaVersion !== 1 || value.fingerprint !== fingerprint || !Array.isArray(value.encoders)) return undefined;
+      if (value.schemaVersion !== 1 || value.fingerprint !== fingerprint || !Array.isArray(value.encoders))
+        return undefined;
       this.cached = value;
       return structuredClone(value);
     } catch {
@@ -293,14 +299,21 @@ export class RenderHardwareService {
           candidate.backend === "CPU_SOFTWARE"
             ? { available: isListed }
             : activeFfmpeg
-              ? { available: false, failureReason: "偵測到其他 FFmpeg 正在轉檔；為避免搶資源，本次延後實際硬體 probe。" }
+              ? {
+                  available: false,
+                  failureReason: "偵測到其他 FFmpeg 正在轉檔；為避免搶資源，本次延後實際硬體 probe。",
+                }
               : isListed && sample
                 ? await this.probeDecoder(candidate.backend, sample)
-                : { available: false, failureReason: isListed ? "無法建立安全的短測試樣本。" : "FFmpeg 未列出此解碼器。" };
+                : {
+                    available: false,
+                    failureReason: isListed ? "無法建立安全的短測試樣本。" : "FFmpeg 未列出此解碼器。",
+                  };
         decoderCapabilities.push({
           ...candidate,
           listed: isListed,
-          runtimeVerified: candidate.backend === "CPU_SOFTWARE" ? isListed : Boolean(isListed && sample && !activeFfmpeg),
+          runtimeVerified:
+            candidate.backend === "CPU_SOFTWARE" ? isListed : Boolean(isListed && sample && !activeFfmpeg),
           available: runtime.available,
           ...(runtime.failureReason ? { failureReason: runtime.failureReason } : {}),
         });
@@ -310,8 +323,9 @@ export class RenderHardwareService {
     }
 
     const recommended = recommendation(encoderCapabilities);
-    const gpuFilters = ["scale_cuda", "scale_qsv", "overlay_cuda", "overlay_qsv"]
-      .filter((name) => listed(inventory.filterTable, name));
+    const gpuFilters = ["scale_cuda", "scale_qsv", "overlay_cuda", "overlay_qsv"].filter((name) =>
+      listed(inventory.filterTable, name),
+    );
     const profile: RenderHardwareCapabilities = {
       schemaVersion: 1,
       fingerprint: inventory.fingerprint,

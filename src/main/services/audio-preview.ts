@@ -13,11 +13,18 @@ const PREVIEW_CACHE_VERSION = 2;
 const MAX_CACHE_BYTES = 2 * 1024 ** 3;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60_000;
 
+/** Paths returned by the placement are dedicated App-owned audio-preview subfolders. */
+export interface AudioPreviewPlacement {
+  readRoots(): readonly string[];
+  chooseWriteRoot(): Promise<string>;
+}
+
 export class AudioPreviewService {
   constructor(
     private readonly root: string,
     private readonly store: ProjectStore,
     private readonly ffmpeg = process.env.FFMPEG_PATH || "ffmpeg",
+    private readonly placement?: AudioPreviewPlacement,
   ) {}
 
   async initialize(): Promise<void> {
@@ -35,23 +42,66 @@ export class AudioPreviewService {
     const maximumStartMs = Math.max(0, (info.durationMs ?? Number.MAX_SAFE_INTEGER) - 1_000);
     const startMs = Math.min(maximumStartMs, Math.max(0, Math.round(request.startMs ?? 0)));
     const availableDurationMs = Math.max(1_000, (info.durationMs ?? Number.MAX_SAFE_INTEGER) - startMs);
-    const durationMs = Math.max(1_000, Math.min(MAX_PREVIEW_MS, availableDurationMs, Math.round(request.durationMs ?? 20_000)));
+    const durationMs = Math.max(
+      1_000,
+      Math.min(MAX_PREVIEW_MS, availableDurationMs, Math.round(request.durationMs ?? 20_000)),
+    );
     const cacheKey = createHash("sha256")
-      .update(JSON.stringify({ sourcePath: asset.sourcePath, size: file.size, mtimeMs: file.mtimeMs, startMs, durationMs, timelineRevision: request.timelineRevision ?? this.store.getProject().timelineRevision, options, version: PREVIEW_CACHE_VERSION }))
+      .update(
+        JSON.stringify({
+          sourcePath: asset.sourcePath,
+          size: file.size,
+          mtimeMs: file.mtimeMs,
+          startMs,
+          durationMs,
+          timelineRevision: request.timelineRevision ?? this.store.getProject().timelineRevision,
+          options,
+          version: PREVIEW_CACHE_VERSION,
+        }),
+      )
       .digest("hex");
-    const outputPath = path.join(this.root, `${cacheKey}.m4a`);
-    const surroundPath = path.join(this.root, `${cacheKey}.5.1.m4a`);
-    const meterPath = path.join(this.root, `${cacheKey}.meter.json`);
+    const root =
+      (await this.existingCacheRoot(cacheKey)) ??
+      path.resolve(this.placement ? await this.placement.chooseWriteRoot() : this.root);
+    await mkdir(root, { recursive: true });
+    const outputPath = path.join(root, `${cacheKey}.m4a`);
+    const surroundPath = path.join(root, `${cacheKey}.5.1.m4a`);
+    const meterPath = path.join(root, `${cacheKey}.meter.json`);
     const plan = buildAudioProcessingFilter(options);
     if (options.mode === "VIRTUAL_SURROUND_5_1") {
       const surround = await stat(surroundPath).catch(() => undefined);
       if (!surround?.isFile() || surround.size <= 0) {
-        const partialSurroundPath = path.join(this.root, `.${cacheKey}.${randomUUID()}.partial.5.1.m4a`);
+        const partialSurroundPath = path.join(root, `.${cacheKey}.${randomUUID()}.partial.5.1.m4a`);
         try {
-          await runProcess(this.ffmpeg, [
-            "-hide_banner", "-loglevel", "error", "-y", "-ss", String(startMs / 1000), "-t", String(durationMs / 1000), "-i", asset.sourcePath,
-            "-filter_complex", plan.filter!, "-map", "[aout]", "-c:a", "aac", "-b:a", "384k", "-ar", "48000", "-ac", "6", partialSurroundPath,
-          ], signal);
+          await runProcess(
+            this.ffmpeg,
+            [
+              "-hide_banner",
+              "-loglevel",
+              "error",
+              "-y",
+              "-ss",
+              String(startMs / 1000),
+              "-t",
+              String(durationMs / 1000),
+              "-i",
+              asset.sourcePath,
+              "-filter_complex",
+              plan.filter!,
+              "-map",
+              "[aout]",
+              "-c:a",
+              "aac",
+              "-b:a",
+              "384k",
+              "-ar",
+              "48000",
+              "-ac",
+              "6",
+              partialSurroundPath,
+            ],
+            signal,
+          );
           await finalizePartialOutput(partialSurroundPath, surroundPath);
         } finally {
           await rm(partialSurroundPath, { force: true });
@@ -59,12 +109,24 @@ export class AudioPreviewService {
       }
     }
     const existing = await stat(outputPath).catch(() => undefined);
-    const cacheStatus = existing?.isFile() && existing.size > 0 ? "HIT" as const : "CREATED" as const;
+    const cacheStatus = existing?.isFile() && existing.size > 0 ? ("HIT" as const) : ("CREATED" as const);
     if (!existing?.isFile() || existing.size <= 0) {
-      const partialPath = path.join(this.root, `.${cacheKey}.${randomUUID()}.partial.m4a`);
-      const args = options.mode === "VIRTUAL_SURROUND_5_1"
-        ? ["-hide_banner", "-loglevel", "error", "-y", "-i", surroundPath]
-        : ["-hide_banner", "-loglevel", "error", "-y", "-ss", String(startMs / 1000), "-t", String(durationMs / 1000), "-i", asset.sourcePath];
+      const partialPath = path.join(root, `.${cacheKey}.${randomUUID()}.partial.m4a`);
+      const args =
+        options.mode === "VIRTUAL_SURROUND_5_1"
+          ? ["-hide_banner", "-loglevel", "error", "-y", "-i", surroundPath]
+          : [
+              "-hide_banner",
+              "-loglevel",
+              "error",
+              "-y",
+              "-ss",
+              String(startMs / 1000),
+              "-t",
+              String(durationMs / 1000),
+              "-i",
+              asset.sourcePath,
+            ];
       if (options.mode === "VIRTUAL_SURROUND_5_1") {
         args.push("-map", "0:a:0", "-af", plan.monitoringFilter!);
       } else if (options.mode === "ENHANCED_STEREO") {
@@ -80,20 +142,45 @@ export class AudioPreviewService {
         await rm(partialPath, { force: true });
       }
     }
-    let meter = await readFile(meterPath, "utf8").then((value) => JSON.parse(value)).catch(() => undefined);
+    let meter = await readFile(meterPath, "utf8")
+      .then((value) => JSON.parse(value))
+      .catch(() => undefined);
     if (!meter) {
-      const meterInput = options.mode === "VIRTUAL_SURROUND_5_1" ? surroundPath : options.mode === "PRESERVE_MULTICHANNEL" ? asset.sourcePath : outputPath;
-      const trimArgs = options.mode === "PRESERVE_MULTICHANNEL" ? ["-ss", String(startMs / 1000), "-t", String(durationMs / 1000)] : [];
+      const meterInput =
+        options.mode === "VIRTUAL_SURROUND_5_1"
+          ? surroundPath
+          : options.mode === "PRESERVE_MULTICHANNEL"
+            ? asset.sourcePath
+            : outputPath;
+      const trimArgs =
+        options.mode === "PRESERVE_MULTICHANNEL"
+          ? ["-ss", String(startMs / 1000), "-t", String(durationMs / 1000)]
+          : [];
       const measured = await runProcess(
         this.ffmpeg,
-        ["-hide_banner", "-nostats", ...trimArgs, "-i", meterInput, "-filter_complex", "ebur128=peak=true,astats=metadata=0:reset=0", "-f", "null", "-"],
+        [
+          "-hide_banner",
+          "-nostats",
+          ...trimArgs,
+          "-i",
+          meterInput,
+          "-filter_complex",
+          "ebur128=peak=true,astats=metadata=0:reset=0",
+          "-f",
+          "null",
+          "-",
+        ],
         signal,
       );
       meter = parseEbur128Summary(measured.stderr);
       await writeFile(meterPath, JSON.stringify(meter), { encoding: "utf8", flag: "wx" }).catch(() => undefined);
     }
     const now = new Date();
-    await Promise.all([utimes(outputPath, now, now).catch(() => undefined), utimes(surroundPath, now, now).catch(() => undefined), utimes(meterPath, now, now).catch(() => undefined)]);
+    await Promise.all([
+      utimes(outputPath, now, now).catch(() => undefined),
+      utimes(surroundPath, now, now).catch(() => undefined),
+      utimes(meterPath, now, now).catch(() => undefined),
+    ]);
     await this.cleanup();
     return {
       cacheKey,
@@ -114,20 +201,29 @@ export class AudioPreviewService {
 
   async resolveExisting(cacheKey: string): Promise<string> {
     if (!/^[a-f0-9]{64}$/i.test(cacheKey)) throw new Error("音訊試聽快取識別碼無效。");
-    const outputPath = path.join(this.root, `${cacheKey}.m4a`);
+    const root = await this.existingCacheRoot(cacheKey);
+    if (!root) throw new Error("音訊試聽快取不存在。");
+    const outputPath = path.join(root, `${cacheKey}.m4a`);
     const file = await stat(outputPath);
     if (!file.isFile() || file.size <= 0) throw new Error("音訊試聽快取不存在。");
     return outputPath;
   }
 
   async cleanup(now = Date.now()): Promise<{ removedFiles: number; removedBytes: number }> {
-    const entries = await readdir(this.root, { withFileTypes: true }).catch(() => []);
+    const entries = (
+      await Promise.all(
+        this.cacheRoots().map(async (root) => ({
+          root,
+          entries: await readdir(root, { withFileTypes: true }).catch(() => []),
+        })),
+      )
+    ).flatMap(({ root, entries }) => entries.map((entry) => ({ root, entry })));
     const files = (
       await Promise.all(
         entries
-          .filter((entry) => entry.isFile())
-          .map(async (entry) => {
-            const filePath = path.join(this.root, entry.name);
+          .filter(({ entry }) => entry.isFile())
+          .map(async ({ root, entry }) => {
+            const filePath = path.join(root, entry.name);
             const info = await stat(filePath).catch(() => undefined);
             return info ? { filePath, size: info.size, mtimeMs: info.mtimeMs } : undefined;
           }),
@@ -145,5 +241,19 @@ export class AudioPreviewService {
       removedBytes += item.size;
     }
     return { removedFiles, removedBytes };
+  }
+
+  private cacheRoots(): string[] {
+    return [...new Set([this.root, ...(this.placement?.readRoots() ?? [])].map((root) => path.resolve(root)))];
+  }
+
+  private async existingCacheRoot(cacheKey: string): Promise<string | undefined> {
+    for (const root of this.cacheRoots()) {
+      for (const name of [`${cacheKey}.m4a`, `${cacheKey}.5.1.m4a`]) {
+        const item = await stat(path.join(root, name)).catch(() => undefined);
+        if (item?.isFile() && item.size > 0) return root;
+      }
+    }
+    return undefined;
   }
 }

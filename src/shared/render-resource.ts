@@ -80,7 +80,10 @@ export function estimatedIntermediateBytes(
   return Math.ceil((((Math.max(0, durationMs) / 1000) * (mbps + 0.192) * 1_000_000) / 8) * 1.08);
 }
 
-export function intermediateBitrateArgs(resolution: PreviewResolution, profile: RenderResourceProfile): {
+export function intermediateBitrateArgs(
+  resolution: PreviewResolution,
+  profile: RenderResourceProfile,
+): {
   bitrate: string;
   maxrate: string;
   bufsize: string;

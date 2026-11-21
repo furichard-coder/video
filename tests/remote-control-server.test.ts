@@ -4,7 +4,9 @@ import { RemoteControlServer } from "../src/main/services/remote-control-server"
 import { RenderCommandState } from "../src/main/services/render-command-state";
 
 const running: RemoteControlServer[] = [];
-afterEach(async () => { await Promise.all(running.splice(0).map((server) => server.stop())); });
+afterEach(async () => {
+  await Promise.all(running.splice(0).map((server) => server.stop()));
+});
 
 async function paired(server: RemoteControlServer) {
   const status = await server.start();
@@ -18,7 +20,7 @@ async function paired(server: RemoteControlServer) {
     headers: { Origin: origin, "Content-Type": "application/json" },
     body: JSON.stringify({ token: decodeURIComponent(pairToken) }),
   });
-  const body = await response.json() as { csrfToken: string };
+  const body = (await response.json()) as { csrfToken: string };
   const setCookie = response.headers.get("set-cookie")!;
   return { origin, cookie: setCookie.split(";")[0], setCookie, csrf: body.csrfToken, pairToken };
 }
@@ -52,31 +54,73 @@ describe("RemoteControlServer", () => {
     expect(server.status().pairingUrl).toBeUndefined();
     const cookieHeader = (await fetch(new URL("/", auth.origin))).headers.get("set-cookie");
     expect(cookieHeader).toBeNull();
-    const denied = await fetch(new URL("/api/state", auth.origin), { headers: { Cookie: auth.cookie, Origin: auth.origin } });
+    const denied = await fetch(new URL("/api/state", auth.origin), {
+      headers: { Cookie: auth.cookie, Origin: auth.origin },
+    });
     expect(denied.status).toBe(401);
-    const accepted = await fetch(new URL("/api/state", auth.origin), { headers: { Cookie: auth.cookie, Origin: auth.origin, "X-Scenery-CSRF": auth.csrf } });
+    const accepted = await fetch(new URL("/api/state", auth.origin), {
+      headers: { Cookie: auth.cookie, Origin: auth.origin, "X-Scenery-CSRF": auth.csrf },
+    });
     expect(accepted.status).toBe(200);
-    const replay = await fetch(new URL("/api/pair", auth.origin), { method: "POST", headers: { Origin: auth.origin, "Content-Type": "application/json" }, body: JSON.stringify({ token: auth.pairToken }) });
+    const replay = await fetch(new URL("/api/pair", auth.origin), {
+      method: "POST",
+      headers: { Origin: auth.origin, "Content-Type": "application/json" },
+      body: JSON.stringify({ token: auth.pairToken }),
+    });
     expect(replay.status).toBe(401);
   });
 
   it("requires a server-issued second-stage nonce for cancel and disconnect does not cancel render", async () => {
     const state = new RenderCommandState("LAN Project");
     const cancel = vi.fn(async () => undefined);
-    state.setHandlers({ startPrepared: async () => { throw new Error("unused"); }, resumeCheckpoint: async () => { throw new Error("unused"); }, cancel });
-    const request = { outputToken: "x", orderedAssetIds: ["a".repeat(64)], transitionSeconds: 0.3, resolution: "1080P" } as ConcatRenderRequest;
+    state.setHandlers({
+      startPrepared: async () => {
+        throw new Error("unused");
+      },
+      resumeCheckpoint: async () => {
+        throw new Error("unused");
+      },
+      cancel,
+    });
+    const request = {
+      outputToken: "x",
+      orderedAssetIds: ["a".repeat(64)],
+      transitionSeconds: 0.3,
+      resolution: "1080P",
+    } as ConcatRenderRequest;
     state.markStarting(request);
     const server = new RemoteControlServer(state);
     const auth = await paired(server);
-    const headers = { Cookie: auth.cookie, Origin: auth.origin, "X-Scenery-CSRF": auth.csrf, "Content-Type": "application/json" };
-    const direct = await fetch(new URL("/api/command/cancel", auth.origin), { method: "POST", headers, body: JSON.stringify({ confirmation: "CANCEL" }) });
+    const headers = {
+      Cookie: auth.cookie,
+      Origin: auth.origin,
+      "X-Scenery-CSRF": auth.csrf,
+      "Content-Type": "application/json",
+    };
+    const direct = await fetch(new URL("/api/command/cancel", auth.origin), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ confirmation: "CANCEL" }),
+    });
     expect(direct.status).toBe(409);
-    const intentResponse = await fetch(new URL("/api/command/cancel-intent", auth.origin), { method: "POST", headers, body: "{}" });
-    const intent = await intentResponse.json() as { cancelNonce: string };
-    const confirmed = await fetch(new URL("/api/command/cancel", auth.origin), { method: "POST", headers, body: JSON.stringify({ confirmation: "CANCEL", cancelNonce: intent.cancelNonce }) });
+    const intentResponse = await fetch(new URL("/api/command/cancel-intent", auth.origin), {
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+    const intent = (await intentResponse.json()) as { cancelNonce: string };
+    const confirmed = await fetch(new URL("/api/command/cancel", auth.origin), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ confirmation: "CANCEL", cancelNonce: intent.cancelNonce }),
+    });
     expect(confirmed.status).toBe(202);
     expect(cancel).toHaveBeenCalledOnce();
-    const nonceReplay = await fetch(new URL("/api/command/cancel", auth.origin), { method: "POST", headers, body: JSON.stringify({ confirmation: "CANCEL", cancelNonce: intent.cancelNonce }) });
+    const nonceReplay = await fetch(new URL("/api/command/cancel", auth.origin), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ confirmation: "CANCEL", cancelNonce: intent.cancelNonce }),
+    });
     expect(nonceReplay.status).toBe(409);
     expect(cancel).toHaveBeenCalledOnce();
     await server.stop();

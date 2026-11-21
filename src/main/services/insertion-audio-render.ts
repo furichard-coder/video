@@ -1,9 +1,4 @@
-import type {
-  AudioProcessingOptions,
-  AudioProtectionOptions,
-  BgmTrack,
-  InsertionAudioPlan,
-} from "../../shared/domain";
+import type { AudioProcessingOptions, AudioProtectionOptions, BgmTrack, InsertionAudioPlan } from "../../shared/domain";
 import { audioCodecArgs, buildAudioProcessingFilter, sanitizeAudioProcessingOptions } from "./audio-processing";
 import {
   MAIN_START_CUE_BASE_GAINS,
@@ -70,9 +65,10 @@ function insertionLoop(
   if (repeatCount > 1) {
     const smooth = Math.min(Math.max(0.005, crossfadeSeconds || 0.06), sourceSpanSeconds / 4);
     const phase = `mod(t\\,${number(sourceSpanSeconds)})`;
-    const envelope = smooth > 0
-      ? `if(lt(${phase}\\,${number(smooth)})\\,${phase}/${number(smooth)}\\,if(gt(${phase}\\,${number(sourceSpanSeconds - smooth)})\\,(${number(sourceSpanSeconds)}-${phase})/${number(smooth)}\\,1))`
-      : "1";
+    const envelope =
+      smooth > 0
+        ? `if(lt(${phase}\\,${number(smooth)})\\,${phase}/${number(smooth)}\\,if(gt(${phase}\\,${number(sourceSpanSeconds - smooth)})\\,(${number(sourceSpanSeconds)}-${phase})/${number(smooth)}\\,1))`
+        : "1";
     const label = `${prefix}looped`;
     return {
       filters: [
@@ -147,7 +143,9 @@ export function buildInsertionAudioPostArguments(
 
   if (options.baseHasAudio) {
     const envelope = sourceGateEnvelope(options.plan);
-    filters.push(`[0:a:0]aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,atrim=duration=${number(durationSeconds)},apad,atrim=duration=${number(durationSeconds)}${envelope ? `,volume='${envelope}':eval=frame` : ""}[ibase]`);
+    filters.push(
+      `[0:a:0]aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,atrim=duration=${number(durationSeconds)},apad,atrim=duration=${number(durationSeconds)}${envelope ? `,volume='${envelope}':eval=frame` : ""}[ibase]`,
+    );
   } else {
     filters.push(`anullsrc=r=48000:cl=stereo,atrim=duration=${number(durationSeconds)},asetpts=PTS-STARTPTS[ibase]`);
   }
@@ -179,10 +177,12 @@ export function buildInsertionAudioPostArguments(
       (item) => range.memberInstanceIds.includes(item.instanceId) && !item.gates.bgm,
     );
     if (disabled.length) {
-      const expression = smoothGateEnvelope(disabled.map((item) => ({
-        start: item.timelineStartMs / 1_000,
-        end: item.timelineEndMs / 1_000,
-      })))!;
+      const expression = smoothGateEnvelope(
+        disabled.map((item) => ({
+          start: item.timelineStartMs / 1_000,
+          end: item.timelineEndMs / 1_000,
+        })),
+      )!;
       chain.push(`volume='${expression}':eval=frame`);
     }
     chain[chain.length - 1] += `[${label}]`;
@@ -209,15 +209,21 @@ export function buildInsertionAudioPostArguments(
       const fade = Math.min(durationMs, track.fadeOutMs) / 1_000;
       chain.push(`afade=t=out:st=${number(Math.max(0, durationMs / 1_000 - fade))}:d=${number(fade)}`);
     }
-    chain.push(`adelay=${Math.max(0, Math.round(track.timelineInMs))}:all=1`, "apad", `atrim=duration=${number(durationSeconds)}`);
+    chain.push(
+      `adelay=${Math.max(0, Math.round(track.timelineInMs))}:all=1`,
+      "apad",
+      `atrim=duration=${number(durationSeconds)}`,
+    );
     const disabled = options.plan.items.filter(
       (item) => !item.gates.bgm && item.timelineEndMs > track.timelineInMs && item.timelineStartMs < timelineEndMs,
     );
     if (disabled.length) {
-      const expression = smoothGateEnvelope(disabled.map((item) => ({
-        start: item.timelineStartMs / 1_000,
-        end: item.timelineEndMs / 1_000,
-      })))!;
+      const expression = smoothGateEnvelope(
+        disabled.map((item) => ({
+          start: item.timelineStartMs / 1_000,
+          end: item.timelineEndMs / 1_000,
+        })),
+      )!;
       chain.push(`volume='${expression}':eval=frame`);
     }
     chain[chain.length - 1] += `[${label}]`;
@@ -247,7 +253,9 @@ export function buildInsertionAudioPostArguments(
   });
 
   const mixInputs = ["ibase", ...overlays];
-  filters.push(`${mixInputs.map((label) => `[${label}]`).join("")}amix=inputs=${mixInputs.length}:duration=first:dropout_transition=0:normalize=0[imix]`);
+  filters.push(
+    `${mixInputs.map((label) => `[${label}]`).join("")}amix=inputs=${mixInputs.length}:duration=first:dropout_transition=0:normalize=0[imix]`,
+  );
   const processing = sanitizeAudioProcessingOptions(options.audioProcessing);
   const processingPlan = buildAudioProcessingFilter(processing);
   if (processing.mode === "ENHANCED_STEREO") {
@@ -256,9 +264,7 @@ export function buildInsertionAudioPostArguments(
     const parts = (processingPlan.filter ?? "").split(";");
     filters.push(`[imix]${parts[0]}`, ...parts.slice(1));
   } else {
-    const peak = options.audioProtection.enabled
-      ? 10 ** (options.audioProtection.peakCeilingDb / 20)
-      : 0.95;
+    const peak = options.audioProtection.enabled ? 10 ** (options.audioProtection.peakCeilingDb / 20) : 0.95;
     filters.push(`[imix]alimiter=limit=${number(peak)}:attack=5:release=100[aout]`);
   }
 

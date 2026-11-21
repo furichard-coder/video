@@ -18,20 +18,93 @@ describe("actual FFmpeg audio processing", () => {
     root = await mkdtemp(path.join(os.tmpdir(), "SceneryWalker-v069-audio-"));
     source = path.join(root, "stereo.mp4");
     await runProcess("ffmpeg", [
-      "-hide_banner", "-loglevel", "error", "-y",
-      "-f", "lavfi", "-i", "color=c=black:s=320x180:d=2:r=30",
-      "-f", "lavfi", "-i", "aevalsrc=0.15*sin(2*PI*440*t)|0.12*sin(2*PI*660*t):s=48000:d=2",
-      "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", source,
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=black:s=320x180:d=2:r=30",
+      "-f",
+      "lavfi",
+      "-i",
+      "aevalsrc=0.15*sin(2*PI*440*t)|0.12*sin(2*PI*660*t):s=48000:d=2",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-c:a",
+      "aac",
+      "-shortest",
+      source,
     ]);
     monoSource = path.join(root, "mono.mp4");
-    await runProcess("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", source, "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy", "-af", "pan=mono|c0=0.5*c0+0.5*c1", "-c:a", "aac", monoSource]);
+    await runProcess("ffmpeg", [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-i",
+      source,
+      "-map",
+      "0:v:0",
+      "-map",
+      "0:a:0",
+      "-c:v",
+      "copy",
+      "-af",
+      "pan=mono|c0=0.5*c0+0.5*c1",
+      "-c:a",
+      "aac",
+      monoSource,
+    ]);
     multichannelSource = path.join(root, "native-5.1.mp4");
-    await runProcess("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x180:d=2:r=30", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=5.1(side)", "-t", "2", "-c:v", "libx264", "-preset", "ultrafast", "-af", "aformat=sample_rates=48000:channel_layouts=5.1(side)", "-c:a", "ac3", "-b:a", "448k", "-channel_layout", "5.1(side)", "-shortest", multichannelSource]);
+    await runProcess("ffmpeg", [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=black:s=320x180:d=2:r=30",
+      "-f",
+      "lavfi",
+      "-i",
+      "anullsrc=r=48000:cl=5.1(side)",
+      "-t",
+      "2",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-af",
+      "aformat=sample_rates=48000:channel_layouts=5.1(side)",
+      "-c:a",
+      "ac3",
+      "-b:a",
+      "448k",
+      "-channel_layout",
+      "5.1(side)",
+      "-shortest",
+      multichannelSource,
+    ]);
   }, 30_000);
-  afterAll(async () => { if (root) await rm(root, { recursive: true, force: true }); });
+  afterAll(async () => {
+    if (root) await rm(root, { recursive: true, force: true });
+  });
 
   async function avDurationDeltaMs(filePath: string): Promise<number> {
-    const { stdout } = await runProcess("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type,duration", "-of", "json", filePath]);
+    const { stdout } = await runProcess("ffprobe", [
+      "-v",
+      "error",
+      "-show_entries",
+      "stream=codec_type,duration",
+      "-of",
+      "json",
+      filePath,
+    ]);
     const streams = (JSON.parse(stdout) as { streams: Array<{ codec_type: string; duration?: string }> }).streams;
     const video = Number(streams.find((stream) => stream.codec_type === "video")?.duration);
     const audio = Number(streams.find((stream) => stream.codec_type === "audio")?.duration);
@@ -42,30 +115,37 @@ describe("actual FFmpeg audio processing", () => {
     ["AAC", "aac"],
     ["AC3", "ac3"],
     ["EAC3", "eac3"],
-  ] as const)("produces real %s 5.1 in MP4 with copied video", async (codec, expectedCodec) => {
-    const output = path.join(root, `${codec}.mp4`);
-    const script = path.join(root, `${codec}.filter.txt`);
-    const built = buildAudioRemuxArguments(
-      source,
-      output,
-      { ...DEFAULT_AUDIO_PROCESSING_OPTIONS, mode: "VIRTUAL_SURROUND_5_1", codec },
-      script,
-    );
-    await writeFile(script, built.filterScript!, "utf8");
-    await runProcess("ffmpeg", built.args);
-    const info = await new MediaProbe().probe(output);
-    expect(info.videoCodec).toBe("h264");
-    expect(info.audioCodec).toBe(expectedCodec);
-    expect(info.audioChannels).toBe(6);
-    expect(info.audioChannelLayout).toMatch(/5\.1/);
-    expect(info.audioSampleRate).toBe(48_000);
-    expect(Math.abs((info.durationMs ?? 0) - 2_000)).toBeLessThanOrEqual(100);
-    expect(await avDurationDeltaMs(output)).toBeLessThanOrEqual(50);
-  }, 30_000);
+  ] as const)(
+    "produces real %s 5.1 in MP4 with copied video",
+    async (codec, expectedCodec) => {
+      const output = path.join(root, `${codec}.mp4`);
+      const script = path.join(root, `${codec}.filter.txt`);
+      const built = buildAudioRemuxArguments(
+        source,
+        output,
+        { ...DEFAULT_AUDIO_PROCESSING_OPTIONS, mode: "VIRTUAL_SURROUND_5_1", codec },
+        script,
+      );
+      await writeFile(script, built.filterScript!, "utf8");
+      await runProcess("ffmpeg", built.args);
+      const info = await new MediaProbe().probe(output);
+      expect(info.videoCodec).toBe("h264");
+      expect(info.audioCodec).toBe(expectedCodec);
+      expect(info.audioChannels).toBe(6);
+      expect(info.audioChannelLayout).toMatch(/5\.1/);
+      expect(info.audioSampleRate).toBe(48_000);
+      expect(Math.abs((info.durationMs ?? 0) - 2_000)).toBeLessThanOrEqual(100);
+      expect(await avDurationDeltaMs(output)).toBeLessThanOrEqual(50);
+    },
+    30_000,
+  );
 
   it("keeps Original Stereo as a copied two-channel track", async () => {
     const output = path.join(root, "original-stereo.mp4");
-    const built = buildAudioRemuxArguments(source, output, { ...DEFAULT_AUDIO_PROCESSING_OPTIONS, mode: "ORIGINAL_STEREO" });
+    const built = buildAudioRemuxArguments(source, output, {
+      ...DEFAULT_AUDIO_PROCESSING_OPTIONS,
+      mode: "ORIGINAL_STEREO",
+    });
     await runProcess("ffmpeg", built.args);
     const before = await new MediaProbe().probe(source);
     const after = await new MediaProbe().probe(output);
@@ -78,7 +158,10 @@ describe("actual FFmpeg audio processing", () => {
 
   it("keeps Enhanced Stereo at two channels and preserves duration", async () => {
     const output = path.join(root, "enhanced.mp4");
-    const built = buildAudioRemuxArguments(source, output, { ...DEFAULT_AUDIO_PROCESSING_OPTIONS, mode: "ENHANCED_STEREO" });
+    const built = buildAudioRemuxArguments(source, output, {
+      ...DEFAULT_AUDIO_PROCESSING_OPTIONS,
+      mode: "ENHANCED_STEREO",
+    });
     await runProcess("ffmpeg", built.args);
     const info = await new MediaProbe().probe(output);
     expect(info.audioChannels).toBe(2);
@@ -88,7 +171,10 @@ describe("actual FFmpeg audio processing", () => {
 
   it("maps mono to safe stereo without doubling duration or channel gain", async () => {
     const output = path.join(root, "mono-stereo.mp4");
-    const built = buildAudioRemuxArguments(monoSource, output, { ...DEFAULT_AUDIO_PROCESSING_OPTIONS, mode: "ENHANCED_STEREO" });
+    const built = buildAudioRemuxArguments(monoSource, output, {
+      ...DEFAULT_AUDIO_PROCESSING_OPTIONS,
+      mode: "ENHANCED_STEREO",
+    });
     await runProcess("ffmpeg", built.args);
     const info = await new MediaProbe().probe(output);
     expect(info.audioChannels).toBe(2);
@@ -98,7 +184,10 @@ describe("actual FFmpeg audio processing", () => {
 
   it("keeps an actual native 5.1 track bit-for-bit codec/layout compatible", async () => {
     const output = path.join(root, "preserved-5.1.mp4");
-    const built = buildAudioRemuxArguments(multichannelSource, output, { ...DEFAULT_AUDIO_PROCESSING_OPTIONS, mode: "PRESERVE_MULTICHANNEL" });
+    const built = buildAudioRemuxArguments(multichannelSource, output, {
+      ...DEFAULT_AUDIO_PROCESSING_OPTIONS,
+      mode: "PRESERVE_MULTICHANNEL",
+    });
     await runProcess("ffmpeg", built.args);
     const before = await new MediaProbe().probe(multichannelSource);
     const after = await new MediaProbe().probe(output);
@@ -110,9 +199,14 @@ describe("actual FFmpeg audio processing", () => {
   it("creates a real stereo-monitoring preview and measured meter cache for virtual 5.1", async () => {
     const fakeStore = {
       getProject: () => ({
-        sources: [{
-          id: "a".repeat(64), sourcePath: source, fileName: "stereo.mp4", kind: "VIDEO",
-        }],
+        sources: [
+          {
+            id: "a".repeat(64),
+            sourcePath: source,
+            fileName: "stereo.mp4",
+            kind: "VIDEO",
+          },
+        ],
       }),
     } as unknown as ProjectStore;
     const service = new AudioPreviewService(path.join(root, "preview"), fakeStore);
@@ -163,5 +257,33 @@ describe("actual FFmpeg audio processing", () => {
     const cleaned = await service.cleanup();
     expect(cleaned.removedFiles).toBeGreaterThanOrEqual(1);
     await expect(stat(stalePartial)).rejects.toMatchObject({ code: "ENOENT" });
+  }, 30_000);
+
+  it("keeps audio previews on their assigned TEMP root when later jobs switch roots", async () => {
+    const fakeStore = {
+      getProject: () => ({
+        timelineRevision: 21,
+        sources: [{ id: "c".repeat(64), sourcePath: source, fileName: "stereo.mp4", kind: "VIDEO" }],
+      }),
+    } as unknown as ProjectStore;
+    const firstRoot = path.join(root, "audio-temp-e");
+    const secondRoot = path.join(root, "audio-temp-c");
+    let nextRoot = firstRoot;
+    const service = new AudioPreviewService(path.join(root, "audio-preview-legacy"), fakeStore, undefined, {
+      readRoots: () => [firstRoot, secondRoot],
+      chooseWriteRoot: async () => nextRoot,
+    });
+    await service.initialize();
+    const request = {
+      assetId: "c".repeat(64),
+      durationMs: 1_000,
+      options: { ...DEFAULT_AUDIO_PROCESSING_OPTIONS, mode: "ORIGINAL_STEREO" as const },
+    };
+    const first = await service.create({ ...request, startMs: 100 });
+    expect(await service.resolveExisting(first.cacheKey)).toContain(firstRoot);
+    nextRoot = secondRoot;
+    expect((await service.create({ ...request, startMs: 100 })).cacheStatus).toBe("HIT");
+    const second = await service.create({ ...request, startMs: 300 });
+    expect(await service.resolveExisting(second.cacheKey)).toContain(secondRoot);
   }, 30_000);
 });

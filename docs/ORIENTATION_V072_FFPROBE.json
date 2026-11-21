@@ -1,0 +1,89 @@
+{
+  "capturedAt": "2026-09-14",
+  "readOnlyEvidence": true,
+  "abnormal": {
+    "fileName": "VID_20260718_090633.mp4",
+    "assetId": "741a49271d4fde53b9667e160bdbce8ed5d88165b2cfcc29a5b46575f8a4ba9e",
+    "usage": {
+      "introIndex": 23,
+      "introInMs": 5500,
+      "introOutMs": 12300,
+      "mainTimelineIndex": 49
+    },
+    "sha256": "0CCB6ABA1DB42E2900039B59474BC017B391360ACCD97DA7073403EAA0C4EC39",
+    "video": {
+      "codec": "h264",
+      "profile": "High",
+      "level": 51,
+      "width": 3840,
+      "height": 2160,
+      "sampleAspectRatio": null,
+      "displayAspectRatio": null,
+      "pixelFormat": "yuv420p",
+      "rFrameRate": "30/1",
+      "avgFrameRate": "50940000/1699117",
+      "timeBase": "1/90000",
+      "displayMatrix": "0 65536 0; -65536 0 0; 0 0 1073741824",
+      "rotation": -90,
+      "canonicalRotation": 270,
+      "visualWidth": 2160,
+      "visualHeight": 3840
+    }
+  },
+  "normalPortraitComparison": {
+    "fileName": "VID_20260718_113747.mp4",
+    "sha256": "BAA1DE6037A56EC321699A9845A017CBF229F3A87BDCBAAB6DE05A36754A352C",
+    "video": {
+      "codec": "h264",
+      "profile": "High",
+      "level": 52,
+      "width": 3840,
+      "height": 2160,
+      "sampleAspectRatio": null,
+      "displayAspectRatio": null,
+      "pixelFormat": "yuv420p",
+      "rFrameRate": "60/1",
+      "avgFrameRate": "406710000/6785081",
+      "timeBase": "1/90000",
+      "displayMatrix": "0 65536 0; -65536 0 0; 0 0 1073741824",
+      "rotation": -90,
+      "canonicalRotation": 270,
+      "visualWidth": 2160,
+      "visualHeight": 3840
+    }
+  },
+  "landscapeComparison": {
+    "fileName": "VID_20260718_102847_00_201.mp4",
+    "sha256": "11B6C2FB614F50BE0B664AC2A52B48207AA5022AEC6764B60BB27268FC28876C",
+    "video": {
+      "codec": "hevc",
+      "profile": "Main",
+      "width": 3840,
+      "height": 2160,
+      "sampleAspectRatio": "1:1",
+      "displayAspectRatio": "16:9",
+      "pixelFormat": "yuvj420p",
+      "rFrameRate": "30000/1001",
+      "avgFrameRate": "30000/1001",
+      "timeBase": "1/30000",
+      "displayMatrix": null,
+      "rotation": 0,
+      "canonicalRotation": 0,
+      "visualWidth": 3840,
+      "visualHeight": 2160
+    }
+  },
+  "actualFixedQsvOutput": {
+    "codec": "h264_qsv",
+    "width": 640,
+    "height": 360,
+    "sampleAspectRatio": "1:1",
+    "displayAspectRatio": "16:9",
+    "pixelFormat": "yuv420p",
+    "rFrameRate": "30000/1001",
+    "avgFrameRate": "30000/1001",
+    "timeBase": "1/30000",
+    "rotationSideData": null,
+    "visuallyUpright": true
+  }
+}

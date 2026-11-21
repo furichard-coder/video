@@ -140,7 +140,7 @@ describe("AI story and subtitle pipeline", () => {
       expect.arrayContaining([
         expect.objectContaining({
           origin: "AI_SPEECH",
-          reviewStatus: "CONFIRMED",
+          reviewStatus: "DRAFT",
           sourceAssetId: expect.any(String),
           sourceInMs: 500,
           sourceOutMs: 1300,
@@ -162,7 +162,7 @@ describe("AI story and subtitle pipeline", () => {
     );
     const calls = analyzeStoryFrames.mock.calls.length;
     const second = await service.generateSubtitles({ includeSpeechTranscription: true });
-    expect(second.generatedCount).toBe(0);
+    expect(second.generatedCount).toBe(2);
     expect(analyzeStoryFrames).toHaveBeenCalledTimes(calls);
     expect(provider.testStoryConnection).toHaveBeenCalledTimes(1);
     expect(await sha256(sourcePath)).toBe(before);
@@ -274,7 +274,7 @@ describe("AI story and subtitle pipeline", () => {
     });
     expect(result.project.subtitleCues[0]).toMatchObject({
       text: "森林植被有助保水與穩定土壤",
-      reviewStatus: "CONFIRMED",
+      reviewStatus: "DRAFT",
       aiAnalysisVersion: AI_STORY_ANALYZER_VERSION,
     });
     expect(codex.testConnection).toHaveBeenCalledTimes(1);
@@ -286,7 +286,7 @@ describe("AI story and subtitle pipeline", () => {
       scopes: ["INTRO"],
       targetCueCount: 1,
     });
-    expect(cached.generatedCount).toBe(0);
+    expect(cached.generatedCount).toBe(1);
     expect(codex.testConnection).toHaveBeenCalledTimes(1);
     expect(codex.analyzeStoryFramesBatch).toHaveBeenCalledTimes(1);
   });
@@ -334,7 +334,7 @@ describe("AI story and subtitle pipeline", () => {
     expect(result.project.subtitleCues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "main-draft", timelineScope: "MAIN", reviewStatus: "DRAFT" }),
-        expect.objectContaining({ timelineScope: "INTRO", origin: "AI_VISUAL", reviewStatus: "CONFIRMED" }),
+        expect.objectContaining({ timelineScope: "INTRO", origin: "AI_VISUAL", reviewStatus: "DRAFT" }),
       ]),
     );
   });

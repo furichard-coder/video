@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "generatedFor": "v0.82 read-only recovery audit",
+  "privacy": "Source paths, checkpoint IDs and media filenames are intentionally omitted.",
+  "oldCheckpoint": {
+    "producer": "v0.80",
+    "projectUpdatedAt": "2026-09-27T12:39:31",
+    "pictureBaseSignature": "390DCD38581B00FAA0AAE3D2BA48D94B9D25E4ADB01CE76FE97DBF65861FDF66"
+  },
+  "currentProject": {
+    "appVersion": "v0.82",
+    "projectUpdatedAt": "2026-09-28T15:50:42",
+    "canonicalPictureSignature": "9066CF54DCE4BF8DADF771EF7C2D397B7009E7960F4D6D2398B9273D6F8EC0A0"
+  },
+  "fieldDiff": [
+    {
+      "category": "sourceMedia",
+      "field": "selectedSourceIdentity",
+      "oldValue": "Old manifest snapshot unavailable; legacy segment keys reference 59 selected source identities.",
+      "newValue": "59/59 source files present; observed size and exact mtime match the current manifest, and none have mtime after checkpoint creation.",
+      "renderAffecting": true,
+      "result": "BOUNDED_CONTINUITY_EVIDENCE",
+      "limitation": "The old checkpoint did not store a full source-content hash; metadata alone cannot prove cryptographic byte identity."
+    },
+    {
+      "category": "timeline",
+      "field": "orderedClipsAndTrimRanges",
+      "oldValue": "92 saved selections: 25 Intro and 67 Main, transition 0.7 seconds.",
+      "newValue": "All 92 current selections match asset identity, order, IN/OUT and insertion identity; transition 0.7 seconds.",
+      "renderAffecting": true,
+      "result": "SAME_FOR_RECORDED_SELECTIONS"
+    },
+    {
+      "category": "videoRender",
+      "field": "wholeProjectPictureSignature",
+      "oldValue": "390DCD38581B00FAA0AAE3D2BA48D94B9D25E4ADB01CE76FE97DBF65861FDF66",
+      "newValue": "9066CF54DCE4BF8DADF771EF7C2D397B7009E7960F4D6D2398B9273D6F8EC0A0",
+      "renderAffecting": true,
+      "result": "DIFFERENT_LEGACY_VS_CANONICAL_HASH",
+      "limitation": "No old Project snapshot exists, so this hash difference cannot be attributed uniquely to picture content, schema/defaults or metadata."
+    },
+    {
+      "category": "videoRender",
+      "field": "levelOneDeterministicSegmentKeys",
+      "oldValue": "10 recorded v2 keys.",
+      "newValue": "10 recalculated v2 keys; all 10 match in recorded order.",
+      "renderAffecting": true,
+      "result": "SAME"
+    },
+    {
+      "category": "audioRender",
+      "field": "baseAudioAndFinalMix",
+      "oldValue": "No old Project snapshot or completed audio master is available.",
+      "newValue": "Current audio settings exist; the old whole-project hash cannot isolate which audio field, if any, changed.",
+      "renderAffecting": true,
+      "result": "UNKNOWN_REBUILD_FINAL_AUDIO_IF_NEEDED"
+    },
+    {
+      "category": "storage",
+      "field": "temporaryLocations",
+      "oldValue": "Single primary TEMP location on E:.",
+      "newValue": "E: primary with configurable C: fallback.",
+      "renderAffecting": false,
+      "result": "LOCATION_ONLY_NOT_MEDIA_IDENTITY"
+    },
+    {
+      "category": "storage",
+      "field": "outputAndArtifactPaths",
+      "oldValue": "Paths recorded in the protected checkpoint.",
+      "newValue": "New jobs may use other configured TEMP locations; completed artifacts remain at their recorded paths.",
+      "renderAffecting": false,
+      "result": "LOCATION_ONLY"
+    },
+    {
+      "category": "appAndUiMetadata",
+      "field": "versionAndYouTubeSettings",
+      "oldValue": "v0.80 checkpoint; YouTube settings are outside the ProjectManifest render identity.",
+      "newValue": "v0.82; YouTube/upload and panel settings remain excluded from render compatibility.",
+      "renderAffecting": false,
+      "result": "IGNORED_FOR_RENDER"
+    }
+  ],
+  "artifactValidation": {
+    "recordedCompletedSegments": 10,
+    "levelOneKeysMatchingCurrentProject": 10,
+    "mediaAndHashValidationPassed": 10,
+    "checkpointDeclaredBytes": 72527956978,
+    "checkpointDeclaredDurationMs": 8976508,
+    "ffprobeAggregateDurationMsApprox": 8976718,
+    "completedBaseMasterAvailable": false,
+    "recoverablePartialMkvFound": false
+  },
+  "decision": "Reuse the 10 validated level-one segments without re-encoding them. The unfinished base picture pass and final audio/mux still require work; no full long-project render was started during this audit. Preserve the v0.80 checkpoint and all source artifacts read-only, and create a separate v0.82 migration record before any continuation."
+}

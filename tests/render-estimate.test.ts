@@ -156,31 +156,67 @@ describe("render preflight estimate", () => {
 
   it("covers the A-E resource matrix independently of free-disk and available-RAM pressure", () => {
     const short16 = buildRenderEstimate(
-      "C:\\Output\\a.mp4", 70 * 1024 ** 3, 30_000, "1080P", "H265_QSV", true,
-      workload(3, 1920, 1080, 30), 10 * 1024 ** 3, 16 * 1024 ** 3,
+      "C:\\Output\\a.mp4",
+      70 * 1024 ** 3,
+      30_000,
+      "1080P",
+      "H265_QSV",
+      true,
+      workload(3, 1920, 1080, 30),
+      10 * 1024 ** 3,
+      16 * 1024 ** 3,
     );
     const crowded16 = buildRenderEstimate(
-      "C:\\Output\\b.mp4", 70 * 1024 ** 3, 60_000, "1440P", "H265_QSV", true,
-      workload(30, 4000, 3000, 30), 8 * 1024 ** 3, 16 * 1024 ** 3,
+      "C:\\Output\\b.mp4",
+      70 * 1024 ** 3,
+      60_000,
+      "1440P",
+      "H265_QSV",
+      true,
+      workload(30, 4000, 3000, 30),
+      8 * 1024 ** 3,
+      16 * 1024 ** 3,
     );
     const sameAt20 = buildRenderEstimate(
-      "C:\\Output\\c.mp4", 70 * 1024 ** 3, 60_000, "1440P", "H265_QSV", true,
-      workload(30, 4000, 3000, 30), 12 * 1024 ** 3, 20 * 1024 ** 3,
+      "C:\\Output\\c.mp4",
+      70 * 1024 ** 3,
+      60_000,
+      "1440P",
+      "H265_QSV",
+      true,
+      workload(30, 4000, 3000, 30),
+      12 * 1024 ** 3,
+      20 * 1024 ** 3,
     );
     const disk20 = buildRenderEstimate(
-      "C:\\Output\\d.mp4", 20 * 1024 ** 3, 60_000, "1080P", "H265_QSV", true,
-      workload(12), 10 * 1024 ** 3, 16 * 1024 ** 3,
+      "C:\\Output\\d.mp4",
+      20 * 1024 ** 3,
+      60_000,
+      "1080P",
+      "H265_QSV",
+      true,
+      workload(12),
+      10 * 1024 ** 3,
+      16 * 1024 ** 3,
     );
     const disk70LowRam = buildRenderEstimate(
-      "C:\\Output\\e.mp4", 70 * 1024 ** 3, 60_000, "1440P", "H265_QSV", false,
-      workload(30), 2.5 * 1024 ** 3, 16 * 1024 ** 3,
+      "C:\\Output\\e.mp4",
+      70 * 1024 ** 3,
+      60_000,
+      "1440P",
+      "H265_QSV",
+      false,
+      workload(30),
+      2.5 * 1024 ** 3,
+      16 * 1024 ** 3,
     );
     expect(short16.canRender).toBe(true);
     expect(crowded16.modeEstimates.lowMemory.usesSegmentedPipeline).toBe(true);
     expect(sameAt20.estimatedOutputBytes).toBe(crowded16.estimatedOutputBytes);
-    expect(disk20.canRender).toBe(true);
+    expect(disk20.canRender, "20 GiB available space should not be blocked by the advisory margin alone").toBe(true);
     expect(disk20.safetyMarginBytes).toBe(20 * 1024 ** 3);
-    expect(disk20.requiredFreeBytes).toBeGreaterThan(disk20.currentFreeBytes);
+    expect(disk20.requiredFreeBytes).toBeLessThanOrEqual(disk20.currentFreeBytes);
+    expect(disk20.warning ?? "").not.toContain("至少 20 GB 安全餘量");
     expect(disk70LowRam.canRender).toBe(true);
     expect(disk70LowRam.modeEstimates.normal.warningLevel).not.toBe("NONE");
   });

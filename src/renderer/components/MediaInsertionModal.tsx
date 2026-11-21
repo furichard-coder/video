@@ -105,8 +105,14 @@ function InsertionMediaPreview({
           if (player.paused) void player.play();
           else player.pause();
         }}
-        onPlay={() => { setPlaying(true); syncAudio(true, true); }}
-        onPause={() => { setPlaying(false); syncAudio(false); }}
+        onPlay={() => {
+          setPlaying(true);
+          syncAudio(true, true);
+        }}
+        onPause={() => {
+          setPlaying(false);
+          syncAudio(false);
+        }}
       />
       <button
         type="button"
@@ -136,7 +142,9 @@ function InsertionMediaPreview({
     <div className="insertion-image-preview-with-audio">
       <img className="insertion-media-preview" src={url} alt={`${asset.fileName} 預覽`} />
       {(audioItem?.sfxEnabled || audioItem?.bgmEnabled) && (
-        <button type="button" onClick={() => syncAudio(true, true)}>▶ 試聽 SFX／BGM</button>
+        <button type="button" onClick={() => syncAudio(true, true)}>
+          ▶ 試聽 SFX／BGM
+        </button>
       )}
       {audioItem?.sfxEnabled && <audio ref={sfxRef} src={PHOTO_SOUND_PREVIEW_URL} preload="auto" />}
       {bgmTrack && audioItem?.bgmEnabled && (

@@ -1,0 +1,78 @@
+{
+  "capturedAt": "2026-09-13T19:12:44.5863679+08:00",
+  "project": "我的素材專案",
+  "sources": [
+    "F:\\DCIM\\Camera01\\VID_20260718_112442_00_209.mp4",
+    "F:\\DCIM\\Camera01\\VID_20260718_100111_00_199.mp4",
+    "F:\\DCIM\\Camera01\\VID_20260718_102353_00_200.mp4",
+    "F:\\DCIM\\Camera01\\VID_20260718_103554_00_202.mp4"
+  ],
+  "clipSeconds": 3,
+  "note": "Four isolated segment jobs; each reads two project 4K clips, normalizes to 1080p, applies xfade, and uses h264_qsv. Hardware row additionally requests QSV decode.",
+  "results": [
+    {
+      "mode": "normal-2",
+      "jobs": 2,
+      "decoder": "cpu",
+      "encoder": "h264_qsv",
+      "fps": 13.61,
+      "speed": 0.454,
+      "cpuPercent": 40.89,
+      "gpuPercent": 9.52,
+      "gpuEncodePercent": 0,
+      "gpuDecodePercent": 2.85,
+      "ramPeakBytes": 2059698176,
+      "ssdBytesPerSecond": 6227353.85,
+      "processingSeconds": 50.194,
+      "status": "PASS"
+    },
+    {
+      "mode": "normal-3",
+      "jobs": 3,
+      "decoder": "cpu",
+      "encoder": "h264_qsv",
+      "fps": 12.31,
+      "speed": 0.411,
+      "cpuPercent": 41.9,
+      "gpuPercent": 12.45,
+      "gpuEncodePercent": 0,
+      "gpuDecodePercent": 2.1,
+      "ramPeakBytes": 2609541120,
+      "ssdBytesPerSecond": 2636908.77,
+      "processingSeconds": 55.528,
+      "status": "PASS"
+    },
+    {
+      "mode": "normal-4",
+      "jobs": 4,
+      "decoder": "cpu",
+      "encoder": "h264_qsv",
+      "fps": 15.73,
+      "speed": 0.525,
+      "cpuPercent": 87.38,
+      "gpuPercent": 14.24,
+      "gpuEncodePercent": 0,
+      "gpuDecodePercent": 2.95,
+      "ramPeakBytes": 3951538176,
+      "ssdBytesPerSecond": 1311131.62,
+      "processingSeconds": 43.453,
+      "status": "PASS"
+    },
+    {
+      "mode": "qsv-decode-encode-3",
+      "jobs": 3,
+      "decoder": "qsv",
+      "encoder": "h264_qsv",
+      "fps": 20.16,
+      "speed": 0.673,
+      "cpuPercent": 29.63,
+      "gpuPercent": 77.79,
+      "gpuEncodePercent": 0,
+      "gpuDecodePercent": 37,
+      "ramPeakBytes": 3373166592,
+      "ssdBytesPerSecond": 6450787.68,
+      "processingSeconds": 33.896,
+      "status": "PASS"
+    }
+  ]
+}

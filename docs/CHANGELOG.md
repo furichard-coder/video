@@ -1,5 +1,82 @@
 # SceneryWalker 素材整理 App 變更紀錄
 
+## v0.88.0 — 連續字幕 Review 與逐筆 AI 提案（2026-10-03）
+
+- 字幕 Review 改為左側獨立清單、右側固定 Preview；Project clock 驅動跨影片／照片接續、精確 SRT overlay 與 active row，編輯／保存不再隱式 seek。
+- 修正片段交界的舊 pause/timeupdate 覆蓋續播旗標、代理來源與新片段短暫錯配、照片時鐘累積誤差，以及清單 offsetTop 座標混用造成固定焦點失效。
+- 加入 Space／方向鍵、上一／下一字幕、±2 秒、播放速度、回到目前字幕，以及手動捲動四秒的跟隨暫停。文字輸入控制不攔截 Space。
+- 新增可選的 AI 逐筆 KEEP/EDIT 檢查、人工確認、持久工作位置與分類錯誤；使用最新草稿並防止過期提案覆蓋人工編輯。既有 SRT 可獨立匯入；正式字幕只在明確輸出時保存，覆寫前永久備份。
+- 真實 Electron 三段影片連播、影片／照片混合播放、100 字幕固定焦點與 Space／文字輸入通過。完整驗收與限制見 `V088_SUBTITLE_REVIEW_REPORT.md`。
+- 單筆真實 OpenAI 圖片 review 回覆 billing/quota 429，未生成 KEEP/EDIT；不宣稱 live AI 成功。Proxy review 不是 Final xfade 合成預覽，也未保證零音訊間隙。
+
+## v0.87.0 — 字幕恢復與獨立影片草稿（2026-10-02）
+
+- 修正 Subtitle Studio 主內容高度與捲動結構，header/footer 保持可見、字幕清單可鍵盤及 scrollbar 捲動，窄版切成單欄；Electron DOM 驗收確認 63 筆既有草稿可見，最後一筆可捲到。
+- 新增 VIDEO_FIRST 獨立影片分析模式。只有具本專案 projectId 且時長相容的成功輸出使用 PROJECT_AWARE；其他／人工選取影片直接分析影片全長並保存獨立工作區，不提供直接套入不相容專案時間線的操作。
+- 加入保存前影片 size／mtime 與 project ID／timelineRevision 檢查、工作 checkpoint 的影片來源持續性、動態模型 catalog、真實 JPEG／strict JSON 能力 probe，以及受限的同 provider Auto fallback。
+- OpenAI `/v1/models` live 請求成功；真實圖片／JSON 請求回覆 `HTTP 429 / credit_balance_exhausted`，未產生 AI 字幕草稿。因此真實 3–5 分鐘 AI 生成與內容品質驗收尚未完成，mock／pipeline 測試不視為 live API 成功。
+- 真實 180 秒取樣通過：90 frames、5 batches、批次 JPEG peak 約 6.02 MiB、完成後圖片 cache 0 bytes；scene boundary 與每個 Intro／Photo 樣本不因相似 hash 而消失，runtime 顯示實際 scene／dedup 計數。前處理效能／真實去重收益仍待獨立量測。
+- TypeScript、production build、Windows 封裝及 packaged smoke 通過；最終回歸結果與曾遇到的負載 timeout 詳列 VERIFICATION。v0.86 release 與 74,888,192,283-byte 成品保留原值。
+
+## v0.86.0 — AI 字幕成品選擇與草稿安全邊界（2026-10-02）
+
+- Output history 新增 projectId 與明確 success provenance；字幕頁依同專案最新成功 Final CONCAT、最近成功 CONCAT、人工影片的順序選擇唯讀分析來源，並顯示 ffprobe 基本資訊。
+- 人工分析來源支援 MP4／MOV／MKV；此流程只讀取 metadata，不會啟動完整影片重新 Encode。
+- AI 故事／畫面字幕改為 `DRAFT`，必須人工確認後才會進入既有正式 SRT export；現有正式字幕保持不變。
+- 新增 1–60 秒取樣間隔與 10–30 張 batch 的純規則及回歸測試，並保留舊 output history 的 recent-render 相容退路。
+- 已確認 2026-09-30 實際 4K Final Output 存在（74,888,192,283 bytes；output history 與 completion marker 時間一致），但 v0.86 開發與測試不讀取全片、不送付費 AI，也不改寫該檔案。
+- 已接入實際 FFmpeg scene／black-frame 掃描、連續 dHash 去重、全片滾動批次、OpenAI／Gemini adapter、原子 `.ai-draft.srt`、逐筆校對及附近畫面重生。人工影片與專案時間線不符時，全片與單筆重生都會停止。
+- 未使用 74.9 GB 成品執行全片 AI，也未送 live 付費請求；真實長片耗時、品質與 token 成本仍待受控驗收。
+
+## v0.85.0 — Resume Artifact Relocation（2026-09-30）
+
+- 修復 checkpoint 舊絕對路徑遺失時直接顯示 `NEEDS_REBUILD` 的 regression。相容性分析與實際 Resume 現在都會搜尋已登錄 TEMP roots、驗證搬移後 Artifact，並以 overlay 重新 Mapping。
+- 支援檔案被平移到不同磁碟與不同資料夾層級；只有大小、ffprobe 媒體屬性與既有 SHA-256 全部通過才可重用。原 checkpoint JSON 與媒體不會被掃描流程改寫、搬移或刪除。
+- 新增回歸驗證：報告路徑可重新識別搬移片段，實際 Resume 即使沒有先開報告也會復原，且已完成片段不再次進 encoder。
+- Windows v0.85.0 package 與 packaged smoke 通過；封裝沿用 v0.84 release 中雜湊符合 pinned value 的核准快門音效，沒有替換或重製音效。
+
+## v0.84.0 — Resume Storage Recovery Wizard（2026-09-29）
+
+- 修正 v0.83 搬移成功後僅更新分析／提示、未呼叫 `concat:resume` 的控制流程；新版使用重新分析的即時結果 gate，安全時才進入真正續轉。
+- 續轉精靈列出每個完成片段、大小、來源／目的地與狀態；支援手動搬移後在已登錄 TEMP 根目錄內有界掃描，依檔案大小、ffprobe 媒體屬性及 SHA-256 找回改名或跨槽片段，更新 copy-on-write checkpoint／內容位置索引，再重新計算 E/C 容量。
+- 路徑與磁碟代號只屬 Artifact Location，不影響畫面身份。手動複製的雙份檔會回報 duplicate；不自動刪原檔。檔案失敗或空間仍不足時保留舊成果並停在復原流程。
+- 目前真實工作 10／10 個 level-1 MKV 仍在 E:，67.547 GiB／8,976,508 ms；都通過存在、大小與 ffprobe 讀取檢查。並非最終 master，下游 Base Master、音訊與 mux 尚須執行。未實際執行長片搬移或續轉。
+- 安全限制：大型 App copy 的 byte progress／速度／ETA 與 copy-only Cancel、經確認刪除 duplicate 原檔、精靈跨重啟狀態保存尚未交付。這些不足不影響原始片段保護，但不能視為整套人工／自動搬移 UX 均已完成。
+
+細節與真實專案逐檔盤點：`docs/V084_RESUME_STORAGE_RECOVERY_REPORT.md`。
+
+驗證：TypeScript PASS、完整回歸 78 files／498 tests PASS、短媒體跨流程實際 Resume 整合測試 PASS、production build、Electron source／packaged smoke PASS。Production dependencies audit 0 vulnerabilities；開發依賴 audit 有 1 個 moderate `undici`。獨立封裝於 `release/v0.84.0/SceneryWalkerSourceOrganizer-win32-x64/`；EXE SHA-256 `FFD0B56900E9C569E4C2A99A7E20F1A62CAAE61AA56AF5AFCF5909750350BE7F`，`app.asar` SHA-256 `15A162205FB2335050635B4AFC6AA92DF66A07B4D7E8068016154D3FD03EF096`。
+
+## v0.83.0 — TEMP Storage Recovery（2026-09-29）
+
+- E:／非系統 TEMP 的新預設 Soft Reserve 改為 1 GiB；C: 系統 TEMP 為 2 GiB，並可逐槽編輯、保存。標準路徑上的舊版 20／30 GiB 預設值會遷移；自訂值不任意重置。建議餘量與 Runtime Hard Safety 分開，不能再因 20%／20 GiB 建議餘量直接判為 FFmpeg 磁碟寫滿。
+- `concat:resume` 先驗證 checkpoint 並分析 E/C 容量與剩餘同時峰值，再決定直接續轉、改寫未開始的新工作、提出經確認的搬移計畫或安全暫停。FFmpeg／Windows `-28 ENOSPC` 與 App 預防性暫停分別標示。
+- 經使用者明確確認後才可搬移已完成且通過 SHA／ffprobe 的片段；跨磁碟複製、檢查、無覆蓋發布、checkpoint／不可變位置索引保存並讀回確認後才刪來源。搬移方案會在少量候選中尋找接近缺口的組合，避免整批複製；計畫過期時重新分析。
+- 舊版 TEMP 有界盤點僅掃描設定根目錄與明確命名的 SceneryWalker 目錄，UNKNOWN／partial／目前 Resume 必需檔一律不可刪。可重建 cache 僅列為候選，依賴未證明前也不可刪；目前機器沒有證據充分的可清理舊版 artifact，故清理執行器採 fail-closed。
+- 真實長片本輪只做唯讀盤點，未搬移或刪除 E/C 上的片段、checkpoint、來源或成品，也未啟動完整長片續轉。本機資料與 54.1 GiB 判斷式詳見 `docs/V083_STORAGE_RECOVERY_REPORT.md`。
+
+驗證：TypeScript PASS、完整回歸 78 files／496 tests PASS、最後 registry 安全修正 focused checkpoint 21/21 PASS、production build、Electron source／packaged smoke PASS。Production dependencies audit 0 vulnerabilities；完整開發依賴 audit 有 1 個 moderate `undici`。獨立封裝於 `release/v0.83.0/SceneryWalkerSourceOrganizer-win32-x64/`；EXE SHA-256 `00A6BA6366C533DC56EF29FC92557D02AA458297D90D7A414C995BDD30F51F24`，`app.asar` SHA-256 `2C128B3E2C159CE87A6EC678906AF022EBC79B76B8AF84A4BF61F7304B5B29D9`。
+
+## v0.82.0 — Resume Recovery（2026-09-29）
+
+- Resume 拒絕點位於舊版 `src/main/services/concat-render.ts:2395`：舊邏輯以 picture/base signature 比對，並以 `projectUpdatedAt` 作為額外閘門；任一不符即拒絕整份 checkpoint。本案兩項比較均不符。
+- 本案缺少 checkpoint 時的完整 Project snapshot，故整體 VIDEO／TIMELINE／BASE_AUDIO 差異仍無法定論。92 筆 clip selection（Intro 25、Main 67）與 0.7 秒 transition 符合目前 manifest；59/59 個來源檔案的即時 size／mtime 符合目前 manifest，且修改時間均不晚於 checkpoint 建立時間。
+- 唯讀 `legacyLevelOneIdsForProject` 對照結果為 10/10 exact match；59/59 個來源 size／mtime 連續，10 個 segment 再通過媒體參數與 SHA 驗證，analyzer 判定 `VALIDATED_SEGMENT_REUSE`。可重用首層片段 8,976,508 ms／72,527,956,978 bytes，可避免重編這 10 段；未找到 base partial 或 audio master，後續 Base picture、audio、mux 階段仍須執行。未執行完整長片 render。
+- TEMP 路徑曾進入舊 picture signature，構成路徑變更引發 false mismatch 的風險；本案同時有 `projectUpdatedAt` 與 picture signature mismatch，不能將根因簡化為 E:／C: 變更。YouTube 上傳設定不在 render hash 中。
+- 新恢復流程建立獨立 copy-on-write checkpoint；原始 checkpoint 與 artifacts 保留。v0.82 的 segment 驗證使用 deterministic segment identity 及媒體參數／內容檢查；舊格式僅在 legacy identity、來源連續性及輸出驗證全部吻合時重用。
+- 驗證：concat integration 47/47、render-checkpoint 18/18、完整回歸 76 files／484 tests、後續介面安全修改的 focused 10/10、typecheck、production build、source／packaged smoke PASS；npm audit 0 vulnerabilities。Windows x64 可攜版獨立封裝於 `release/v0.82.0/SceneryWalkerSourceOrganizer-win32-x64/`，EXE SHA-256 `200227FC9F4115BBE9A32447479B74DF8E55163C8FBB3194C84513E44D03F6CA`，`app.asar` SHA-256 `69295BCF91D4E2EBC6E5AF292331CDE34038FD1D1AE614D52238B9DD65E1DE49`。
+
+逐欄差異見 `docs/RESUME_COMPAT_DIFF.json`；Recovery evidence: `docs/V082_RESUME_RECOVERY_REPORT.md`.
+
+## v0.81.0 — 2026-09-28
+
+- 完成 E: 主要／C: 使用者 TEMP 下 SceneryWalker 備援的多磁碟 TEMP。兩槽可變更、上下調整、手動選址或自動備援；逐磁碟保留 E: 至少 20 GiB、C: 至少 30 GiB。僅在新工作開始前選址，沒有中途搬移或鏡像。
+- Intermediate、segment、Base Master partial、音訊 TEMP/filter 與新建 Proxy／字幕／音訊試聽快取均遵守選址；既有快取仍可跨槽讀取。Checkpoint 記錄片段絕對路徑及磁碟，跨槽 concat／續轉直接讀取各路徑。
+- 磁碟預檢不把 E+C 當成單一工作容量，Final Output 另有硬閘；TEMP 和成品在同一槽時合計需求。執行時逐槽顯示 free、工作檔、reserve、目前與下一工作的磁碟，容量不足於工作邊界安全暫停。
+- v0.79 唯讀復原及 v0.80 copy-on-write checkpoint 保持相容；舊片段不搬移。磁碟代號改變時可在所有完成片段的大小、SHA-256、ffprobe 驗證後重新對應路徑。TEMP 設定不再使畫面識別改變或重編既有 Master。
+- 短片 E/C 真實跨磁碟 concat 與更換 TEMP 後只重試音訊封裝通過；未用完整長片測試，也未碰原專案的舊續轉檔或來源素材。
+- Windows x64 可攜版獨立封裝於 `release/v0.81.0/SceneryWalkerSourceOrganizer-win32-x64/`；EXE SHA-256 `1042FECB2A3FB52F16A4B812F1D81EB6F9941DE6D4EED83BDF5734DD5F0875C6`。未覆蓋 v0.79／v0.80 release。
+
 本檔案是每次可交付功能變更的簡短索引。完成一個階段後，必須同步更新本檔案、`README.md` 與 `VERIFICATION.md`；只有通過建置／測試的內容才可標記為完成。
 
 ## v0.80.0 — 2026-09-27
