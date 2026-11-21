@@ -1,4 +1,6 @@
 import path from "node:path";
+import os from "node:os";
+import { mkdtemp, rm } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   ABSOLUTE_DISK_SAFETY_RESERVE_BYTES,
@@ -8,11 +10,48 @@ import {
   isEnospcError,
   remainingAdditionalWriteBytes,
   safetyReserveBytes,
+  splitRemainingWriteByVolume,
+  remainingReservedWriteBytes,
+  RenderDiskMonitor,
 } from "../src/main/services/render-disk-space";
+import { pictureBaseStageRequired } from "../src/main/services/concat-render";
 
 const GIB = 1024 ** 3;
 
 describe("render disk reliability", () => {
+  it("does not reserve a new picture/base stage for an audio-only resume", () => {
+    expect(pictureBaseStageRequired({ outputPath: "E:\\Masters\\verified.mkv" })).toBe(false);
+    expect(pictureBaseStageRequired(undefined)).toBe(true);
+  });
+
+  it("subtracts bytes already written from an active job reservation", () => {
+    const estimated = 40 * GIB;
+    expect(remainingReservedWriteBytes(estimated, 2 * GIB, 7 * GIB)).toBe(35 * GIB);
+    expect(remainingReservedWriteBytes(estimated, 2 * GIB, 50 * GIB)).toBe(0);
+  });
+
+  it("reports an offline inactive primary without throwing", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "render-monitor-offline-"));
+    try {
+      const monitor = new RenderDiskMonitor({
+        tempRoot: path.join(root, "missing-primary"),
+        outputPath: path.join(root, "final.mp4"),
+        estimatedRemainingWriteBytes: () => 0,
+        estimatedFinalOutputBytes: 0,
+        diskSpaceForMonitoring: async (target) => {
+          if (target.includes("missing-primary")) throw new Error("offline");
+          return { freeBytes: 100 * GIB, capacityBytes: 500 * GIB };
+        },
+      });
+      const snapshot = await monitor.snapshot("TEST");
+      expect(snapshot.volumes?.find((item) => item.role === "PRIMARY")).toMatchObject({
+        availableForNextJob: false,
+        unavailableReason: "OFFLINE_OR_UNREADABLE",
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it("uses the largest lifecycle branch instead of summing files that never coexist", () => {
     const estimate = estimatePeakDiskUsage({
       remainingIntermediateBytes: 50 * GIB,
@@ -53,17 +92,17 @@ describe("render disk reliability", () => {
     expect(estimate.currentOutputFreeBytes).toBe(45 * GIB);
   });
 
-  it("recognizes Windows/FFmpeg ENOSPC variants and scales the reserve", () => {
+  it("recognizes Windows/FFmpeg ENOSPC variants and keeps the advisory reserve small", () => {
     expect(isEnospcError(new Error("Task finished with error code: -28 (No space left on device)"))).toBe(true);
     expect(isEnospcError(new Error("Error muxing a packet; Error writing trailer"))).toBe(true);
     expect(isEnospcError(new Error("Cannot allocate memory"))).toBe(false);
-    expect(safetyReserveBytes(10 * GIB)).toBe(20 * GIB);
-    expect(safetyReserveBytes(200 * GIB)).toBe(40 * GIB);
+    expect(safetyReserveBytes(10 * GIB)).toBe(1 * GIB);
+    expect(safetyReserveBytes(200 * GIB)).toBe(1 * GIB);
     expect(path.win32.parse("D:\\x").root).toBe("D:\\");
   });
 
   it("keeps recommended reserve pressure distinct from a hard inability to finish", () => {
-    expect(diskPressureLevel(144 * GIB, 135 * GIB, 20 * GIB)).toBe("CRITICAL");
+    expect(diskPressureLevel(144 * GIB, 135 * GIB, 20 * GIB)).toBe("WARNING");
     expect(diskPressureLevel(144 * GIB, 145 * GIB, 20 * GIB)).toBe("EMERGENCY");
   });
 
@@ -92,5 +131,18 @@ describe("render disk reliability", () => {
     // This is not caused by charging the protected 67.55 GiB a second time.
     expect(diskPressureLevel(155_105_148_928, estimate.peakAdditionalBytes, safetyReserveBytes(estimate.peakAdditionalBytes)))
       .toBe("EMERGENCY");
+  });
+
+  it("charges a cross-volume recovery output from the stream-copied base estimate, not the old delivery estimate", () => {
+    const oldDeliveryEstimate = 42_616_740_592;
+    const baseMasterEstimate = 103 * GIB;
+    const split = splitRemainingWriteByVolume({
+      totalRemainingBytes: 210 * GIB,
+      estimatedFinalOutputBytes: Math.max(baseMasterEstimate, oldDeliveryEstimate),
+      finalOutputBytes: 0,
+      sharedVolume: false,
+    });
+    expect(split.outputRemainingBytes).toBe(baseMasterEstimate);
+    expect(split.tempRemainingBytes).toBe(107 * GIB);
   });
 });

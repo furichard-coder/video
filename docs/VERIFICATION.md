@@ -1,5 +1,121 @@
 # 第一階段驗證紀錄
 
+## v0.88.0 連續字幕 Review（2026-10-03；live AI 內容驗收受阻）
+
+- `npm run typecheck`、production build、`git diff --check`：PASS。
+- 完整回歸：**第二輪 96 files／585 tests PASS，241.47 秒，maxWorkers=2**，包含 scope 隔離；首輪為 242.66 秒。最後 standalone handoff renderer 10/10、AUTH/MODEL service 9/9 另通過；Sol focused 5 files／27 tests PASS。不是把局部與全量計數相加。
+- 真實隔離 Electron：三影片從 5 秒至 29.4 秒連播；影片→照片→影片至 24.4 秒；100 字幕第 50 筆定位在 44.96% 焦點，Preview Y 不變；Space pause/resume 與文字輸入 Space PASS。所有 fixture 都是合成短片／專案副本，沒有轉出使用者長片。
+- 新版正式輸出 SRT 覆寫前備份及較新人工文字優先有 service／renderer 回歸；native save dialog 與完整 live-provider IPC 尚未單獨端到端驗收。
+- 真實單筆 OpenAI `gpt-6-luna` review 使用一張 171,473-byte JPEG，服務回覆 billing/quota 429，RATE_LIMIT、retryable=false。API transport 有實際請求，**未取得 KEEP/EDIT**，不得稱為成功 AI Review。
+- 最終 Windows v0.88 package／packaged smoke PASS；EXE SHA-256 `72BB67C0F9DFB3C38E3849CDC505629B67BDB08EF21BAD5A475E80858602D7B9`；app.asar `690B3EB92F26658E525A64E6DC7C580446CF355778AA39EE0B4CD83F15E433EA`。首輪測試封裝保留在 `release/v0.88.0-pre-scope-fix-20261003`；正式影片、原專案與 v0.87 release 未變。
+- 最後 scope/label focused regression 1/1 PASS：單擊選取 Intro 不改 Main 播放 scope／標籤，明確跳到才切換。片頭→正片跨範圍自動接續未完成，詳細限制見 `V088_SUBTITLE_REVIEW_REPORT.md`。
+
+## v0.87.0 字幕恢復／獨立影片草稿（2026-10-02；真實 AI 內容驗收受阻）
+
+- 報告：[`V087_SUBTITLE_RECOVERY_REPORT.md`](V087_SUBTITLE_RECOVERY_REPORT.md)。
+- TypeScript renderer/main typecheck：PASS；核心 focused suite：10 files／31 tests PASS。首輪完整 suite 曾記錄 92 files／556 tests PASS；其後新增的 fallback／Gemini 測試需納入最終回歸，以上不代表最終 suite。
+- 真實 Electron UI：5 個案例通過，DOM 確認 63 筆字幕列、可捲至末筆與無 API key 時可開啟帳號設定；已檢視字幕及設定截圖。1366×768、受主機限制的 viewport 與 125%／150% zoom 有驗收；4K 僅以 40% zoom 模擬，未在實體 4K Windows scaling 驗收。
+- 模擬 provider＋短影片 FFmpeg pipeline：PASS，但不代表 live AI 成功。OpenAI `/v1/models` GET 成功；實際 JPEG／JSON 請求遭 `HTTP 429 / credit_balance_exhausted` 拒絕，沒有成功 AI draft，也未完成 3–5 分鐘真實 AI 內容／成本驗收。
+- 真實 3 分鐘影片取樣：90 frames／5 batches／API 0 次，batch JPEG peak 6,313,794 bytes，完成保留 cache 0 bytes；耗時 605,325 ms（與完整測試並行，不作獨立速度比較）。無正式影片變更，沒有真實 AI draft。
+- Production build／Windows package／packaged smoke：PASS。封裝 `release/v0.87.0/SceneryWalkerSourceOrganizer-win32-x64/`；EXE SHA-256 `2028E1D127431D42C002BF45D4A239C08217BFDD37FDA0216752F4947181507A`；app.asar `BE6BC49F128E1420B6073B2F1A28D6A32EBE6E57BF36530DB98CAE3E8DDA065F`。
+- 首輪完整回歸 94 files／561 tests PASS；最新核心 focused 8 files／26 tests PASS。一次 4K 取樣並行輪次出現 4 tests＋1 hook timeout（5 files）；packaged smoke 初次亦 timeout，複測 PASS。取樣結束後以 `npx vitest run --maxWorkers=2` 執行最新完整回歸：**94 files／565 tests 全部 PASS，240.37 秒**。沒有放寬 timeout 或跳過失敗項目。
+- 最新 production build、封裝啟動 PASS；Electron UI 5 案再次 PASS，63 rows、可捲至最後一筆、未設 API key 仍可進設定。v0.86 EXE SHA-256 仍為 `A42DFF754B3C11159A4DA297FCF2C17F96561EC27F879509394D11F792EBD204`；原專案與正式影片 size/mtime 未變。
+- 未重新編碼正式影片、未修改來源、未刪除 render checkpoint、MKV 或既有 SRT。
+
+## v0.86.0 AI 字幕草稿安全核心（2026-10-02）
+
+- `npm run typecheck`：PASS。
+- 最新完整回歸：88 files／545 tests PASS（包含人工／舊來源影片時長不符的單筆重生安全閘）。
+- `npm run build`、`npm run package:win`、`npm run smoke:packaged`：PASS。
+- 獨立封裝：`release/v0.86.0/SceneryWalkerSourceOrganizer-win32-x64/`。
+- 舊開發封裝保存在 `release/v0.86.0-pre-final-20261002/` 與 `release/v0.86.0-before-manual-video-guard-20261002/`；最新封裝 smoke PASS。
+- 最新 EXE SHA-256：`A42DFF754B3C11159A4DA297FCF2C17F96561EC27F879509394D11F792EBD204`。此封裝包含人工影片時長安全閘修正。
+- 未執行長片 AI 分析或 live OpenAI／Gemini request；74.9 GB final MP4、v0.85 release、來源、正式 SRT 與 checkpoint 均未修改。
+- 未執行 live Provider 或 74.9 GB 全片分析；720p／1080p 比較只驗證短 synthetic 的時間與 payload，不代表真實旅遊畫面辨識品質或費用。
+
+## v0.85.0 Resume Artifact Relocation（2026-09-30）
+
+| 檢查 | 結果 |
+| --- | --- |
+| Root cause | `analyzeResumeCompatibility()` 只驗證 checkpoint 的舊 `outputPath`，未先執行 relocation discovery；舊 E:\ 路徑遺失即被計入需重建 |
+| 修正 | Compatibility 與實際 Resume 共用 bounded TEMP scan + ffprobe + checkpoint SHA-256 驗證，成功後發佈 remap overlay |
+| 安全性 | 掃描不改寫原 checkpoint、不移動或刪除來源；候選不一致即拒絕重用 |
+| 真實媒體 | 10／10 segment 大小、ffprobe 與完整 SHA-256 均符合 checkpoint；原 checkpoint SHA-256 維持 `A9B5D8ABAB9F54C159F26539DF3F631ECB8E9D8CA071C0076D9ADFA1765E9A31` |
+| 自動測試 | TypeScript typecheck PASS；checkpoint relocation focused test PASS；Resume integration focused test PASS；renderer Resume UI 13／13 PASS |
+| Production build | PASS；只有既有的 Vite 500 kB chunk warning |
+| Windows package | PASS：使用 v0.84 release 內 SHA-256 完全符合 pinned hash 的核准快門音效；packaged smoke PASS |
+| v0.85 EXE | `release/v0.85.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.85.0.exe`；SHA-256 `2C94F03D4C97CA1E50E46CDAE7B08EEE2A685B071F5766440140DEB0EE036110` |
+| app.asar | SHA-256 `E987747971FA3A1364460051DF1EE63A2076338C4573ADBCD817EB45126E7B18` |
+
+## v0.84.0 Resume／TEMP 手動復原（2026-09-29）
+
+| 檢查 | 結果 |
+| --- | --- |
+| v0.83 停止點 | 已定位：搬移後僅重新分析，未呼叫 `concat:resume`。v0.84 由最新分析確認 READY 後才實際呼叫續轉 IPC |
+| 舊片段辨識 | 實際工作 10／10 個 level-1 MKV 存在、大小符合 checkpoint，逐檔 ffprobe 可讀 H.264／AAC 3840×2160；這次未對 67.547 GiB 真實資料重算全量 SHA／尾段解碼，也未做搬移或長片轉檔 |
+| 手動跨槽驗證 | PASS（短媒體整合）；搬移／改名後掃描已登錄 TEMP、ffprobe＋SHA 驗證、COW checkpoint remap、重新分析 READY、真正 Resume；確認已完成片段未重新 Encode |
+| 新選備援槽 | PASS（單元／整合）；先登錄至 COW checkpoint，再進行搬移；改路徑不影響 render identity |
+| 限制 | 大型 App copy 尚無 byte progress／copy-only Cancel；雙份檔僅回報 duplicate、不自動刪 E:；精靈狀態未跨重啟持久化；未跑完真實長片 |
+| TypeScript／回歸 | TypeScript PASS；完整 Vitest 78 files／498 tests PASS；`git diff --check` PASS |
+| 建置／啟動 | production build、Windows x64 可攜版封裝、Electron source／隔離 userData packaged smoke 全部 PASS |
+| 依賴安全 | production dependencies audit 0 vulnerabilities；開發依賴 1 個 moderate `undici` |
+| 交付檔 | `release/v0.84.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.84.0.exe`；SHA-256 `FFD0B56900E9C569E4C2A99A7E20F1A62CAAE61AA56AF5AFCF5909750350BE7F`。`resources/app.asar` SHA-256 `15A162205FB2335050635B4AFC6AA92DF66A07B4D7E8068016154D3FD03EF096` |
+
+逐檔盤點、空間試算、v0.83 根因與安全限制見 `docs/V084_RESUME_STORAGE_RECOVERY_REPORT.md`。
+
+## v0.83.0 TEMP Storage Recovery（2026-09-29）
+
+| 檢查 | 結果 |
+| --- | --- |
+| 每槽 Soft Reserve | PASS（單元）；新預設 E:／資料碟 1 GiB、C: 2 GiB，設定可保存；舊標準位置的 20／30 GiB 預設遷移，自訂值保留。Soft Reserve 不是 FFmpeg `-28` 硬門檻 |
+| 54.1 GiB 舊訊息 | 已定位；新寫入估算峰值約 182.189 GiB，舊版再加入 36.438 GiB 的 20% 建議餘量並當成 Fatal，對 E: 164.54 GiB 快照形成約 54.1 GiB 缺口。屬 APP_PREEMPTIVE_DISK_PAUSE；本次未觀察到 FFmpeg 真正 `-28` |
+| Resume Storage Analysis | PASS（模擬／單元）；按續轉前分析 E/C、checkpoint、已完成片段與剩餘峰值，區分可直接續、未開始工作轉 C、需確認搬移、安全暫停；計畫過期後拒絕直接執行 |
+| 跨磁碟搬移 | PASS（測試夾與模擬故障）；copy、size／ffprobe／SHA、無覆蓋發布、checkpoint 與不可變 relocation registry 寫入／讀回驗證後才刪來源；目的地同名及發布失敗均保留來源。舊 checkpoint JSON 不改寫 |
+| 片段選擇 | PASS（單元）；20 個以內候選以有界組合搜尋最少足夠 bytes，加入至少 512 MiB／缺口 5% 的估算緩衝。沒有把 E/C free 當成同一磁碟容量 |
+| 舊版 TEMP 清理 | PASS（唯讀盤點／分類）；目前 checkpoint 引用的 10 個 MKV 約 67.547 GiB、E: 快取候選 1.63 MiB、quickbench 約 725.53 MiB、C: 備援目錄空；未證明舊檔可安全刪除，`immediatelyReclaimableBytes=0`，執行器 fail-closed |
+| 真實資料安全 | 未刪除、未搬移 E/C 真實片段、checkpoint、來源或最終輸出；v0.82 視窗未強制關閉。未執行長片 Resume，因此不能保證完整長片已能轉完 |
+| TypeScript／回歸 | TypeScript PASS；完整 Vitest 78 files／496 tests PASS；最後登錄檔安全修正另有 focused checkpoint 21/21 PASS；`git diff --check` PASS |
+| 建置／啟動 | production build、Windows x64 可攜版封裝、Electron source smoke、隔離 userData packaged smoke 全部 PASS |
+| 依賴安全 | production dependencies `npm audit --omit=dev --audit-level=moderate`：0 vulnerabilities；完整開發依賴 audit 有 1 個 moderate `undici`（經 jsdom 引入），未宣稱整體 0 漏洞 |
+| 交付檔 | `release/v0.83.0/SceneryWalkerSourceOrganizer-win32-x64/SceneryWalkerSourceOrganizer-v0.83.0.exe`；SHA-256 `00A6BA6366C533DC56EF29FC92557D02AA458297D90D7A414C995BDD30F51F24`。`resources/app.asar` SHA-256 `2C128B3E2C159CE87A6EC678906AF022EBC79B76B8AF84A4BF61F7304B5B29D9` |
+
+完整本機 TEMP 路徑、分類、數字來源與限制見 `docs/V083_STORAGE_RECOVERY_REPORT.md`。Soft Reserve 1／2 GiB 是偏向使用容量的預設，不保證 Windows／Pagefile 或長片 Render 在接近滿碟時仍安全；使用者應在執行前確認即時分析結果。
+
+## v0.82.0 Resume Recovery（2026-09-29）
+
+| 檢查 | 結果 |
+| --- | --- |
+| 舊拒絕條件 | 已定位；舊版 `concat-render.ts:2395` 對照 picture/base signature，並要求 `projectUpdatedAt` 相同。本案兩者均不相同 |
+| mismatch 分類 | UNKNOWN；舊 checkpoint 沒有完整 Project snapshot，無法可靠分類為 VIDEO_MISMATCH、TIMELINE_MISMATCH 或 BASE_AUDIO_MISMATCH |
+| Timeline 對照 | 92 筆 checkpoint clip selection（Intro 25、Main 67）符合目前 manifest；transition 為 0.7 秒。這不是完整 render identity 證明 |
+| Source／timeline continuity | 59/59 個來源檔案的即時 size／mtime 與目前 manifest 相符，且修改時間均不晚於 checkpoint 建立時間；92 筆 clip selection 與目前 manifest 相符。舊 checkpoint 未存來源內容雜湊 |
+| Legacy segment identity | PASS（唯讀）；`legacyLevelOneIdsForProject` 預期 ID 10 個、checkpoint 記錄 10 個，全部 exact match |
+| Segment media／content validation | PASS；10/10 經 codec、尺寸、fps、pixel format、色彩範圍、audio/sample/channel、duration、size、SHA 驗證；`VALIDATED_SEGMENT_REUSE`，checkpoint duration 8,976,508 ms、72,527,956,978 bytes，可跳過首層 segment 重編 |
+| Reuse boundary | 未找到 base partial 或 audio master；後續 Base picture、audio、mux 階段仍需執行。不能宣稱整段二十多小時 render 已全數免重跑 |
+| Base/audio artifacts | 未找到 base partial 或 audio master；不宣稱可從其中恢復 |
+| TEMP／YouTube | TEMP 曾參與舊 picture signature，屬相容性風險；本案並非只有 TEMP 比較失敗。YouTube 設定在 render hash 之外，未造成此次 mismatch |
+| 原始資料保護 | v0.82 新增恢復副本，不直接改寫來源 checkpoint；此案完整長片未重跑 |
+| TypeScript／focused tests | Typecheck PASS；render-checkpoint 18/18 PASS；concat integration 47/47 PASS |
+| Full regression／package | 76 files／484 tests PASS；後續介面安全修改 focused 10/10 PASS；production build、Electron source／packaged smoke PASS；npm audit 0 vulnerabilities；v0.82 獨立封裝，EXE SHA-256 `200227FC9F4115BBE9A32447479B74DF8E55163C8FBB3194C84513E44D03F6CA`，`app.asar` SHA-256 `69295BCF91D4E2EBC6E5AF292331CDE34038FD1D1AE614D52238B9DD65E1DE49` |
+
+本案確認 10 個首層 segment（8,976,508 ms、72,527,956,978 bytes）可重用，可避免重編這些 segment；Base picture、audio、mux 仍需執行，不能宣稱整段二十多小時都已保住。舊 checkpoint 沒有完整 Project snapshot，因此整體 VIDEO／TIMELINE／BASE_AUDIO 相容性仍為 UNKNOWN。逐欄差異見 `docs/RESUME_COMPAT_DIFF.json`；完整證據及限制見 `docs/V082_RESUME_RECOVERY_REPORT.md`。
+
+## v0.81.0 雙磁碟 TEMP／第 2 暫存槽（2026-09-28）
+
+| 檢查 | 結果 |
+| --- | --- |
+| TEMP 路由 | PASS；主要 E:、備援 C:，兩槽持久化可改；E 充足時優先，E 不足／不可寫時下一工作選 C，正在寫入的工作不搬移 |
+| 磁碟安全保留 | PASS；E: 至少 20 GiB，C: 至少 30 GiB；每一工作必須放得進單一槽，E+C 不作單工作容量相加 |
+| 可用空間快照 | C: 74.76 GiB、E: 153.75 GiB（封裝後檢查；僅即時快照，不保證長片全程容量） |
+| Resume／舊版保護 | PASS；schema5 持久化每段實際路徑／volume；舊 v0.79 復原來源唯讀，v0.80 COW 片段不搬移；TEMP 路徑更換不使既有畫面 Master 失效 |
+| 斷線與 remap | PASS（單元／短片）；E 離線時新工作目錄可重新錨定可寫槽；缺失根目錄重對應前先逐片驗證大小、SHA-256、ffprobe，僅更新 COW checkpoint |
+| 跨磁碟串接 | PASS（短片實際 FFmpeg）；E 與 C 各一段 H.264 MKV，以絕對路徑直接 concat `-c copy`，總時長約 1 秒，不鏡像媒體 |
+| 換槽續轉 | PASS（短片整合）；模擬失敗後把 TEMP 換到新目錄，續轉僅呼叫最後音訊封裝 1 次，影片 master 重用 |
+| Final Output | PASS（程式與單元）；成品路徑獨立，與 TEMP 同磁碟時容量合算；跨磁碟發佈採成品磁碟上的唯一 partial |
+| Proxy／試聽快取 | PASS；新縮圖/Proxy、字幕與音訊試聽使用可寫 TEMP，舊 App Data 快取維持可讀；專項測試 20/20 |
+| 完整回歸 | 76 files／482 tests PASS；兩項短媒體整合測試在整套並行時超過原 5 秒預設時限，單獨重跑通過後，將其合理時限設為 30 秒，整套重跑全通過；TypeScript PASS；production build、source／packaged smoke PASS；npm audit 0 vulnerabilities |
+| 長片驗證界線 | 未對原 1h40m 專案實際重新轉檔；無法保證目前約 C: 45 GiB 可排程備援一定足以容納下一個大型單一工作 |
+
 ## v0.80.0 Checkpoint Recovery／Boundaries（2026-09-27）
 
 | 檢查 | 結果 |

@@ -33,6 +33,12 @@ interface CacheMarker {
 const INTRO_THUMBNAIL_VERSION = "intro-thumbnail-v1";
 const INTRO_THUMBNAIL_LIMIT_PER_ASSET = 64;
 
+/** Existing App Data cache stays readable; new files may be placed on a selected TEMP volume. */
+export interface PreviewCachePlacement {
+  readRoots(): readonly string[];
+  chooseWriteRoot(variant: PreviewVariant): Promise<string>;
+}
+
 const OUTPUT_NAMES: Record<PreviewVariant, string> = {
   THUMBNAIL: "thumbnail.jpg",
   IMAGE_PREVIEW: "image-preview.jpg",
@@ -117,6 +123,7 @@ export class PreviewCache {
     private readonly sources: SourceService,
     private readonly ffmpegExecutable = process.env.FFMPEG_PATH || "ffmpeg",
     private readonly mediaProbe = new MediaProbe(),
+    private readonly placement?: PreviewCachePlacement,
   ) {}
 
   async initialize(): Promise<void> {
@@ -146,14 +153,18 @@ export class PreviewCache {
         asset = await this.sources.ensureMetadata(assetId, signal);
       }
 
-      const directory = this.cacheDirectory(asset.previewCacheKey);
+      for (const directory of this.cacheDirectories(asset.previewCacheKey)) {
+        const outputPath = assertWithinRoot(directory, path.join(directory, OUTPUT_NAMES[variant]));
+        const markerPath = assertWithinRoot(directory, path.join(directory, `${variant.toLowerCase()}.json`));
+        if (await this.cacheHit(markerPath, outputPath, asset, variant)) {
+          return this.result(asset, variant, "HIT");
+        }
+      }
+
+      const directory = await this.writeCacheDirectory(asset.previewCacheKey, variant);
       const outputPath = assertWithinRoot(directory, path.join(directory, OUTPUT_NAMES[variant]));
       const markerPath = assertWithinRoot(directory, path.join(directory, `${variant.toLowerCase()}.json`));
       await mkdir(directory, { recursive: true });
-
-      if (await this.cacheHit(markerPath, outputPath, asset, variant)) {
-        return this.result(asset, variant, "HIT");
-      }
 
       const partialPath = `${outputPath}.${process.pid}.partial${path.extname(outputPath)}`;
       try {
@@ -192,15 +203,7 @@ export class PreviewCache {
     signal?: AbortSignal,
   ): Promise<PreviewResult & { cachePath: string }> {
     const result = await this.ensure(assetId, variant, signal);
-    const asset = this.store.getAsset(assetId);
-    if (!asset) throw new Error("找不到來源項目。");
-    const names: Record<PreviewVariant, string> = {
-      THUMBNAIL: "thumbnail.jpg",
-      IMAGE_PREVIEW: "image-preview.jpg",
-      VIDEO_PROXY: "video-preview.mp4",
-      VIDEO_CLIP_PROXY: "video-clip-preview.mp4",
-    };
-    return { ...result, cachePath: path.join(this.cacheDirectory(asset.previewCacheKey), names[variant]) };
+    return { ...result, cachePath: await this.resolveExisting(assetId, variant) };
   }
 
   async ensureClip(assetId: string, inMs: number, outMs: number, signal?: AbortSignal): Promise<PreviewResult> {
@@ -225,44 +228,19 @@ export class PreviewCache {
       const clipKey = createHash("sha256")
         .update(`${CLIP_PREVIEWER_VERSION}\0${asset.previewCacheKey}\0${startMs}\0${endMs}`)
         .digest("hex");
-      const directory = this.cacheDirectory(asset.previewCacheKey);
-      const outputPath = assertWithinRoot(directory, path.join(directory, `clip-${clipKey}.mp4`));
-      const markerPath = assertWithinRoot(directory, path.join(directory, `clip-${clipKey}.json`));
-      await mkdir(directory, { recursive: true });
-      let hit = false;
-      if ((await exists(markerPath)) && (await isUsableCachedOutput(outputPath, "VIDEO_CLIP_PROXY"))) {
-        try {
-          const marker = JSON.parse(await readFile(markerPath, "utf8")) as CacheMarker & {
-            sourceStartMs?: number;
-            sourceEndMs?: number;
-          };
-          const markerMatches =
-            marker.cacheKey === asset.previewCacheKey &&
-            marker.previewerVersion === CLIP_PREVIEWER_VERSION &&
-            marker.sourcePath === asset.sourcePath &&
-            marker.sourceSize === asset.sizeBytes &&
-            marker.sourceModifiedAt === asset.fileModifiedAt &&
-            marker.variant === "VIDEO_CLIP_PROXY" &&
-            marker.sourceStartMs === startMs &&
-            marker.sourceEndMs === endMs;
-          if (markerMatches) {
-            const output = await stat(outputPath);
-            const fingerprintMatches =
-              marker.outputSizeBytes === output.size && marker.outputModifiedAt === output.mtime.toISOString();
-            hit = fingerprintMatches || (await this.isValidProxy(outputPath));
-            if (hit && !fingerprintMatches) {
-              await writeFile(
-                markerPath,
-                `${JSON.stringify({ ...marker, outputSizeBytes: output.size, outputModifiedAt: output.mtime.toISOString() }, null, 2)}\n`,
-                "utf8",
-              );
-            }
-          }
-        } catch {
-          hit = false;
+      let directory: string | undefined;
+      for (const candidate of this.cacheDirectories(asset.previewCacheKey)) {
+        if (await this.clipCacheHit(candidate, asset, clipKey, startMs, endMs)) {
+          directory = candidate;
+          break;
         }
       }
+      const hit = Boolean(directory);
+      directory ??= await this.writeCacheDirectory(asset.previewCacheKey, "VIDEO_CLIP_PROXY");
+      const outputPath = assertWithinRoot(directory, path.join(directory, `clip-${clipKey}.mp4`));
+      const markerPath = assertWithinRoot(directory, path.join(directory, `clip-${clipKey}.json`));
       if (!hit) {
+        await mkdir(directory, { recursive: true });
         const partialPath = `${outputPath}.${process.pid}.partial.mp4`;
         try {
           await rm(partialPath, { force: true });
@@ -298,14 +276,53 @@ export class PreviewCache {
     }, signal);
   }
 
+  private async clipCacheHit(
+    directory: string,
+    asset: SourceAsset,
+    clipKey: string,
+    startMs: number,
+    endMs: number,
+  ): Promise<boolean> {
+    const outputPath = assertWithinRoot(directory, path.join(directory, `clip-${clipKey}.mp4`));
+    const markerPath = assertWithinRoot(directory, path.join(directory, `clip-${clipKey}.json`));
+    if (!(await exists(markerPath)) || !(await isUsableCachedOutput(outputPath, "VIDEO_CLIP_PROXY"))) return false;
+    try {
+      const marker = JSON.parse(await readFile(markerPath, "utf8")) as CacheMarker & {
+        sourceStartMs?: number;
+        sourceEndMs?: number;
+      };
+      if (
+        marker.cacheKey !== asset.previewCacheKey ||
+        marker.previewerVersion !== CLIP_PREVIEWER_VERSION ||
+        marker.sourcePath !== asset.sourcePath ||
+        marker.sourceSize !== asset.sizeBytes ||
+        marker.sourceModifiedAt !== asset.fileModifiedAt ||
+        marker.variant !== "VIDEO_CLIP_PROXY" ||
+        marker.sourceStartMs !== startMs ||
+        marker.sourceEndMs !== endMs
+      ) return false;
+      const output = await stat(outputPath);
+      const fingerprintMatches = marker.outputSizeBytes === output.size && marker.outputModifiedAt === output.mtime.toISOString();
+      if (!fingerprintMatches && !(await this.isValidProxy(outputPath))) return false;
+      if (!fingerprintMatches) {
+        await writeFile(markerPath, `${JSON.stringify({ ...marker, outputSizeBytes: output.size, outputModifiedAt: output.mtime.toISOString() }, null, 2)}\n`, "utf8");
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async resolveExisting(assetId: string, variant: PreviewVariant): Promise<string> {
     assertSafeHexId(assetId, "Asset ID");
     const asset = this.store.getAsset(assetId);
     if (!asset) throw new Error("找不到來源項目。");
-    const directory = this.cacheDirectory(asset.previewCacheKey);
-    const outputPath = assertWithinRoot(directory, path.join(directory, OUTPUT_NAMES[variant]));
-    if (!(await exists(outputPath))) throw new Error("預覽尚未建立或已失效。");
-    return outputPath;
+    for (const directory of this.cacheDirectories(asset.previewCacheKey)) {
+      const outputPath = assertWithinRoot(directory, path.join(directory, OUTPUT_NAMES[variant]));
+      const markerPath = assertWithinRoot(directory, path.join(directory, `${variant.toLowerCase()}.json`));
+      if (await this.cacheHit(markerPath, outputPath, asset, variant)) return outputPath;
+    }
+    throw new Error("預覽尚未建立或已失效。");
   }
 
   async resolveClipExisting(assetId: string, clipKey: string): Promise<string> {
@@ -313,10 +330,17 @@ export class PreviewCache {
     assertSafeHexId(clipKey, "Clip cache key");
     const asset = this.store.getAsset(assetId);
     if (!asset) throw new Error("找不到來源項目。");
-    const directory = this.cacheDirectory(asset.previewCacheKey);
-    const outputPath = assertWithinRoot(directory, path.join(directory, `clip-${clipKey}.mp4`));
-    if (!(await exists(outputPath))) throw new Error("區段代理尚未建立或已失效。");
-    return outputPath;
+    for (const directory of this.cacheDirectories(asset.previewCacheKey)) {
+      const markerPath = assertWithinRoot(directory, path.join(directory, `clip-${clipKey}.json`));
+      const marker = await readFile(markerPath, "utf8").then((value) => JSON.parse(value) as CacheMarker & {
+        sourceStartMs?: number; sourceEndMs?: number;
+      }).catch(() => undefined);
+      if (
+        marker && Number.isFinite(marker.sourceStartMs) && Number.isFinite(marker.sourceEndMs) &&
+        await this.clipCacheHit(directory, asset, clipKey, marker.sourceStartMs!, marker.sourceEndMs!)
+      ) return assertWithinRoot(directory, path.join(directory, `clip-${clipKey}.mp4`));
+    }
+    throw new Error("區段代理尚未建立或已失效。");
   }
 
   async ensureIntroThumbnail(
@@ -336,11 +360,10 @@ export class PreviewCache {
       const thumbnailKey = createHash("sha256")
         .update(`${INTRO_THUMBNAIL_VERSION}\0${asset.previewCacheKey}\0${startMs}\0${endMs}`)
         .digest("hex");
-      const directory = this.cacheDirectory(asset.previewCacheKey);
-      const outputPath = assertWithinRoot(directory, path.join(directory, `intro-${thumbnailKey}.jpg`));
-      const markerPath = assertWithinRoot(directory, path.join(directory, `intro-${thumbnailKey}.json`));
-      await mkdir(directory, { recursive: true });
-      if ((await exists(markerPath)) && (await isUsableCachedOutput(outputPath, "THUMBNAIL"))) {
+      for (const directory of this.cacheDirectories(asset.previewCacheKey)) {
+        const outputPath = assertWithinRoot(directory, path.join(directory, `intro-${thumbnailKey}.jpg`));
+        const markerPath = assertWithinRoot(directory, path.join(directory, `intro-${thumbnailKey}.json`));
+        if (!(await exists(markerPath)) || !(await isUsableCachedOutput(outputPath, "THUMBNAIL"))) continue;
         try {
           const marker = JSON.parse(await readFile(markerPath, "utf8")) as CacheMarker & {
             sourceStartMs?: number;
@@ -364,6 +387,10 @@ export class PreviewCache {
           // Invalid marker is regenerated below.
         }
       }
+      const directory = await this.writeCacheDirectory(asset.previewCacheKey, "THUMBNAIL");
+      const outputPath = assertWithinRoot(directory, path.join(directory, `intro-${thumbnailKey}.jpg`));
+      const markerPath = assertWithinRoot(directory, path.join(directory, `intro-${thumbnailKey}.json`));
+      await mkdir(directory, { recursive: true });
       const partialPath = `${outputPath}.${process.pid}.partial.jpg`;
       const orientation = resolveMediaOrientation({
         width: asset.mediaInfo?.width,
@@ -430,15 +457,33 @@ export class PreviewCache {
     assertSafeHexId(thumbnailKey, "Intro thumbnail cache key");
     const asset = this.store.getAsset(assetId);
     if (!asset) throw new Error("找不到來源項目。");
-    const directory = this.cacheDirectory(asset.previewCacheKey);
-    const outputPath = assertWithinRoot(directory, path.join(directory, `intro-${thumbnailKey}.jpg`));
-    if (!(await exists(outputPath))) throw new Error("片頭縮圖尚未建立或已失效。");
-    return outputPath;
+    for (const directory of this.cacheDirectories(asset.previewCacheKey)) {
+      const outputPath = assertWithinRoot(directory, path.join(directory, `intro-${thumbnailKey}.jpg`));
+      const markerPath = assertWithinRoot(directory, path.join(directory, `intro-${thumbnailKey}.json`));
+      if (!(await isUsableCachedOutput(outputPath, "THUMBNAIL"))) continue;
+      const marker = await readFile(markerPath, "utf8").then((value) => JSON.parse(value) as CacheMarker)
+        .catch(() => undefined);
+      if (
+        marker?.cacheKey === asset.previewCacheKey &&
+        marker.previewerVersion === INTRO_THUMBNAIL_VERSION &&
+        marker.sourcePath === asset.sourcePath &&
+        marker.sourceSize === asset.sizeBytes &&
+        marker.sourceModifiedAt === asset.fileModifiedAt
+      ) return outputPath;
+    }
+    throw new Error("片頭縮圖尚未建立或已失效。");
   }
 
-  private cacheDirectory(cacheKey: string): string {
+  private cacheDirectories(cacheKey: string): string[] {
     const safeKey = assertSafeHexId(cacheKey, "Cache key");
-    return assertWithinRoot(this.cacheRoot, path.join(this.cacheRoot, safeKey));
+    const roots = [this.cacheRoot, ...(this.placement?.readRoots() ?? [])];
+    return [...new Set(roots.map((root) => path.resolve(root)))].map((root) => assertWithinRoot(root, path.join(root, safeKey)));
+  }
+
+  private async writeCacheDirectory(cacheKey: string, variant: PreviewVariant): Promise<string> {
+    const root = path.resolve(this.placement ? await this.placement.chooseWriteRoot(variant) : this.cacheRoot);
+    const safeKey = assertSafeHexId(cacheKey, "Cache key");
+    return assertWithinRoot(root, path.join(root, safeKey));
   }
 
   private async cacheHit(

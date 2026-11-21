@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, stat } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { appendFile, copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell as electronShell } from "electron";
 import type {
@@ -32,11 +32,24 @@ import type {
   ProjectColorSettings,
   SortMode,
   SubtitleCue,
+  SubtitleAiCheckAction,
+  SubtitleAiCheckJobSnapshot,
+  SubtitleAiCheckProgress,
+  SubtitleAiCheckRequest,
   SubtitleTimelineScope,
+  SubtitleVisualAnalysisOptions,
+  SubtitleVisualCueRegenerateRequest,
+  SubtitleVisualAnalysisProgress,
+  SubtitleVisualPreflight,
   ThumbnailRenderRequest,
   TransitionDurationSec,
   TranslationSettingsUpdate,
   UserPreferencesUpdate,
+  RenderTempLocationConfig,
+  RenderTempLocationStatus,
+  RenderCheckpointRemapRequest,
+  ExecuteResumeStoragePlanRequest,
+  ExecuteTemporaryArtifactActionsRequest,
   VoiceInputRequest,
   VolumeSegment,
   WatermarkSettings,
@@ -52,13 +65,42 @@ import { emptyCancelledResult, MEDIA_DIALOG_FILTERS, SourceService } from "./ser
 import { ExternalPlayerService } from "./services/external-player";
 import { PlayerSettingsStore } from "./services/player-settings";
 import { BgmService } from "./services/bgm-service";
-import { exportSrt } from "./services/subtitle-export";
+import { backupExistingSubtitleOutput, exportSrt } from "./services/subtitle-export";
 import { importSrtFile } from "./services/subtitle-import";
+import {
+  preflightSubtitleAiDraft,
+  promoteSubtitleAiDraft as promoteStoredSubtitleAiDraft,
+  writeSubtitleAiDraft,
+} from "./services/subtitle-draft-store";
 import { AiSettingsStore } from "./services/ai-settings";
+import { AiModelCatalogService } from "./services/ai-model-catalog";
 import { AiStoryAnalysisService } from "./services/ai-story-analysis";
 import { YoutubeSettingsStore, YoutubeUploadService } from "./services/youtube-upload";
 import { PlatformUploadHandoffService } from "./services/platform-upload-handoff";
 import { OutputHistoryStore } from "./services/output-history";
+import { MediaProbe } from "./services/media-probe";
+import { selectSubtitleVideoSource, subtitleTimelineCompatibility, subtitleAnalysisMode } from "./services/subtitle-video-selection";
+import { StandaloneSubtitleStore, authorizeSubtitleVideo } from "./services/standalone-subtitle-store";
+import { SubtitleFrameExtractor } from "./services/subtitle-frame-extractor";
+import { OpenAiSubtitleVisionProvider, GeminiSubtitleVisionProvider } from "./services/subtitle-vision-providers";
+import { runSubtitleVisionDrafts, type SubtitleVisionFrame } from "./services/subtitle-vision-orchestrator";
+import { runSubtitleVisionBatchWithFallback } from "./services/subtitle-vision-fallback";
+import {
+  buildSubtitleAiCheckProposal,
+  advanceSubtitleAiCheckProgress,
+  classifySubtitleAiCheckError,
+  createSubtitleAiCheckSnapshot,
+  GeminiSubtitleAiCheckProvider,
+  OpenAiSubtitleAiCheckProvider,
+  resolveSubtitleAiCheckAction,
+  subtitleCueRevision,
+  subtitleAiCheckContextRevision,
+  SubtitleAiCheckError,
+  SubtitleAiCheckJobStore,
+} from "./services/subtitle-ai-check";
+import { DiskSubtitleVisionCache } from "./services/subtitle-vision-cache";
+import { mergeSubtitleVisionDrafts } from "./services/subtitle-draft-merge";
+import { buildTimelinePlan } from "../shared/timeline-plan";
 import { UserPreferencesStore } from "./services/user-preferences";
 import { TranslationSettingsStore } from "./services/translation-settings";
 import { SubtitleTranslationService } from "./services/subtitle-translation";
@@ -76,6 +118,9 @@ import { resourceProfileFromLegacy } from "../shared/render-resource";
 import { AudioPreviewService } from "./services/audio-preview";
 import { RenderCommandState } from "./services/render-command-state";
 import { validateRenderTemporaryFolder } from "./services/render-disk-space";
+import { evaluateRenderTempPreflight, probeRenderTempLocations } from "./services/render-temp-scheduler";
+import { describeRenderTempLocation } from "./services/render-temp-scheduler";
+import { scanRegisteredTemporaryArtifacts } from "./services/temporary-artifact-inventory";
 import { RemoteControlServer } from "./services/remote-control-server";
 import {
   completedRenderQualifies,
@@ -130,6 +175,57 @@ export function registerIpc(
   let aiSubtitleController: AbortController | undefined;
   let materialAnalysisController: AbortController | undefined;
   let subtitlePreviewController: AbortController | undefined;
+  let subtitleVisualController: AbortController | undefined;
+  let subtitleAiCheckController: AbortController | undefined;
+  let subtitleAiCheckRunPromise: Promise<SubtitleAiCheckJobSnapshot> | undefined;
+  let subtitleAiCheckPaused = false;
+  let subtitleVisualPaused = false;
+  let subtitleVisualLastOptions: SubtitleVisualAnalysisOptions | undefined;
+  let lastManualSubtitleVideoPath: string | undefined;
+  let explicitSubtitleVideoPath: string | undefined;
+  let resumedSubtitleSelectionReason: "PROJECT_CONCAT" | "LATEST_CONCAT" | "MANUAL_PATH" | undefined;
+  const standaloneSubtitles = new StandaloneSubtitleStore(path.join(app.getPath("userData"), "subtitle-workspaces"));
+  const aiModels = new AiModelCatalogService(app.getPath("userData"));
+  const aiRuntime = (provider: "OPENAI" | "GEMINI", accountId?: string) => {
+    if (provider === "OPENAI") { const runtime = aiSettings.getRuntimeAccount(accountId); return { key: runtime.apiKey, model: runtime.visionModel }; }
+    const runtime = aiSettings.getRuntimeGeminiReview();
+    if (!runtime.apiKey) throw new Error("Gemini 尚未設定 API Key。");
+    return { key: runtime.apiKey, model: runtime.model };
+  };
+  ipcMain.handle("ai:models:refresh", (_event, provider: "OPENAI" | "GEMINI", accountId?: string) => {
+    if (provider !== "OPENAI" && provider !== "GEMINI") throw new Error("模型服務無效。");
+    const runtime = aiRuntime(provider, accountId);
+    return aiModels.refresh(provider, runtime.key, runtime.model);
+  });
+  ipcMain.handle("ai:vision:test", async (_event, provider: "OPENAI" | "GEMINI", accountId?: string, modelId?: string) => {
+    if (provider !== "OPENAI" && provider !== "GEMINI") throw new Error("模型服務無效。");
+    const runtime = aiRuntime(provider, accountId);
+    if (modelId && !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,150}$/.test(modelId)) throw new Error("模型名稱格式無效。");
+    return aiModels.test(provider, runtime.key, modelId ?? runtime.model);
+  });
+  const subtitleProvider = async (choice: "CHATGPT" | "GEMINI") => {
+    const kind = choice === "GEMINI" ? "GEMINI" : "OPENAI";
+    const runtime = aiRuntime(kind);
+    if (kind === "GEMINI" && !aiSettings.getRuntimeGeminiReview().enabled) throw new Error("請先明確啟用 Gemini。");
+    let model: string;
+    try { model = await aiModels.resolve(kind, runtime.key, runtime.model); }
+    catch (error) {
+      if (runtime.model.toLowerCase() !== "auto") throw error;
+      const probe = await aiModels.test(kind, runtime.key, "auto");
+      if (!probe.ok) throw new Error(probe.message);
+      model = await aiModels.resolve(kind, runtime.key, "auto");
+    }
+    return { provider: kind === "GEMINI" ? new GeminiSubtitleVisionProvider(model, runtime.key) : new OpenAiSubtitleVisionProvider(model, runtime.key), model, apiKey: runtime.key, selectionMode: runtime.model.toLowerCase() === "auto" ? "AUTO" as const : "MANUAL" as const };
+  };
+  const subtitleLogPath = path.join(app.getPath("userData"), "jobs", "subtitle-v087.log");
+  const subtitleLog = (stage: string, data: unknown) => {
+    void mkdir(path.dirname(subtitleLogPath), { recursive: true }).then(() => appendFile(subtitleLogPath, `${new Date().toISOString()} [${stage}] ${JSON.stringify(data)}\n`, "utf8")).catch(() => undefined);
+  };
+  const subtitleVideoProbe = new MediaProbe();
+  const subtitleFrameExtractor = new SubtitleFrameExtractor();
+  const subtitleVisualCheckpointPath = path.join(app.getPath("userData"), "jobs", "subtitle-visual-job.json");
+  const subtitleAiCheckJobs = new SubtitleAiCheckJobStore(path.join(app.getPath("userData"), "jobs", "subtitle-ai-check-job.json"));
+  const subtitleSourcePreferencePath = path.join(app.getPath("userData"), "settings", "subtitle-analysis-source.json");
   let voiceInputController: AbortController | undefined;
   let musicSuggestionController: AbortController | undefined;
   let audioPreviewController: AbortController | undefined;
@@ -139,14 +235,24 @@ export function registerIpc(
   const previewControllers = new Map<string, AbortController>();
   const outputTokens = new Map<string, { outputPath: string; createdAt: number; allowOverwrite: boolean }>();
   const thumbnailTokens = new Map<string, { outputPath: string; createdAt: number; format: "jpg" | "png" }>();
-  const subtitleOutputTokens = new Map<string, { outputPath: string; createdAt: number }>();
+  const subtitleOutputTokens = new Map<
+    string,
+    { outputPath: string; createdAt: number; draftScopes?: SubtitleTimelineScope[]; draftCueIds?: string[] }
+  >();
   const backgroundJobs = new Map<string, BackgroundJobSnapshot>();
   const appWorkingSetBytes = () =>
     app.getAppMetrics().reduce((sum, metric) => sum + Math.max(0, metric.memory?.workingSetSize ?? 0) * 1024, 0);
 
   const estimateConcatWithSystem = async (outputPath: string, request: ConcatRenderEstimateRequest) => {
-    const configuredTemp = userPreferences.snapshot().renderDefaults.renderTemporaryFolder ?? app.getPath("temp");
-    const renderTemp = await validateRenderTemporaryFolder(configuredTemp);
+    const defaults = userPreferences.snapshot().renderDefaults;
+    const configuredTemp = defaults.renderTemporaryFolder ?? app.getPath("temp");
+    const configuredLocations = defaults.tempLocations?.length
+      ? defaults.tempLocations
+      : [{ id: "primary", path: configuredTemp, role: "PRIMARY" as const, enabled: true, allowFallback: true }];
+    const tempLocationStatuses = await probeRenderTempLocations(configuredLocations);
+    const resourceTemp = tempLocationStatuses.find((item) => item.role === "PRIMARY" && item.available) ??
+      tempLocationStatuses.find((item) => item.available);
+    const renderTemp = resourceTemp ?? await validateRenderTemporaryFolder(configuredTemp);
     const workload = buildRenderEstimateWorkload(
       store.getProject().sources,
       request.orderedAssetIds,
@@ -159,7 +265,6 @@ export function registerIpc(
       appWorkingSetBytes: appWorkingSetBytes(),
       tempPath: renderTemp.path,
     });
-    const defaults = userPreferences.snapshot().renderDefaults;
     const resourceProfile = resourceProfileFromLegacy(request);
     const maximumRenderRamGiB = request.maximumRenderRamGiB ?? defaults.maximumRenderRamGiB;
     const maximumRenderTempGiB = request.maximumRenderTempGiB ?? defaults.maximumRenderTempGiB;
@@ -271,13 +376,36 @@ export function registerIpc(
     const normal = enrichMode(estimate.modeEstimates.balanced ?? estimate.modeEstimates.normal, normalPolicy);
     const high = enrichMode(estimate.modeEstimates.highSpeed ?? estimate.modeEstimates.normal, highSpeedPolicy);
     const selected = resourceProfile === "LOW_DISK" ? low : resourceProfile === "HIGH_SPEED" ? high : normal;
+    const estimatedNextTempJobBytes = Math.max(
+      1,
+      selected.policy.estimatedWorkingBytesPerJob ??
+        Math.ceil((selected.mode.diskBreakdown?.concurrentPartialPeakBytes ?? selected.mode.estimatedTemporaryBytes) /
+          Math.max(1, selected.policy.maximumParallelJobs)),
+    );
+    const breakdown = selected.mode.diskBreakdown;
+    const outputHardRequiredBytes = selected.mode.estimatedOutputBytes + estimate.minimumReserveBytes;
+    const admission = evaluateRenderTempPreflight(
+      tempLocationStatuses,
+      estimatedNextTempJobBytes,
+      request.tempLocationSelection ?? defaults.tempLocationSelection ?? "AUTO",
+      breakdown?.currentOutputFreeBytes ?? systemResources.outputDriveFreeBytes,
+      outputHardRequiredBytes,
+      path.parse(outputPath).root.toUpperCase(),
+      selected.mode.estimatedOutputBytes,
+      estimate.minimumReserveBytes,
+    );
+    const { selectedTemp, outputVolumeCanRender } = admission;
+    const multiVolumeWarnings = [...selected.mode.warnings];
+    if (!selectedTemp) multiVolumeWarnings.push("沒有任何單一 Render TEMP 磁碟可在保留安全空間後容納下一個工作。");
+    if (admission.sharedVolumeConflict) multiVolumeWarnings.push("TEMP 與 Final Output 位於同一磁碟時，必須同時容納下一工作與成品，不能分開計算可用空間。");
+    if (!outputVolumeCanRender) multiVolumeWarnings.push("Final Output 磁碟空間不足；TEMP 備援不會改變成品路徑。");
     return {
       ...estimate,
       estimatedTemporaryBytes: selected.mode.estimatedTemporaryBytes,
       estimatedRenderTimeMs: selected.mode.estimatedRenderTimeMs,
       estimatedFreeAfterBytes: selected.mode.estimatedFreeAfterBytes,
-      canRender: selected.mode.canRender,
-      warning: selected.mode.warnings.join(" ") || undefined,
+      canRender: admission.canRender,
+      warning: multiVolumeWarnings.join(" ") || undefined,
       modeEstimates: {
         lowMemory: low.mode,
         normal: normal.mode,
@@ -288,6 +416,10 @@ export function registerIpc(
       systemResources,
       runtimePolicy: selected.policy,
       hardwareCapabilities: await renderHardware.getCapabilities(),
+      tempLocationStatuses,
+      selectedTempLocationId: selectedTemp?.locationId,
+      estimatedNextTempJobBytes,
+      outputVolumeCanRender,
     };
   };
   const unsubscribeProjectChanges = store.subscribe((change) => {
@@ -420,18 +552,72 @@ export function registerIpc(
     const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
     if (result.canceled || !result.filePaths[0]) return null;
     const validated = await validateRenderTemporaryFolder(result.filePaths[0]);
+    const currentLocations = userPreferences.snapshot().renderDefaults.tempLocations ?? [];
+    const nextLocations = currentLocations.length
+      ? currentLocations.map((item) => item.role === "PRIMARY" ? { ...item, path: validated.path } : item)
+      : [{ id: "primary", path: validated.path, role: "PRIMARY" as const, enabled: true, allowFallback: true }];
+    await userPreferences.setRenderTempLocations(nextLocations);
     await userPreferences.update({ renderDefaults: { renderTemporaryFolder: validated.path } });
     return validated;
   });
   ipcMain.handle("render-temp:validate", async (_event, targetPath: string) => {
     if (concatController) throw new Error("转档进行中，暂时不能切换 Render Temporary Folder。");
     const validated = await validateRenderTemporaryFolder(targetPath);
+    const currentLocations = userPreferences.snapshot().renderDefaults.tempLocations ?? [];
+    const nextLocations = currentLocations.length
+      ? currentLocations.map((item) => item.role === "PRIMARY" ? { ...item, path: validated.path } : item)
+      : [{ id: "primary", path: validated.path, role: "PRIMARY" as const, enabled: true, allowFallback: true }];
+    await userPreferences.setRenderTempLocations(nextLocations);
     await userPreferences.update({ renderDefaults: { renderTemporaryFolder: validated.path } });
     return validated;
+  });
+  ipcMain.handle("render-temp:list", async (): Promise<RenderTempLocationStatus[]> => {
+    const locations = userPreferences.snapshot().renderDefaults.tempLocations ?? [];
+    return Promise.all(locations.map(async (config) => {
+      try {
+        const disk = await validateRenderTemporaryFolder(config.path);
+        return describeRenderTempLocation({ config, freeBytes: disk.freeBytes, capacityBytes: disk.capacityBytes });
+      } catch {
+        return describeRenderTempLocation({ config, freeBytes: 0, capacityBytes: 0, writable: false });
+      }
+    }));
+  });
+  ipcMain.handle("render-temp:choose-location", async (event) => {
+    if (concatController) throw new Error("轉檔進行中，暫時不能切換 Render TEMP。");
+    const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const options: Electron.OpenDialogOptions = {
+      title: "選擇 Render TEMP 資料夾",
+      defaultPath: app.getPath("temp"),
+      properties: ["openDirectory", "createDirectory"],
+    };
+    const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
+    if (result.canceled || !result.filePaths[0]) return null;
+    return validateRenderTemporaryFolder(result.filePaths[0]);
+  });
+  ipcMain.handle("render-temp:set-locations", async (_event, locations: RenderTempLocationConfig[]) => {
+    if (concatController) throw new Error("轉檔進行中，暫時不能切換 Render TEMP。");
+    for (const item of locations) await validateRenderTemporaryFolder(item.path);
+    await userPreferences.setRenderTempLocations(locations);
+    const primary = locations.find((item) => item.role === "PRIMARY");
+    if (primary) await userPreferences.update({ renderDefaults: { renderTemporaryFolder: primary.path } });
+    return userPreferences.snapshot().renderDefaults.tempLocations;
   });
   ipcMain.handle("render-temp:reveal", () => {
     const target = userPreferences.snapshot().renderDefaults.renderTemporaryFolder ?? app.getPath("temp");
     electronShell.openPath(target);
+  });
+  ipcMain.handle("render-temp:reveal-registered", async (_event, requestedPath: string) => {
+    if (typeof requestedPath !== "string" || !path.isAbsolute(requestedPath)) throw new Error("TEMP 路徑無效。");
+    const requested = path.resolve(requestedPath);
+    const registered = userPreferences.snapshot().renderDefaults.tempLocations ?? [];
+    const root = registered.map((item) => path.resolve(item.path)).find((candidate) =>
+      requested.toLowerCase() === candidate.toLowerCase() || requested.toLowerCase().startsWith(candidate.toLowerCase() + path.sep),
+    );
+    if (!root) throw new Error("只能開啟已登錄 TEMP 內的資料夾。");
+    const item = await stat(requested).catch(() => undefined);
+    const folder = item?.isDirectory() ? requested : path.dirname(requested);
+    const result = await electronShell.openPath(folder);
+    if (result) throw new Error(`無法開啟 TEMP 資料夾：${result}`);
   });
   ipcMain.handle("project:get", () => store.getProject());
   ipcMain.handle("project:history-state", () => store.getHistoryState());
@@ -694,10 +880,16 @@ export function registerIpc(
       (request.videoCodec !== undefined && !RENDER_CODECS.has(request.videoCodec))
     )
       throw new Error("轉檔解析度或影片格式無效。");
-    const validatedRenderTemp = await validateRenderTemporaryFolder(
-      userPreferences.snapshot().renderDefaults.renderTemporaryFolder ?? app.getPath("temp"),
-    );
-    request.renderTemporaryFolder = validatedRenderTemp.path;
+    const renderDefaults = userPreferences.snapshot().renderDefaults;
+    request.tempLocations = structuredClone(renderDefaults.tempLocations ?? [{
+      id: "primary",
+      path: renderDefaults.renderTemporaryFolder ?? app.getPath("temp"),
+      role: "PRIMARY",
+      enabled: true,
+      allowFallback: true,
+    }]);
+    request.tempLocationSelection = request.tempLocationSelection ?? renderDefaults.tempLocationSelection ?? "AUTO";
+    request.renderTemporaryFolder = request.tempLocations.find((item) => item.role === "PRIMARY")?.path ?? request.tempLocations[0]?.path;
     const preflight = await estimateConcatWithSystem(selectedOutput.outputPath, {
       outputToken: request.outputToken,
       expectedDurationMs: request.estimatedDurationMs ?? 0,
@@ -708,12 +900,20 @@ export function registerIpc(
       resourceProfile: request.resourceProfile,
       maximumRenderRamGiB: request.maximumRenderRamGiB,
       maximumRenderTempGiB: request.maximumRenderTempGiB,
+      tempLocations: request.tempLocations,
+      tempLocationSelection: request.tempLocationSelection,
       orderedAssetIds: request.orderedAssetIds,
       clipSelections: request.clipSelections,
       transitionSeconds: request.transitionSeconds,
       generatedInputCount: request.mainStartCard ? 1 : 0,
     });
     if (!preflight.canRender) throw new Error(preflight.warning ?? "輸出磁碟空間不足 1 GB，本次不會開始轉檔。");
+    // Checkpoint metadata is small, but its initial work root must still be
+    // reachable. An offline/full primary must not prevent a new C: fallback
+    // job from starting before the per-segment scheduler even runs.
+    request.renderTemporaryFolder = preflight.tempLocationStatuses?.find(
+      (location) => location.id === preflight.selectedTempLocationId,
+    )?.path ?? request.renderTemporaryFolder;
     const selectedProfile = resourceProfileFromLegacy(request);
     const selectedMode =
       selectedProfile === "LOW_DISK"
@@ -745,7 +945,7 @@ export function registerIpc(
         });
         publishConcatProgress(progress);
       });
-      await outputHistory.registerRender(result, store.getProject().name);
+      await outputHistory.registerRender(result, store.getProject().name, store.getProject().id);
       finishBackgroundJob(backgroundJobId, result.cancelled ? "CANCELLED" : "COMPLETED", {
         detail: result.cancelled ? "使用者取消，已保留可播放結尾" : result.outputPath,
       });
@@ -785,16 +985,98 @@ export function registerIpc(
   });
   ipcMain.handle("remote-control:clear-prepared-render", () => renderCommands.clearPrepared());
   ipcMain.handle("concat:resume-offer", () => concatRenderer.getResumeOffer());
+  ipcMain.handle("concat:analyze-resume", async (_event, checkpointId: string) => {
+    if (typeof checkpointId !== "string" || !/^[a-f0-9-]{8,80}$/i.test(checkpointId))
+      throw new Error("續轉識別碼無效。");
+    return concatRenderer.analyzeResumeCompatibility(
+      checkpointId,
+      userPreferences.snapshot().renderDefaults.tempLocations ?? [],
+    );
+  });
+  ipcMain.handle("concat:analyze-resume-storage", async (_event, checkpointId: string) => {
+    if (typeof checkpointId !== "string" || !/^[a-f0-9-]{8,80}$/i.test(checkpointId))
+      throw new Error("續轉識別碼無效。");
+    return concatRenderer.analyzeResumeStorage(
+      checkpointId,
+      userPreferences.snapshot().renderDefaults.tempLocations ?? [],
+    );
+  });
+  ipcMain.handle("concat:execute-resume-storage-plan", async (_event, request: ExecuteResumeStoragePlanRequest) => {
+    if (concatController) throw new Error("轉檔進行中，不能搬移 Resume Artifact。");
+    if (!request || typeof request.checkpointId !== "string" || typeof request.planId !== "string" || !Array.isArray(request.artifactIds))
+      throw new Error("空間最佳化要求格式無效。");
+    return concatRenderer.executeResumeStoragePlan(
+      request.checkpointId,
+      request.planId,
+      request.artifactIds,
+      userPreferences.snapshot().renderDefaults.tempLocations ?? [],
+    );
+  });
+  ipcMain.handle("concat:scan-remap-artifacts", async (_event, checkpointId: string) => {
+    if (concatController) throw new Error("轉檔進行中，不能重新對應 Resume Artifact。");
+    if (typeof checkpointId !== "string" || !/^[a-f0-9-]{8,80}$/i.test(checkpointId))
+      throw new Error("續轉識別碼無效。");
+    return concatRenderer.scanAndRemapManuallyMovedArtifacts(
+      checkpointId,
+      userPreferences.snapshot().renderDefaults.tempLocations ?? [],
+    );
+  });
+  ipcMain.handle("render-temp:analyze-artifacts", async () => {
+    const offer = await concatRenderer.getResumeOffer();
+    const roots = (userPreferences.snapshot().renderDefaults.tempLocations ?? []).map((item) => item.path);
+    const known = !offer ? {
+      capturedAt: new Date().toISOString(),
+      roots,
+      items: [],
+      totalBytes: 0,
+      immediatelyReclaimableBytes: 0,
+      movableBytes: 0,
+    } : (await concatRenderer.analyzeResumeStorage(
+        offer.checkpointId,
+        userPreferences.snapshot().renderDefaults.tempLocations ?? [],
+      )).inventory;
+    return scanRegisteredTemporaryArtifacts(roots, known, store.getProject().sources.map((asset) => asset.sourcePath));
+  });
+  ipcMain.handle("render-temp:execute-artifact-actions", async (_event, request: ExecuteTemporaryArtifactActionsRequest) => {
+    if (concatController) throw new Error("轉檔進行中，不能清理或搬移 TEMP Artifact。");
+    if (!request || !Array.isArray(request.artifactIds) || !request.artifactIds.length)
+      throw new Error("未選擇要處理的 TEMP Artifact。");
+    // The generic inventory currently exposes protected Resume artifacts only.
+    // Deletion/move becomes available only when a fresh analyzer can prove the
+    // item is independent; never accept a renderer-supplied path or status.
+    throw new Error("所選 TEMP Artifact 目前沒有可安全執行的獨立清理證據，已全部保留。");
+  });
   ipcMain.handle("concat:discard-resume", async (_event, checkpointId: string) => {
     if (typeof checkpointId !== "string" || !/^[a-f0-9-]{8,80}$/i.test(checkpointId))
       throw new Error("續轉識別碼無效。");
     await concatRenderer.discardResume(checkpointId);
+  });
+  ipcMain.handle("concat:remap-resume", async (_event, request: RenderCheckpointRemapRequest) => {
+    if (concatController) throw new Error("轉檔進行中，不能重新對應 checkpoint。");
+    if (!request || typeof request.checkpointId !== "string") throw new Error("重新對應要求格式無效。");
+    const target = await validateRenderTemporaryFolder(request.toRoot);
+    const remappedSegmentCount = await concatRenderer.remapResumeSegments(
+      request.checkpointId,
+      request.fromRoot,
+      target.path,
+    );
+    return { ...request, toRoot: target.path, remappedSegmentCount };
   });
   ipcMain.handle("concat:discard-video-master", () => concatRenderer.discardReusableVideoMaster());
   const executeConcatResume = async (checkpointId: string) => {
     if (concatController) throw new Error("已有一個串連預覽正在產出，請先等待或取消。");
     if (typeof checkpointId !== "string" || !/^[a-f0-9-]{8,80}$/i.test(checkpointId))
       throw new Error("續轉識別碼無效。");
+    const resumeDefaults = userPreferences.snapshot().renderDefaults;
+    const storage = await concatRenderer.analyzeResumeStorage(checkpointId, resumeDefaults.tempLocations ?? []);
+    if (!storage.canResumeWithoutCleanup) {
+      const shortfall = (storage.plan.shortfallBytes / 1024 ** 3).toFixed(1);
+      throw new Error(
+        storage.plan.action === "PROPOSE_MOVE" || storage.plan.action === "PROPOSE_CLEANUP"
+          ? `APP_PREEMPTIVE_DISK_PAUSE：續轉前需要確認 TEMP 最佳化方案（目前同時峰值尚缺約 ${shortfall} GB）。`
+          : `APP_PREEMPTIVE_DISK_PAUSE：目前沒有可安全執行的空間方案（同時峰值尚缺約 ${shortfall} GB）；checkpoint 與完成片段均已保留。`,
+      );
+    }
     postSuccessPower.cancel("侦测到新的续转工作；已取消先前排定的电源动作。");
     const releasePowerGuard = renderPowerGuard.acquire();
     const controller = new AbortController();
@@ -812,8 +1094,8 @@ export function registerIpc(
           cumulativeElapsedMs: progress.cumulativeElapsedMs,
         });
         publishConcatProgress(progress);
-      });
-      await outputHistory.registerRender(result, store.getProject().name);
+      }, resumeDefaults.tempLocations, resumeDefaults.tempLocationSelection ?? "AUTO");
+      await outputHistory.registerRender(result, store.getProject().name, store.getProject().id);
       finishBackgroundJob(backgroundJobId, result.cancelled ? "CANCELLED" : "COMPLETED", {
         detail: result.cancelled ? "使用者取消，已清除本次續轉工作" : result.outputPath,
       });
@@ -1175,6 +1457,553 @@ export function registerIpc(
   ipcMain.handle("bgm:ai-suggest-cancel", () => musicSuggestionController?.abort());
   ipcMain.handle("bgm:open-suggestion", (_event, url: string) => musicSuggestions.open(url));
   ipcMain.handle("subtitle:set-cues", (_event, cues: SubtitleCue[]) => store.setSubtitleCues(cues));
+  const describeSubtitleVideo = async (selection: ReturnType<typeof selectSubtitleVideoSource>) => {
+    if (!selection.path) return { reason: "NONE" as const };
+    const media = await subtitleVideoProbe.probe(selection.path);
+    const file = await stat(selection.path);
+    return {
+      reason: selection.reason,
+      jobId: selection.record?.jobId,
+      outputPath: selection.path,
+      fileName: path.basename(selection.path),
+      durationMs: media.durationMs,
+      width: media.displayWidth ?? media.width,
+      height: media.displayHeight ?? media.height,
+      videoCodec: media.videoCodec,
+      frameRate: media.frameRate,
+      sizeBytes: file.size,
+      createdAt: file.birthtime.toISOString(),
+      modifiedAt: file.mtime.toISOString(),
+      previewUrl: authorizeSubtitleVideo(selection.path),
+    };
+  };
+  const persistedManualSubtitlePath = async () => {
+    if (lastManualSubtitleVideoPath) return lastManualSubtitleVideoPath;
+    try {
+      const parsed = JSON.parse(await readFile(subtitleSourcePreferencePath, "utf8")) as { path?: unknown };
+      if (typeof parsed.path === "string" && path.isAbsolute(parsed.path)) lastManualSubtitleVideoPath = parsed.path;
+    } catch { /* no saved manual source */ }
+    return lastManualSubtitleVideoPath;
+  };
+  const currentSubtitleVideoSelection = async () => {
+    if (explicitSubtitleVideoPath) return { reason: resumedSubtitleSelectionReason ?? "MANUAL_PATH" as const, path: explicitSubtitleVideoPath };
+    const history = await outputHistory.snapshot();
+    return selectSubtitleVideoSource(history.outputs, {
+      projectId: store.getProject().id,
+      projectName: store.getProject().name,
+      lastManualPath: await persistedManualSubtitlePath(),
+      isManualPathValid: (candidate) => path.isAbsolute(candidate),
+    });
+  };
+  ipcMain.handle("subtitle:analysis-video:get", async () => {
+    const result = await describeSubtitleVideo(await currentSubtitleVideoSelection());
+    subtitleLog("SUBTITLE_UI", { projectId: store.getProject().id, videoPath: "outputPath" in result ? result.outputPath : undefined, loadedProjectCues: store.getProject().subtitleCues.length });
+    return result;
+  });
+  ipcMain.handle("subtitle:analysis-video:choose", async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const options: Electron.OpenDialogOptions = {
+      title: "選擇 AI 字幕分析影片（只讀）",
+      properties: ["openFile"],
+      filters: [{ name: "影片", extensions: ["mp4", "mov", "mkv", "m4v", "avi", "webm"] }],
+    };
+    const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
+    if (result.canceled || !result.filePaths[0]) return null;
+    const selectedPath = path.resolve(result.filePaths[0]);
+    const file = await stat(selectedPath);
+    if (!file.isFile() || file.size < 1) throw new Error("選取的分析影片不存在或是空檔案。");
+    lastManualSubtitleVideoPath = selectedPath;
+    explicitSubtitleVideoPath = selectedPath;
+    resumedSubtitleSelectionReason = undefined;
+    await mkdir(path.dirname(subtitleSourcePreferencePath), { recursive: true });
+    const preferencePartial = `${subtitleSourcePreferencePath}.${process.pid}.partial`;
+    await writeFile(preferencePartial, JSON.stringify({ schemaVersion: 1, path: selectedPath }, null, 2), "utf8");
+    await rename(preferencePartial, subtitleSourcePreferencePath);
+    return describeSubtitleVideo({ reason: "MANUAL_PATH", path: selectedPath });
+  });
+  const publishSubtitleVisualProgress = (event: Electron.IpcMainInvokeEvent, progress: SubtitleVisualAnalysisProgress) => {
+    if (!event.sender.isDestroyed()) event.sender.send("subtitle:visual-job:progress", progress);
+  };
+  const subtitlePreflight = async (options: SubtitleVisualAnalysisOptions): Promise<SubtitleVisualPreflight> => {
+    const project = store.getProject();
+    const selected = await currentSubtitleVideoSelection();
+    if (!selected.path) throw new Error("請先選擇分析影片。");
+    const media = await subtitleVideoProbe.probe(selected.path);
+    const videoDurationMs = media.durationMs ?? 0;
+    if (videoDurationMs <= 0) throw new Error("影片沒有有效時長。");
+    const projectDurationMs = buildTimelinePlan(project, { includeIntro: project.introSegments.length > 0 }).durationMs;
+    const comparison = subtitleAnalysisMode(selected.reason, projectDurationMs, videoDurationMs);
+    const identity = selected.reason === "PROJECT_CONCAT" ? "PROJECT_OUTPUT" as const : selected.reason === "LATEST_CONCAT" ? "LEGACY_PROJECT_OUTPUT" as const : "EXTERNAL" as const;
+    const recommendedMode = comparison.mode;
+    const siblingSrt = path.join(path.dirname(selected.path), `${path.parse(selected.path).name}.srt`);
+    let existingSrtPath: string | undefined;
+    let existingSrtCount = 0;
+    try { const imported = await importSrtFile(siblingSrt); existingSrtPath = siblingSrt; existingSrtCount = imported.cues.length; } catch { /* no readable sibling SRT */ }
+    let modelId: string | undefined;
+    let selectionMode: "AUTO" | "MANUAL" = "AUTO";
+    try { const runtime = aiRuntime(options.provider === "GEMINI" ? "GEMINI" : "OPENAI"); modelId = runtime.model; selectionMode = runtime.model.toLowerCase() === "auto" ? "AUTO" : "MANUAL"; } catch { /* configuration is resolved at start, never prevents viewing subtitles */ }
+    return { videoPath: selected.path, videoDurationMs, projectDurationMs, differenceMs: comparison.differenceMs,
+      toleranceMs: comparison.toleranceMs, timelineCompatible: comparison.compatible, recommendedMode, identity,
+      existingSrtPath, existingSrtCount, projectSubtitleCount: project.subtitleCues.length,
+      rawFrameEstimate: Math.ceil(videoDurationMs / (Math.max(1, Math.min(60, options.intervalSeconds)) * 1000)),
+      provider: options.provider, selectionMode, modelId,
+      warning: recommendedMode === "VIDEO_FIRST" ? "所選影片與目前專案未確認相容；使用影片時間軸建立獨立草稿，不會修改專案。" : undefined };
+  };
+  ipcMain.handle("subtitle:visual-preflight", (_event, options: SubtitleVisualAnalysisOptions) => subtitlePreflight(options));
+  ipcMain.handle("subtitle:workspace:get", () => standaloneSubtitles.latest());
+  ipcMain.handle("subtitle:workspace:import-srt", async (event) => {
+    const selected = await currentSubtitleVideoSelection();
+    if (!selected.path) throw new Error("請先選擇要檢查的影片，再匯入既有 SRT。");
+    const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const dialogOptions: Electron.OpenDialogOptions = {
+      title: "匯入既有 SRT 到獨立影片檢查工作區",
+      defaultPath: userPreferences.getLastDirectory("SUBTITLE_INPUT", app.getPath("documents")),
+      properties: ["openFile"],
+      filters: [{ name: "SubRip 字幕", extensions: ["srt"] }],
+    };
+    const picked = window ? await dialog.showOpenDialog(window, dialogOptions) : await dialog.showOpenDialog(dialogOptions);
+    if (picked.canceled || !picked.filePaths[0]) return null;
+    const imported = await importSrtFile(picked.filePaths[0]);
+    const media = await subtitleVideoProbe.probe(selected.path);
+    const durationMs = media.durationMs ?? 0;
+    if (durationMs <= 0) throw new Error("所選影片沒有有效時長。");
+    if (imported.cues.some((cue) => cue.endMs > durationMs)) throw new Error("SRT 字幕超出所選影片時長；來源檔保持不變，請選擇相符影片或修正副本。");
+    const file = await stat(selected.path);
+    const fingerprint = createHash("sha256").update(`${selected.path}\0${file.size}\0${file.mtimeMs}`).digest("hex");
+    await userPreferences.rememberDirectory("SUBTITLE_INPUT", picked.filePaths[0]);
+    return standaloneSubtitles.create(selected.path, fingerprint, durationMs, imported.cues.map((cue) => ({
+      ...cue,
+      timelineScope: "MAIN" as const,
+      origin: "IMPORTED_SRT" as const,
+      reviewStatus: "DRAFT" as const,
+    })));
+  });
+  ipcMain.handle("subtitle:project-ai-check:prepare", async () => {
+    const project = store.getProject();
+    if (project.introSegments.length > 0)
+      throw new Error("目前專案含片頭，片頭與正片字幕使用各自時間軸；為避免把合併成品時間誤套回專案，v0.88 暫不建立可回寫的全專案 AI 檢查工作區。可使用獨立影片工作區，只保存 AI draft。");
+    const selected = await currentSubtitleVideoSelection();
+    if (!selected.path || selected.reason !== "PROJECT_CONCAT")
+      throw new Error("AI 檢查現有專案字幕只接受帶有目前 projectId 的成功輸出；legacy／外部影片請使用獨立影片字幕工作區。");
+    const media = await subtitleVideoProbe.probe(selected.path);
+    const durationMs = media.durationMs ?? 0;
+    const projectDurationMs = buildTimelinePlan(project, { includeIntro: project.introSegments.length > 0 }).durationMs;
+    const compatibility = subtitleTimelineCompatibility(projectDurationMs, durationMs);
+    if (!compatibility.compatible) throw new Error("目前專案輸出時長與時間線不相容，不能檢查或套回專案字幕。");
+    const file = await stat(selected.path);
+    const fingerprint = createHash("sha256").update(`${selected.path}\0${file.size}\0${file.mtimeMs}`).digest("hex");
+    return standaloneSubtitles.create(selected.path, fingerprint, durationMs, structuredClone(project.subtitleCues), {
+      projectId: project.id,
+      timelineRevision: project.timelineRevision,
+    });
+  });
+  ipcMain.handle("subtitle:workspace:save", (_event, id: string, cues: SubtitleCue[]) => standaloneSubtitles.save(id, cues));
+  ipcMain.handle("subtitle:workspace:export", async (_event, id: string, token: string) => {
+    const selected = subtitleOutputTokens.get(token);
+    if (!selected || Date.now() - selected.createdAt > 30 * 60 * 1000) throw new Error("請重新選擇字幕儲存位置。");
+    const workspace = await standaloneSubtitles.get(id);
+    subtitleOutputTokens.delete(token);
+    const backupPath = await backupExistingSubtitleOutput(selected.outputPath);
+    const result = await exportSrt(workspace.cues, selected.outputPath);
+    return { ...result, backupPath };
+  });
+  const evidenceFrameCache = new Map<string, string>();
+  const pendingEvidenceFrames = new Map<string, Promise<{ url: string }>>();
+  let evidenceFrameQueue: Promise<unknown> = Promise.resolve();
+  const subtitleEvidenceFrame = async (id: string, timestampMs: number): Promise<{ url: string }> => {
+    if (!Number.isFinite(timestampMs)) throw new Error("字幕影格時間無效。");
+    const workspace = await standaloneSubtitles.get(id);
+    await standaloneSubtitles.validateSource(workspace);
+    const startMs = Math.max(0, Math.min(workspace.videoDurationMs - 1, Math.round(timestampMs)));
+    const key = `${id}:${startMs}`;
+    const cached = evidenceFrameCache.get(key);
+    if (cached) return { url: cached };
+    const pending = pendingEvidenceFrames.get(key);
+    if (pending) return pending;
+    const job = evidenceFrameQueue.catch(() => undefined).then(async () => {
+      let image = "";
+      await subtitleFrameExtractor.extractBatches({ sourcePath: workspace.videoPath, projectId: workspace.id,
+        cacheRoot: path.join(app.getPath("userData"), "cache"), segments: [{ type: "MAIN", startMs, endMs: startMs + 1 }],
+        intervalSeconds: 1, detectSceneChanges: false, deduplicateFrames: false }, async (frames) => {
+          if (frames[0]) image = `data:image/jpeg;base64,${(await readFile(frames[0].path)).toString("base64")}`;
+        });
+      evidenceFrameCache.set(key, image);
+      if (evidenceFrameCache.size > 20) evidenceFrameCache.delete(evidenceFrameCache.keys().next().value!);
+      return { url: image };
+    }).finally(() => pendingEvidenceFrames.delete(key));
+    pendingEvidenceFrames.set(key, job);
+    evidenceFrameQueue = job;
+    return job;
+  };
+  ipcMain.handle("subtitle:workspace:frame", (_event, id: string, timestampMs: number) => subtitleEvidenceFrame(id, timestampMs));
+
+  const publishSubtitleAiCheckProgress = (event: Electron.IpcMainInvokeEvent, progress: SubtitleAiCheckProgress) => {
+    if (!event.sender.isDestroyed()) event.sender.send("subtitle:ai-check:progress", progress);
+  };
+  const runSubtitleAiCheck = async (event: Electron.IpcMainInvokeEvent, request: SubtitleAiCheckRequest, resumeOnly = false): Promise<SubtitleAiCheckJobSnapshot> => {
+    if (!request.enabled) throw new Error("逐筆 AI 檢查預設關閉；請先明確勾選啟用。");
+    if (subtitleAiCheckController) throw new Error("逐筆 AI 字幕檢查正在執行中。");
+    const workspace = await standaloneSubtitles.get(request.workspaceId);
+    const options = {
+      enabled: true,
+      interactiveConfirmation: request.interactiveConfirmation !== false,
+      provider: request.provider,
+      displayLanguage: request.displayLanguage,
+      title: request.title.slice(0, 240),
+      description: request.description.slice(0, 4000),
+    };
+    const saved = await subtitleAiCheckJobs.load();
+    const sameInput = saved?.workspaceId === workspace.id
+      && saved.videoFingerprint === workspace.videoFingerprint
+      && JSON.stringify(saved.options) === JSON.stringify(options);
+    if (resumeOnly && !sameInput) throw new Error("找不到可繼續的逐筆 AI 字幕檢查工作。");
+    let snapshot = sameInput ? saved! : createSubtitleAiCheckSnapshot(workspace.id, workspace.videoFingerprint, options, workspace.cues.length);
+    let runtime: Awaited<ReturnType<typeof subtitleProvider>>;
+    try {
+      await standaloneSubtitles.validateSource(workspace);
+      runtime = await subtitleProvider(request.provider);
+    } catch (error) {
+      const categorized = classifySubtitleAiCheckError(error);
+      snapshot.progress = { ...snapshot.progress, status: "FAILED", total: workspace.cues.length, errorCode: categorized.code, error: categorized.message };
+      await subtitleAiCheckJobs.save(snapshot);
+      publishSubtitleAiCheckProgress(event, snapshot.progress);
+      throw categorized;
+    }
+    const provider = runtime.provider.kind === "GEMINI"
+      ? new GeminiSubtitleAiCheckProvider(runtime.model, runtime.apiKey)
+      : new OpenAiSubtitleAiCheckProvider(runtime.model, runtime.apiKey);
+    const completedCacheCurrent = workspace.cues.every((cue, index) => snapshot.proposals.some((proposal) => proposal.cueId === cue.id
+      && proposal.baseCueRevision === subtitleCueRevision(cue)
+      && proposal.baseContextRevision === subtitleAiCheckContextRevision(cue, workspace.cues[index - 1], workspace.cues[index + 1], options.title, options.description)
+      && proposal.provider === provider.kind && proposal.modelId === provider.modelId));
+    if (snapshot.progress.status === "COMPLETED" && completedCacheCurrent) {
+      publishSubtitleAiCheckProgress(event, snapshot.progress);
+      return snapshot;
+    }
+    if (snapshot.progress.status === "COMPLETED") snapshot = createSubtitleAiCheckSnapshot(workspace.id, workspace.videoFingerprint, options, workspace.cues.length);
+    if (resumeOnly && options.interactiveConfirmation && snapshot.proposals.some((proposal) => proposal.status === "PENDING" || proposal.status === "EDITING"))
+      throw new Error("請先處理目前 AI 建議，再繼續下一筆。");
+    const controller = new AbortController();
+    subtitleAiCheckController = controller;
+    subtitleAiCheckPaused = false;
+    const startedAt = Date.now();
+    const previousElapsed = snapshot.progress.elapsedMs;
+    snapshot.progress = { ...snapshot.progress, status: "RUNNING", total: workspace.cues.length, provider: provider.kind, modelId: provider.modelId, error: undefined, errorCode: undefined };
+    await subtitleAiCheckJobs.save(snapshot);
+    publishSubtitleAiCheckProgress(event, snapshot.progress);
+    try {
+      for (let index = snapshot.progress.nextCueIndex; index < workspace.cues.length; index += 1) {
+        if (controller.signal.aborted) throw new DOMException("AI 字幕檢查已停止。", "AbortError");
+        const latestWorkspace = await standaloneSubtitles.get(workspace.id);
+        const latestCueIndex = latestWorkspace.cues.findIndex((item) => item.id === workspace.cues[index].id);
+        const cue = latestWorkspace.cues[latestCueIndex];
+        if (!cue) {
+          snapshot.progress = { ...snapshot.progress, processed: index + 1, nextCueIndex: index + 1, elapsedMs: previousElapsed + Date.now() - startedAt };
+          await subtitleAiCheckJobs.save(snapshot);
+          continue;
+        }
+        const previous = latestWorkspace.cues[latestCueIndex - 1];
+        const next = latestWorkspace.cues[latestCueIndex + 1];
+        const contextRevision = subtitleAiCheckContextRevision(cue, previous, next, options.title, options.description);
+        const priorProposal = snapshot.proposals.find((item) => item.cueId === cue.id && item.baseCueRevision === subtitleCueRevision(cue)
+          && item.baseContextRevision === contextRevision && item.provider === provider.kind && item.modelId === provider.modelId);
+        if (priorProposal) {
+          snapshot.progress = { ...snapshot.progress, processed: index + 1, nextCueIndex: index + 1, cacheHits: snapshot.progress.cacheHits + 1, currentCueId: cue.id, elapsedMs: previousElapsed + Date.now() - startedAt };
+          await subtitleAiCheckJobs.save(snapshot);
+          publishSubtitleAiCheckProgress(event, snapshot.progress);
+          continue;
+        }
+        const middle = Math.round((cue.startMs + cue.endMs) / 2);
+        const times = [...new Set([
+          previous ? Math.round((previous.startMs + previous.endMs) / 2) : undefined,
+          cue.startMs,
+          middle,
+          Math.max(cue.startMs, cue.endMs - 1),
+          next ? Math.round((next.startMs + next.endMs) / 2) : undefined,
+        ].filter((value): value is number => value !== undefined))];
+        const roles = times.map((time) => time === cue.startMs ? "START" as const : time === middle ? "MIDDLE" as const : time === Math.max(cue.startMs, cue.endMs - 1) ? "END" as const : previous && time < cue.startMs ? "PREVIOUS" as const : "NEXT" as const);
+        const evidence = [];
+        for (let evidenceIndex = 0; evidenceIndex < times.length; evidenceIndex += 1) {
+          try {
+            const frame = await subtitleEvidenceFrame(workspace.id, times[evidenceIndex]);
+            if (frame.url) evidence.push({ role: roles[evidenceIndex], timestampMs: times[evidenceIndex], imageDataUrl: frame.url });
+          } catch (error) {
+            throw new SubtitleAiCheckError("FRAME_EXTRACTION", error instanceof Error ? error.message : "字幕檢查影格擷取失敗。");
+          }
+        }
+        const result = await provider.checkCue({ cue, cueIndex: latestCueIndex, cueCount: latestWorkspace.cues.length, videoDurationMs: workspace.videoDurationMs,
+          previousCue: previous, nextCue: next, title: options.title, description: options.description,
+          displayLanguage: options.displayLanguage, evidence }, controller.signal);
+        snapshot.proposals.push(buildSubtitleAiCheckProposal(cue, latestCueIndex, times, provider, result, contextRevision));
+        snapshot.progress = advanceSubtitleAiCheckProgress(snapshot.progress, index, cue.id, options.interactiveConfirmation, previousElapsed + Date.now() - startedAt);
+        await subtitleAiCheckJobs.save(snapshot);
+        publishSubtitleAiCheckProgress(event, snapshot.progress);
+        if (options.interactiveConfirmation) return snapshot;
+      }
+      snapshot.progress = { ...snapshot.progress, status: "COMPLETED", currentCueId: undefined, elapsedMs: previousElapsed + Date.now() - startedAt };
+      await subtitleAiCheckJobs.save(snapshot);
+      publishSubtitleAiCheckProgress(event, snapshot.progress);
+      return snapshot;
+    } catch (error) {
+      const aborted = controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError");
+      const categorized = classifySubtitleAiCheckError(error);
+      snapshot.progress = { ...snapshot.progress, status: aborted ? (subtitleAiCheckPaused ? "PAUSED" : "STOPPED") : "FAILED", elapsedMs: previousElapsed + Date.now() - startedAt,
+        errorCode: aborted ? undefined : categorized.code, error: aborted ? undefined : categorized.message };
+      await subtitleAiCheckJobs.save(snapshot);
+      publishSubtitleAiCheckProgress(event, snapshot.progress);
+      if (!aborted) throw categorized;
+      return snapshot;
+    } finally {
+      if (subtitleAiCheckController === controller) subtitleAiCheckController = undefined;
+    }
+  };
+  const launchSubtitleAiCheck = (event: Electron.IpcMainInvokeEvent, request: SubtitleAiCheckRequest, resumeOnly = false) => {
+    if (subtitleAiCheckRunPromise) throw new Error("逐筆 AI 字幕檢查正在執行中。");
+    const task = runSubtitleAiCheck(event, request, resumeOnly);
+    subtitleAiCheckRunPromise = task;
+    void task.then(
+      () => { if (subtitleAiCheckRunPromise === task) subtitleAiCheckRunPromise = undefined; },
+      () => { if (subtitleAiCheckRunPromise === task) subtitleAiCheckRunPromise = undefined; },
+    );
+    return task;
+  };
+  ipcMain.handle("subtitle:ai-check:get", () => subtitleAiCheckJobs.load());
+  ipcMain.handle("subtitle:ai-check:start", (event, request: SubtitleAiCheckRequest) => launchSubtitleAiCheck(event, request));
+  ipcMain.handle("subtitle:ai-check:pause", async () => {
+    subtitleAiCheckPaused = true;
+    const running = subtitleAiCheckRunPromise;
+    subtitleAiCheckController?.abort();
+    if (running) await running.catch(() => undefined);
+  });
+  ipcMain.handle("subtitle:ai-check:stop", async () => {
+    subtitleAiCheckPaused = false;
+    const running = subtitleAiCheckRunPromise;
+    if (subtitleAiCheckController) subtitleAiCheckController.abort();
+    if (running) await running.catch(() => undefined);
+    const snapshot = await subtitleAiCheckJobs.load();
+    if (snapshot && (snapshot.progress.status === "PAUSED" || snapshot.progress.status === "RUNNING")) {
+      snapshot.progress = { ...snapshot.progress, status: "STOPPED", currentCueId: undefined };
+      await subtitleAiCheckJobs.save(snapshot);
+    }
+    return snapshot;
+  });
+  ipcMain.handle("subtitle:ai-check:resume", async (event) => {
+    const saved = await subtitleAiCheckJobs.load();
+    if (!saved) throw new Error("找不到可繼續的逐筆 AI 字幕檢查工作。");
+    return launchSubtitleAiCheck(event, { workspaceId: saved.workspaceId, ...saved.options }, true);
+  });
+  ipcMain.handle("subtitle:ai-check:action", async (_event, action: SubtitleAiCheckAction) => {
+    const snapshot = await subtitleAiCheckJobs.load();
+    if (!snapshot || snapshot.workspaceId !== action.workspaceId) throw new Error("逐筆 AI 字幕檢查工作不存在或已過期。");
+    const proposalIndex = snapshot.proposals.findIndex((item) => item.id === action.proposalId);
+    if (proposalIndex < 0) throw new Error("找不到這筆 AI 字幕建議。");
+    if (snapshot.progress.status === "RUNNING") throw new Error("請先暫停逐筆 AI 檢查，再處理建議。");
+    const workspace = await standaloneSubtitles.get(action.workspaceId);
+    const linkedProject = workspace.sourceProjectId ? store.getProject() : undefined;
+    if ((action.action === "APPLY" || action.action === "EDIT") && linkedProject
+      && (linkedProject.id !== workspace.sourceProjectId || linkedProject.timelineRevision !== workspace.sourceTimelineRevision))
+      throw new Error("專案時間線已變更；AI 建議保留但不能套用，請重新建立檢查工作。");
+    const targetCues = linkedProject && linkedProject.id === workspace.sourceProjectId ? linkedProject.subtitleCues : workspace.cues;
+    const resolved = resolveSubtitleAiCheckAction(targetCues, snapshot.proposals[proposalIndex], action, workspace.videoDurationMs);
+    snapshot.proposals[proposalIndex] = resolved.proposal;
+    const updatedWorkspace = action.action === "APPLY" || action.action === "EDIT"
+      ? await standaloneSubtitles.save(workspace.id, resolved.cues)
+      : workspace;
+    const updatedProject = (action.action === "APPLY" || action.action === "EDIT") && linkedProject && !resolved.conflict
+      ? await store.setSubtitleCues(resolved.cues)
+      : undefined;
+    await subtitleAiCheckJobs.save(snapshot);
+    return { workspace: updatedWorkspace, project: updatedProject, proposal: resolved.proposal, conflict: resolved.conflict };
+  });
+  let subtitleVisualResumeData: { videoPath?: string; selectionReason?: "PROJECT_CONCAT" | "LATEST_CONCAT" | "MANUAL_PATH" | "NONE"; videoFingerprint?: string; contextRevision?: string; nextBatch?: number; drafts?: import("./services/subtitle-vision-orchestrator").SubtitleVisionDraft[]; frameSegments?: Record<string, SubtitleVisionFrame["segmentType"]>; progress?: SubtitleVisualAnalysisProgress } = {};
+  const saveSubtitleVisualCheckpoint = async (options: SubtitleVisualAnalysisOptions, status: string) => {
+    await mkdir(path.dirname(subtitleVisualCheckpointPath), { recursive: true });
+    const partial = `${subtitleVisualCheckpointPath}.${process.pid}.partial`;
+    await writeFile(partial, JSON.stringify({ schemaVersion: 2, projectId: store.getProject().id, options, status, ...subtitleVisualResumeData, updatedAt: new Date().toISOString() }, null, 2), "utf8");
+    await rename(partial, subtitleVisualCheckpointPath);
+  };
+  const runSubtitleVisualJob = async (event: Electron.IpcMainInvokeEvent, options: SubtitleVisualAnalysisOptions) => {
+    if (subtitleVisualController) throw new Error("AI 畫面字幕分析已在進行中。");
+    const project = store.getProject();
+    const selected = await currentSubtitleVideoSelection();
+    if (!selected.path) throw new Error("找不到可分析的成功 Final Output，請先選擇影片。");
+    const media = await subtitleVideoProbe.probe(selected.path);
+    const durationMs = media.durationMs ?? 0;
+    if (durationMs <= 0) throw new Error("分析影片沒有有效時長。");
+    const combined = buildTimelinePlan(project, { includeIntro: project.introSegments.length > 0 });
+    const preflight = await subtitlePreflight(options);
+    if (options.srtPolicy === "CANCEL") return;
+    const mode = options.analysisMode === "VIDEO_FIRST" ? "VIDEO_FIRST" : preflight.recommendedMode;
+    subtitleLog("AI", { mode, selected: selected.path, videoDurationMs: durationMs, projectDurationMs: combined.durationMs, differenceMs: preflight.differenceMs });
+    const assetById = new Map(project.sources.map((asset) => [asset.id, asset]));
+    const segments = mode === "VIDEO_FIRST" ? [{ type: "MAIN" as const, startMs: 0, endMs: durationMs }] : combined.clips
+      .filter((clip) => options.scopes.includes(clip.scope))
+      .map((clip) => ({
+        type: clip.scope === "INTRO" ? "INTRO" as const : assetById.get(clip.assetId)?.kind === "IMAGE" ? "PHOTO" as const : clip.mediaInsertionId ? "INSERT" as const : "MAIN" as const,
+        startMs: clip.outputStartMs,
+        endMs: clip.outputEndMs,
+      }));
+    if (!segments.length) throw new Error("所選字幕範圍沒有可分析片段。");
+    const controller = new AbortController();
+    subtitleVisualController = controller;
+    subtitleVisualPaused = false;
+    subtitleVisualLastOptions = structuredClone(options);
+    const startedAt = Date.now();
+    let lastProgress: SubtitleVisualAnalysisProgress = { status: "RUNNING", phase: "PREPARING_VIDEO", rawFrames: 0, sceneFrames: 0, deduplicatedFrames: 0, sentFrames: 0, requests: 0, elapsedMs: 0, tokens: 0, cacheHits: 0, temporaryBytes: 0, mode };
+    const base = (): SubtitleVisualAnalysisProgress => ({ ...lastProgress, elapsedMs: Date.now() - startedAt });
+    const publish = (patch: Partial<SubtitleVisualAnalysisProgress>) => { lastProgress = { ...base(), ...patch }; publishSubtitleVisualProgress(event, lastProgress); };
+    publishSubtitleVisualProgress(event, base());
+    try {
+      if (preflight.existingSrtPath && options.srtPolicy === "BACKUP") {
+        const backup = `${preflight.existingSrtPath}.backup_${new Date().toISOString().replace(/[:.]/g, "-")}.srt`;
+        await copyFile(preflight.existingSrtPath, backup, 1);
+      }
+      const file = await stat(selected.path);
+      const videoFingerprint = createHash("sha256").update(`${selected.path}\0${file.size}\0${file.mtimeMs}`).digest("hex");
+      const contextRevision = createHash("sha256").update(JSON.stringify({
+        title: options.title.trim(), description: options.description.trim(), mode,
+        timeline: segments.map((segment) => [segment.type, segment.startMs, segment.endMs]),
+      })).digest("hex");
+      try {
+        const saved = JSON.parse(await readFile(subtitleVisualCheckpointPath, "utf8")) as typeof subtitleVisualResumeData & { projectId?: string; status?: string; options?: SubtitleVisualAnalysisOptions };
+        const sameOptions = JSON.stringify(saved.options) === JSON.stringify(options);
+        subtitleVisualResumeData = ["PAUSED", "FAILED", "CANCELLED"].includes(saved.status ?? "") && saved.projectId === project.id && saved.videoFingerprint === videoFingerprint && saved.contextRevision === contextRevision && sameOptions ? saved : {};
+      } catch { subtitleVisualResumeData = {}; }
+      subtitleVisualResumeData = { ...subtitleVisualResumeData, videoPath: selected.path, selectionReason: selected.reason, videoFingerprint, contextRevision };
+      if (subtitleVisualResumeData.progress) lastProgress = { ...subtitleVisualResumeData.progress, status: "RUNNING", mode };
+      const resolvedProvider = await subtitleProvider(options.provider);
+      let provider: import("./services/subtitle-vision-orchestrator").SubtitleVisionProvider = resolvedProvider.provider;
+      publish({ modelId: resolvedProvider.model });
+      subtitleLog("AI", { provider: provider.kind, model: provider.version });
+      const cache = new DiskSubtitleVisionCache(path.join(app.getPath("userData"), "cache", "subtitle-vision", project.id));
+      const allDrafts: import("./services/subtitle-vision-orchestrator").SubtitleVisionDraft[] = [...(subtitleVisualResumeData.drafts ?? [])];
+      const frameSegments = new Map<string, SubtitleVisionFrame["segmentType"]>(Object.entries(subtitleVisualResumeData.frameSegments ?? {}) as Array<[string, SubtitleVisionFrame["segmentType"]]>);
+      let processedFrames = subtitleVisualResumeData.progress?.sentFrames ?? 0;
+      let requestCount = subtitleVisualResumeData.progress?.requests ?? 0;
+      let tokenCount = subtitleVisualResumeData.progress?.tokens ?? 0;
+      let cacheHits = subtitleVisualResumeData.progress?.cacheHits ?? 0;
+      let frameIndex = 0;
+      const extracted = await subtitleFrameExtractor.extractBatches({
+        sourcePath: selected.path,
+        cacheRoot: path.join(app.getPath("userData"), "cache"),
+        projectId: project.id,
+        segments,
+        intervalSeconds: options.intervalSeconds,
+        detectSceneChanges: options.detectSceneChanges,
+        deduplicateFrames: options.deduplicateFrames,
+        sceneThreshold: 0.3,
+        signal: controller.signal,
+        onProgress: (item) => publish({ phase: item.stage === "SCENES" ? "SCENE_DETECTION" : "EXTRACTING_FRAMES",
+          rawFrames: item.rawFrames ?? lastProgress.rawFrames,
+          sceneFrames: item.sceneFrames ?? lastProgress.sceneFrames,
+          deduplicatedFrames: item.deduplicatedFrames ?? lastProgress.deduplicatedFrames }),
+      }, async (items, batchIndex) => {
+        if (batchIndex < (subtitleVisualResumeData.nextBatch ?? 0)) { frameIndex += items.length; return; }
+        const batch: SubtitleVisionFrame[] = [];
+        let temporaryBytes = 0;
+        for (const item of items) {
+          const bytes = await readFile(item.path);
+          temporaryBytes += bytes.byteLength;
+          const id = `frame-${frameIndex++}-${item.timeMs}`;
+          frameSegments.set(id, item.segmentType);
+          batch.push({ id, timestampMs: item.timeMs, imageDataUrl: `data:image/jpeg;base64,${bytes.toString("base64")}`, fingerprint: createHash("sha256").update(bytes).digest("hex"), videoFingerprint, videoDurationMs: durationMs, contextRevision, segmentType: item.segmentType, context: { projectName: mode === "PROJECT_AWARE" ? project.name : "", title: options.title, description: options.description, previousSubtitle: allDrafts.at(-1)?.text, neighborTimestampsMs: items.map((frame) => frame.timeMs) } });
+        }
+        publish({ phase: "AI_ANALYZING", temporaryBytes });
+        const fallbackResult = await runSubtitleVisionBatchWithFallback(batch, provider, cache, { density: options.density, language: options.displayLanguage, signal: controller.signal }, {
+          catalog: aiModels, apiKey: resolvedProvider.apiKey, selectionMode: resolvedProvider.selectionMode,
+          onFallback: (previousModel, nextModel, reason) => { publish({ modelId: nextModel }); subtitleLog("AI_FALLBACK", { previousModel, nextModel, status: reason.status, code: reason.code }); },
+        });
+        provider = fallbackResult.provider;
+        const analyzed = fallbackResult.result;
+        allDrafts.push(...analyzed.drafts);
+        processedFrames += batch.length;
+        requestCount += analyzed.progress.requests;
+        tokenCount += analyzed.progress.inputTokens + analyzed.progress.outputTokens;
+        cacheHits += analyzed.progress.cacheHits;
+        subtitleLog("AI_BATCH", { batchIndex, frames: batch.length, requests: requestCount, tokens: tokenCount, cacheHits });
+        publish({ phase: "AI_ANALYZING", sentFrames: processedFrames, requests: requestCount, tokens: tokenCount, cacheHits, temporaryBytes });
+        subtitleVisualResumeData = { videoPath: selected.path, selectionReason: selected.reason, videoFingerprint, contextRevision, nextBatch: batchIndex + 1, drafts: allDrafts, frameSegments: Object.fromEntries(frameSegments), progress: base() };
+        await saveSubtitleVisualCheckpoint(options, "RUNNING");
+      });
+      publish({ phase: "GENERATING_SUBTITLES" });
+      const finalSourceStat = await stat(selected.path);
+      if (finalSourceStat.size !== file.size || finalSourceStat.mtimeMs !== file.mtimeMs) throw new Error("分析期間影片已變更；既有字幕保留，請重新分析新影片。");
+      const merged = mergeSubtitleVisionDrafts(allDrafts, { durationMs, maxCharsPerLine: 60 });
+      const currentProject = store.getProject();
+      const writeMode = mode === "PROJECT_AWARE" && currentProject.id === project.id && currentProject.timelineRevision === project.timelineRevision ? "PROJECT_AWARE" : "VIDEO_FIRST";
+      const introOrigin = combined.clips.find((clip) => clip.scope === "INTRO")?.outputStartMs ?? 0;
+      const mainOrigin = combined.clips.find((clip) => clip.scope === "MAIN")?.outputStartMs ?? 0;
+      const cues = merged.map((draft) => {
+        const scope: SubtitleTimelineScope = frameSegments.get(draft.frameId) === "INTRO" ? "INTRO" : "MAIN";
+        const origin = writeMode === "VIDEO_FIRST" ? 0 : scope === "INTRO" ? introOrigin : mainOrigin;
+        return { id: randomUUID(), startMs: Math.max(0, draft.startMs - origin), endMs: Math.max(1, draft.endMs - origin), text: draft.text, timelineScope: scope, origin: "AI_VISUAL" as const, reviewStatus: "DRAFT" as const, aiConfidence: Math.round(draft.confidence * 100), aiWarnings: draft.warning ? [draft.warning] : [], aiAnalysisVersion: provider.version };
+      });
+      const workspace = writeMode === "VIDEO_FIRST" ? await standaloneSubtitles.create(selected.path, videoFingerprint, durationMs, cues) : undefined;
+      subtitleLog("SUBTITLE", { mode: writeMode, draftGenerated: cues.length, workspaceId: workspace?.id });
+      if (writeMode === "PROJECT_AWARE") await store.replaceAiSubtitleDrafts(cues, options.scopes, "PRESERVE_USER_EDITED");
+      subtitleVisualResumeData = {};
+      await saveSubtitleVisualCheckpoint(options, "COMPLETED");
+      publish({ status: "COMPLETED", phase: "DRAFT_READY", mode: writeMode, rawFrames: extracted.plan.counters.raw, sceneFrames: extracted.plan.counters.scene, deduplicatedFrames: extracted.plan.counters.dedup, sentFrames: processedFrames, requests: requestCount, tokens: tokenCount, cacheHits, draftCount: cues.length, temporaryBytes: 0 });
+      return { mode: writeMode, generatedCount: cues.length, workspace };
+    } catch (error) {
+      const paused = subtitleVisualPaused && error instanceof Error && error.name === "AbortError";
+      await saveSubtitleVisualCheckpoint(options, paused ? "PAUSED" : error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED");
+      publishSubtitleVisualProgress(event, { ...base(), status: paused ? "PAUSED" : error instanceof Error && error.name === "AbortError" ? "CANCELLED" : "FAILED", error: error instanceof Error ? error.message : String(error) });
+      if (!paused) throw error;
+    } finally {
+      if (subtitleVisualController === controller) subtitleVisualController = undefined;
+    }
+  };
+  ipcMain.handle("subtitle:visual-job:start", (event, options: SubtitleVisualAnalysisOptions) => runSubtitleVisualJob(event, options));
+  ipcMain.handle("subtitle:visual-job:pause", async () => { subtitleVisualPaused = true; subtitleVisualController?.abort(); });
+  ipcMain.handle("subtitle:visual-job:cancel", async () => { subtitleVisualPaused = false; subtitleVisualController?.abort(); if (subtitleVisualLastOptions) await saveSubtitleVisualCheckpoint(subtitleVisualLastOptions, "CANCELLED"); });
+  ipcMain.handle("subtitle:visual-job:resume", async (event) => {
+    const saved = JSON.parse(await readFile(subtitleVisualCheckpointPath, "utf8")) as { projectId: string; options: SubtitleVisualAnalysisOptions; videoPath?: string; selectionReason?: string };
+    if (saved.projectId !== store.getProject().id) throw new Error("暫停工作不屬於目前專案。");
+    if (saved.videoPath && path.isAbsolute(saved.videoPath)) {
+      explicitSubtitleVideoPath = saved.videoPath;
+      resumedSubtitleSelectionReason = saved.selectionReason === "PROJECT_CONCAT" || saved.selectionReason === "LATEST_CONCAT" ? saved.selectionReason : "MANUAL_PATH";
+    }
+    if (!subtitleVisualLastOptions) {
+      subtitleVisualLastOptions = saved.options;
+    }
+    return runSubtitleVisualJob(event, subtitleVisualLastOptions);
+  });
+  ipcMain.handle("subtitle:visual-cue:regenerate", async (_event, request: SubtitleVisualCueRegenerateRequest) => {
+    const project = store.getProject();
+    const cue = project.subtitleCues.find((item) => item.id === request.cueId);
+    if (!cue || cue.origin !== "AI_VISUAL" || cue.reviewStatus !== "DRAFT") throw new Error("只能重新產生待確認的畫面 AI 草稿。");
+    const selected = await currentSubtitleVideoSelection();
+    if (!selected.path) throw new Error("找不到可分析的成功 Final Output。");
+    const combined = buildTimelinePlan(project, { includeIntro: project.introSegments.length > 0 });
+    const origin = cue.timelineScope === "INTRO"
+      ? combined.clips.find((clip) => clip.scope === "INTRO")?.outputStartMs ?? 0
+      : combined.clips.find((clip) => clip.scope === "MAIN")?.outputStartMs ?? 0;
+    const media = await subtitleVideoProbe.probe(selected.path);
+    const durationMs = media.durationMs ?? 0;
+    const compatibility = subtitleTimelineCompatibility(combined.durationMs, durationMs);
+    if (!compatibility.compatible || selected.reason === "MANUAL_PATH") throw new Error("此影片不適合直接修改專案字幕；請用影片時間軸分析建立獨立草稿。");
+    const center = origin + Math.round((cue.startMs + cue.endMs) / 2);
+    const startMs = Math.max(0, center - 1_000);
+    const endMs = Math.min(durationMs, center + 1_001);
+    const { provider } = await subtitleProvider(request.provider);
+    const file = await stat(selected.path);
+    const videoFingerprint = createHash("sha256").update(`${selected.path}\0${file.size}\0${file.mtimeMs}`).digest("hex");
+    const contextRevision = createHash("sha256").update(JSON.stringify([cue.id, cue.startMs, cue.endMs, request.instruction, request.displayLanguage])).digest("hex");
+    const drafts: import("./services/subtitle-vision-orchestrator").SubtitleVisionDraft[] = [];
+    await subtitleFrameExtractor.extractBatches({ projectId: project.id, sourcePath: selected.path, cacheRoot: path.join(app.getPath("userData"), "cache"), segments: [{ type: "MAIN", startMs, endMs }], intervalSeconds: 1, detectSceneChanges: false, deduplicateFrames: true }, async (items) => {
+      const frames: SubtitleVisionFrame[] = [];
+      for (let index = 0; index < items.length; index += 1) {
+        const bytes = await readFile(items[index].path);
+        frames.push({ id: `cue-${cue.id}-${index}`, timestampMs: items[index].timeMs, imageDataUrl: `data:image/jpeg;base64,${bytes.toString("base64")}`, fingerprint: createHash("sha256").update(bytes).digest("hex"), videoFingerprint, videoDurationMs: durationMs, contextRevision, segmentType: "MAIN", context: { projectName: project.name, title: project.aiStoryContext.topic, description: `${project.aiStoryContext.storySummary ?? ""}\nUser correction: ${request.instruction}`.trim(), previousSubtitle: cue.text } });
+      }
+      const result = await runSubtitleVisionDrafts(frames, provider, new DiskSubtitleVisionCache(path.join(app.getPath("userData"), "cache", "subtitle-vision", project.id)), { density: "STANDARD", language: request.displayLanguage });
+      drafts.push(...result.drafts);
+    });
+    if (!drafts.length) throw new Error("附近畫面沒有產生可用字幕建議。");
+    const text = drafts.map((draft) => draft.text.trim()).filter(Boolean).join(" ").slice(0, 120);
+    return { text, confidence: Math.min(...drafts.map((draft) => draft.confidence)), warning: drafts.find((draft) => draft.warning)?.warning };
+  });
   ipcMain.handle("subtitle:ai-generate", async (event, options: AiSubtitleGenerationOptions) => {
     if (aiSubtitleController) throw new Error("AI 字幕分析已在進行中。");
     const controller = new AbortController();
@@ -1261,6 +2090,7 @@ export function registerIpc(
           includedIntroSegmentCount: store.getProject().introSegments.length,
         },
         store.getProject().name,
+        store.getProject().id,
       );
       finishBackgroundJob(backgroundJobId, "COMPLETED", { detail: result.outputPath });
       return result;
@@ -1340,6 +2170,44 @@ export function registerIpc(
     } finally {
       subtitleExportController = undefined;
     }
+  });
+  ipcMain.handle("subtitle:save-ai-draft", async (_event, token: string, scopes?: SubtitleTimelineScope[]) => {
+    const selected = subtitleOutputTokens.get(token);
+    if (!selected || Date.now() - selected.createdAt > 30 * 60 * 1000)
+      throw new Error("字幕輸出位置授權已失效，請重新選擇。");
+    const selectedScopes = new Set(
+      (Array.isArray(scopes) && scopes.length ? scopes : ["MAIN"]).filter(
+        (scope): scope is SubtitleTimelineScope => scope === "INTRO" || scope === "MAIN",
+      ),
+    );
+    const drafts = store.getProject().subtitleCues
+      .filter((cue) => (cue.reviewStatus ?? "CONFIRMED") === "DRAFT" && selectedScopes.has(cue.timelineScope ?? "MAIN"))
+      .sort((left, right) => (left.timelineScope ?? "MAIN").localeCompare(right.timelineScope ?? "MAIN") || left.startMs - right.startMs);
+    if (!drafts.length) throw new Error("目前範圍沒有待確認的 AI 字幕草稿。");
+    const saved = await writeSubtitleAiDraft(selected.outputPath, drafts);
+    selected.draftScopes = [...selectedScopes];
+    selected.draftCueIds = drafts.map((cue) => cue.id);
+    const preflight = await preflightSubtitleAiDraft(selected.outputPath);
+    return { ...saved, officialExists: preflight.officialExists, defaultChoice: preflight.defaultChoice };
+  });
+  ipcMain.handle("subtitle:promote-ai-draft", async (_event, token: string, choice: "BACKUP" | "OVERWRITE" | "CANCEL") => {
+    const selected = subtitleOutputTokens.get(token);
+    if (!selected || Date.now() - selected.createdAt > 30 * 60 * 1000)
+      throw new Error("字幕輸出位置授權已失效，請重新選擇。");
+    if (choice !== "BACKUP" && choice !== "OVERWRITE" && choice !== "CANCEL") throw new Error("字幕衝突處理選項無效。");
+    if (choice !== "CANCEL") {
+      const scopes = new Set(selected.draftScopes ?? []);
+      if (!scopes.size) throw new Error("找不到這份草稿的審核範圍，請重新保存 AI 草稿。");
+      const cuesById = new Map(store.getProject().subtitleCues.map((cue) => [cue.id, cue]));
+      const unconfirmed = (selected.draftCueIds ?? []).filter(
+        (id) => (cuesById.get(id)?.reviewStatus ?? "CONFIRMED") !== "CONFIRMED",
+      );
+      if (!selected.draftCueIds?.length || unconfirmed.length)
+        throw new Error(`仍有 ${unconfirmed.length || "未識別"} 筆草稿未逐筆確認；不能升級正式 SRT。`);
+    }
+    const result = await promoteStoredSubtitleAiDraft(selected.outputPath, choice);
+    if (!result.cancelled) subtitleOutputTokens.delete(token);
+    return result;
   });
   ipcMain.handle("subtitle:cancel-export", () => subtitleExportController?.abort());
   ipcMain.handle("youtube:get-settings", () => youtubeSettings.getSnapshot());

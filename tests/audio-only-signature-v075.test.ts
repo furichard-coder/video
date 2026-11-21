@@ -58,4 +58,22 @@ describe("v0.75 audio-only checkpoint signatures", () => {
       finalInsertionAudioSignature(base, plan, request),
     );
   });
+
+  it("does not re-key picture media when only TEMP location or storage estimates change", () => {
+    const original = pictureBaseRenderSignature(project, {
+      ...request,
+      renderTemporaryFolder: "E:\\temp\\SceneryWalker",
+      tempLocations: [{ id: "primary", path: "E:\\temp\\SceneryWalker", role: "PRIMARY", enabled: true }],
+      tempLocationSelection: "PRIMARY",
+      estimatedPeakDiskBytes: 100,
+    });
+    const fallback = pictureBaseRenderSignature(project, {
+      ...request,
+      renderTemporaryFolder: "C:\\Users\\test\\AppData\\Local\\Temp\\SceneryWalker",
+      tempLocations: [{ id: "fallback", path: "C:\\Users\\test\\AppData\\Local\\Temp\\SceneryWalker", role: "FALLBACK", enabled: true }],
+      tempLocationSelection: "FALLBACK",
+      estimatedPeakDiskBytes: 200,
+    });
+    expect(fallback).toBe(original);
+  });
 });

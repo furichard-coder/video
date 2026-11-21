@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { AiPublishAssets, GeminiPublishReview } from "../../shared/domain";
+import { AiModelCatalogService, getAiModelCatalogRoot } from "./ai-model-catalog";
 import type { PublishGenerationInput } from "./publish-generation";
 
 type FetchLike = typeof fetch;
@@ -14,7 +15,26 @@ function strings(value: unknown): string[] {
 }
 
 export class GeminiPublishReviewProvider {
-  constructor(private readonly fetcher: FetchLike = fetch) {}
+  private readonly modelCatalog: AiModelCatalogService;
+
+  constructor(
+    private readonly fetcher: FetchLike = fetch,
+    catalogRootDir = getAiModelCatalogRoot(),
+  ) {
+    this.modelCatalog = new AiModelCatalogService(catalogRootDir, fetcher);
+  }
+
+  private async resolveModel(model: string, apiKey: string): Promise<string> {
+    if (model.trim().toLowerCase() !== "auto") return model;
+    try {
+      return await this.modelCatalog.resolve("GEMINI", apiKey, model);
+    } catch {
+      const result = await this.modelCatalog.test("GEMINI", apiKey, "auto");
+      if (!result.ok || !result.modelId)
+        throw new Error(result.message || "Auto 找不到通過圖片與結構化輸出測試的 Gemini 模型。");
+      return result.modelId;
+    }
+  }
 
   async review(
     assets: AiPublishAssets,
@@ -22,6 +42,7 @@ export class GeminiPublishReviewProvider {
     settings: { model: string; apiKey: string },
     signal?: AbortSignal,
   ): Promise<GeminiPublishReview> {
+    const model = await this.resolveModel(settings.model, settings.apiKey);
     const titleIds = assets.titles.map((item) => item.id);
     const thumbnailIds = assets.thumbnails.map((item) => item.id);
     const prompt = [
@@ -39,7 +60,7 @@ export class GeminiPublishReviewProvider {
       })),
     );
     const response = await this.fetcher(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.model)}:generateContent`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": settings.apiKey },
@@ -86,7 +107,7 @@ export class GeminiPublishReviewProvider {
     return {
       enabled: true,
       status: "REVIEWED",
-      model: settings.model,
+      model,
       summary: typeof parsed.summary === "string" ? parsed.summary.trim().slice(0, 1_000) : "Gemini 已完成第二次復核。",
       recommendedTitleId,
       recommendedThumbnailId,

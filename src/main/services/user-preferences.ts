@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import type {
   AudioProtectionOptions,
   BgmScopeSelection,
@@ -17,6 +18,7 @@ import type {
   TransitionDurationSec,
   UserPreferences,
   UserPreferencesUpdate,
+  RenderTempLocationConfig,
   ViewMode,
   VoiceInputLanguage,
   YoutubePrivacyStatus,
@@ -47,6 +49,94 @@ const SUBTITLE_LANGUAGES = new Set<SubtitleRenderLanguage>(["zh-TW", "en", "zh-C
 const SUBTITLE_POSITIONS = new Set<SubtitleRenderPosition>(["TOP", "MIDDLE", "BOTTOM"]);
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const MAIN_START_TRANSITIONS = new Set<MainStartCardTransition>(["DISSOLVE", "FADE_BLACK", "HARD_CUT"]);
+
+function defaultRenderTempLocations(): RenderTempLocationConfig[] {
+  return [
+    { id: "primary", path: "E:\\temp\\SceneryWalker", role: "PRIMARY", enabled: true, allowFallback: true, reserveBytes: 1 * 1024 ** 3 },
+    {
+      id: "fallback",
+      path: path.join(os.tmpdir(), "SceneryWalker"),
+      role: "FALLBACK",
+      enabled: true,
+      allowFallback: true,
+      reserveBytes: 2 * 1024 ** 3,
+    },
+  ];
+}
+
+function sanitizeTempLocations(
+  value: unknown,
+  legacyPrimaryPath?: string,
+): RenderTempLocationConfig[] {
+  const source = Array.isArray(value) && value.length ? value : defaultRenderTempLocations();
+  const locations: RenderTempLocationConfig[] = [];
+  for (const entry of source) {
+    if (!entry || typeof entry !== "object") continue;
+    const item = entry as Partial<RenderTempLocationConfig>;
+    if (
+      typeof item.id !== "string" ||
+      !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(item.id) ||
+      typeof item.path !== "string" ||
+      !path.isAbsolute(item.path) ||
+      (item.role !== "PRIMARY" && item.role !== "FALLBACK")
+    ) continue;
+    const resolvedPath = path.resolve(item.path);
+    const volume = path.parse(resolvedPath).root.toUpperCase();
+    const fallbackReserve = volume === "C:\\" ? 2 * 1024 ** 3 : 1 * 1024 ** 3;
+    const storedReserve = Number.isFinite(item.reserveBytes) ? Math.max(0, Math.ceil(item.reserveBytes!)) : undefined;
+    // Migrate only known v0.81/v0.82 default locations and values. The live
+    // project uses E:\temp rather than the later factory subdirectory; an
+    // arbitrary user-selected 20/30 GiB reserve must remain untouched.
+    const normalizedPath = resolvedPath.toLowerCase();
+    const legacyPrimary = item.role === "PRIMARY" &&
+      (normalizedPath === path.resolve("E:\\temp").toLowerCase() ||
+        normalizedPath === path.resolve("E:\\temp\\SceneryWalker").toLowerCase()) &&
+      storedReserve === 20 * 1024 ** 3;
+    const legacyFallback = item.role === "FALLBACK" &&
+      normalizedPath === path.resolve(path.join(os.tmpdir(), "SceneryWalker")).toLowerCase() &&
+      storedReserve === 30 * 1024 ** 3;
+    const reserveBytes = storedReserve === undefined || legacyPrimary || legacyFallback
+      ? fallbackReserve
+      : storedReserve;
+    locations.push({
+      id: item.id,
+      path: resolvedPath,
+      role: item.role,
+      enabled: item.enabled !== false,
+      allowFallback: item.allowFallback !== false,
+      reserveBytes,
+    });
+  }
+  if (!locations.length) {
+    const fallback = defaultRenderTempLocations();
+    if (legacyPrimaryPath && path.isAbsolute(legacyPrimaryPath)) fallback[0]!.path = path.resolve(legacyPrimaryPath);
+    return fallback;
+  }
+  if (legacyPrimaryPath && path.isAbsolute(legacyPrimaryPath) && (!Array.isArray(value) || value.length === 0)) {
+    const primary = locations.find((item) => item.role === "PRIMARY");
+    if (primary) primary.path = path.resolve(legacyPrimaryPath);
+  }
+  if (!locations.some((item) => item.role === "PRIMARY")) locations[0]!.role = "PRIMARY";
+  let keptPrimary = false;
+  for (const location of locations) {
+    if (location.role === "PRIMARY") {
+      if (keptPrimary) location.role = "FALLBACK";
+      keptPrimary = true;
+    }
+  }
+  return locations;
+}
+
+function validateTempLocations(locations: unknown): RenderTempLocationConfig[] {
+  if (!Array.isArray(locations) || locations.length < 1 || locations.length > 8) throw new Error("Render TEMP 位置數量無效。");
+  const normalized = sanitizeTempLocations(locations);
+  if (normalized.length !== locations.length) throw new Error("Render TEMP 位置格式或路徑無效。");
+  if (normalized.filter((item) => item.role === "PRIMARY").length !== 1) throw new Error("必須指定一個主要 TEMP 磁碟。");
+  if (new Set(normalized.map((item) => item.id)).size !== normalized.length) throw new Error("Render TEMP 位置 ID 重複。");
+  if (new Set(normalized.map((item) => item.path.toLocaleLowerCase())).size !== normalized.length)
+    throw new Error("Render TEMP 位置不可重複。");
+  return normalized;
+}
 
 export function sanitizePostSuccessPowerPreference(value: unknown): PostSuccessPowerPreference {
   const candidate = value && typeof value === "object" ? (value as Partial<PostSuccessPowerPreference>) : {};
@@ -249,6 +339,8 @@ function defaults(): UserPreferences {
       youtubeFullAutoUpload: true,
       postSuccessPower: sanitizePostSuccessPowerPreference(undefined),
       renderTemporaryFolder: undefined,
+      tempLocations: defaultRenderTempLocations(),
+      tempLocationSelection: "AUTO",
       introPreviewIncludeBgm: false,
       mainPreviewIncludeBgm: true,
       mainStartCard: sanitizeMainStartCardOptions(undefined),
@@ -345,6 +437,11 @@ function sanitize(value: unknown): UserPreferences {
         typeof render?.renderTemporaryFolder === "string" && path.isAbsolute(render.renderTemporaryFolder)
           ? path.resolve(render.renderTemporaryFolder)
           : undefined,
+      tempLocations: sanitizeTempLocations(render?.tempLocations, render?.renderTemporaryFolder),
+      tempLocationSelection:
+        render?.tempLocationSelection === "PRIMARY" || render?.tempLocationSelection === "FALLBACK"
+          ? render.tempLocationSelection
+          : "AUTO",
       introPreviewIncludeBgm:
         typeof render?.introPreviewIncludeBgm === "boolean"
           ? render.introPreviewIncludeBgm
@@ -397,6 +494,14 @@ export class UserPreferencesStore {
 
   snapshot(): UserPreferences {
     return structuredClone(this.current);
+  }
+
+  async setRenderTempLocations(locations: RenderTempLocationConfig[]): Promise<UserPreferences> {
+    const sanitized = validateTempLocations(locations);
+    await this.mutate((next) => {
+      next.renderDefaults.tempLocations = sanitized;
+    });
+    return this.snapshot();
   }
 
   getLastDirectory(key: PreferenceDirectoryKey, fallback: string): string {
@@ -488,6 +593,18 @@ export class UserPreferencesStore {
           if (typeof render.renderTemporaryFolder !== "string" || !path.isAbsolute(render.renderTemporaryFolder))
             throw new Error("Render Temporary Folder 必須是絕對路徑。");
           next.renderDefaults.renderTemporaryFolder = path.resolve(render.renderTemporaryFolder);
+          next.renderDefaults.tempLocations = sanitizeTempLocations(next.renderDefaults.tempLocations).map((item) =>
+            item.role === "PRIMARY" ? { ...item, path: path.resolve(render.renderTemporaryFolder!) } : item,
+          );
+        }
+        if (render.tempLocations !== undefined) {
+          const locations = validateTempLocations(render.tempLocations);
+          next.renderDefaults.tempLocations = locations;
+        }
+        if (render.tempLocationSelection !== undefined) {
+          if (render.tempLocationSelection !== "AUTO" && render.tempLocationSelection !== "PRIMARY" && render.tempLocationSelection !== "FALLBACK")
+            throw new Error("Render TEMP 選址模式無效。");
+          next.renderDefaults.tempLocationSelection = render.tempLocationSelection;
         }
         if (render.introPreviewIncludeBgm !== undefined)
           next.renderDefaults.introPreviewIncludeBgm = Boolean(render.introPreviewIncludeBgm);

@@ -9,8 +9,15 @@ import type {
   SubtitleCueReviewStatus,
   SubtitleGenerationScope,
   SubtitlePreviewResult,
+  SubtitleAnalysisVideoSelection,
   SubtitlePreviewStyle,
   SubtitleTimelineScope,
+  MaterialAnalysisProvider,
+  SubtitleVisualDensity,
+  SubtitleVisualAnalysisProgress,
+  SubtitleVisualAnalysisOptions,
+  SubtitleVisualPreflight,
+  StandaloneSubtitleWorkspace,
 } from "../../shared/domain";
 import { buildTimelinePlan } from "../../shared/timeline-plan";
 import {
@@ -29,6 +36,15 @@ import { formatDuration } from "../format";
 import { SharedIntroPreviewHistory } from "./SharedIntroPreviewHistory";
 import { TimecodeInput } from "./TimecodeInput";
 import { SafeDefaultButton } from "./SafeDefaultButton";
+import { StandaloneSubtitleReview } from "./StandaloneSubtitleReview";
+import {
+  activeSubtitleCueAt,
+  adjacentCue,
+  buildSubtitlePlaybackSegments,
+  playbackSegmentAt,
+  projectClockToSourceMs,
+  sourceTimeToProjectClockMs,
+} from "../subtitle-playback";
 
 interface Props {
   project: ProjectManifest;
@@ -46,6 +62,18 @@ const DEFAULT_STYLE: SubtitlePreviewStyle = {
   shadowEnabled: true,
   outlineWidthPx: 2,
 };
+
+function formatExactCueTime(timeMs: number): string {
+  const safeMs = Math.max(0, Math.round(Number.isFinite(timeMs) ? timeMs : 0));
+  const hours = Math.floor(safeMs / 3_600_000);
+  const minutes = Math.floor((safeMs % 3_600_000) / 60_000);
+  const seconds = Math.floor((safeMs % 60_000) / 1_000);
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(safeMs % 1_000).padStart(3, "0")}`;
+}
+
+function formatCueDuration(startMs: number, endMs: number): string {
+  return `${(Math.max(0, endMs - startMs) / 1_000).toFixed(3)}s`;
+}
 
 function fileName(scopes: SubtitleTimelineScope[]) {
   const date = new Date();
@@ -83,6 +111,10 @@ function cueOrigin(cue: SubtitleCue): string {
 
 function cueScope(cue: SubtitleCue): SubtitleTimelineScope {
   return cue.timelineScope ?? "MAIN";
+}
+
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])"));
 }
 
 function scopeNeedsReview(project: ProjectManifest, scope: SubtitleTimelineScope): boolean {
@@ -141,6 +173,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   const [preview, setPreview] = useState<PreviewResult>();
   const [introPreview, setIntroPreview] = useState<SubtitlePreviewResult>();
   const [useIntroTimelinePreview, setUseIntroTimelinePreview] = useState(false);
+  const [sourcePlaybackScope, setSourcePlaybackScope] = useState<SubtitleTimelineScope>("MAIN");
   const [previewError, setPreviewError] = useState<string>();
   const [progress, setProgress] = useState<AiAnalysisProgress>();
   const [previewProgress, setPreviewProgress] = useState<ConcatRenderProgress>();
@@ -153,9 +186,36 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     "FILL_BLANKS" | "REPLACE_AI_SCOPE" | "PRESERVE_USER_EDITED"
   >("FILL_BLANKS");
   const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [followResumeRevision, setFollowResumeRevision] = useState(0);
+  const [projectAiCheckEnabled, setProjectAiCheckEnabled] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const [analysisVideo, setAnalysisVideo] = useState<SubtitleAnalysisVideoSelection>();
+  const [visualPreflight, setVisualPreflight] = useState<SubtitleVisualPreflight>();
+  const [standaloneWorkspace, setStandaloneWorkspace] = useState<StandaloneSubtitleWorkspace>();
+  const [visualProvider, setVisualProvider] = useState<MaterialAnalysisProvider>("CHATGPT");
+  const [visualIntervalSeconds, setVisualIntervalSeconds] = useState(2);
+  const [visualDensity, setVisualDensity] = useState<SubtitleVisualDensity>("STANDARD");
+  const [visualSrtPolicy, setVisualSrtPolicy] = useState<"BACKUP" | "SAVE_AS" | "OVERWRITE" | "CANCEL">("BACKUP");
+  const [detectSceneChanges, setDetectSceneChanges] = useState(true);
+  const [deduplicateFrames, setDeduplicateFrames] = useState(true);
+  const [visualTitle, setVisualTitle] = useState(project.aiStoryContext.topic ?? "");
+  const [visualDescription, setVisualDescription] = useState(project.aiStoryContext.storySummary ?? "");
+  const [visualProgress, setVisualProgress] = useState<SubtitleVisualAnalysisProgress>({
+    status: "IDLE",
+    rawFrames: 0,
+    sceneFrames: 0,
+    deduplicatedFrames: 0,
+    sentFrames: 0,
+    requests: 0,
+    elapsedMs: 0,
+    tokens: 0,
+    cacheHits: 0,
+    temporaryBytes: 0,
+  });
+  const [savedDraftToken, setSavedDraftToken] = useState<{ token: string; officialExists: boolean }>();
   const [localDirty, setLocalDirty] = useState(false);
   const [closePrompt, setClosePrompt] = useState(false);
   const [forceReviewPrompt, setForceReviewPrompt] = useState(false);
@@ -163,10 +223,20 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   const [lineWidthDraft, setLineWidthDraft] = useState("");
   const [positionCueId, setPositionCueId] = useState<string>();
   const [reviewQueueIds, setReviewQueueIds] = useState<string[]>([]);
+  const [visualDraftLanguage, setVisualDraftLanguage] = useState("zh-TW");
+  const [localCorrectionText, setLocalCorrectionText] = useState("");
   const [previewHistoryRevision, setPreviewHistoryRevision] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const selectedTextEditorRef = useRef<HTMLTextAreaElement>(null);
   const positionNudgeRef = useRef<HTMLDivElement>(null);
+  const cueListRef = useRef<HTMLElement>(null);
+  const cueRowRefs = useRef(new Map<string, HTMLDivElement>());
+  const manualFollowUntilRef = useRef(0);
+  const manualFollowTimerRef = useRef<number | undefined>(undefined);
+  const programmaticFollowUntilRef = useRef(0);
+  const continuePlaybackRef = useRef(false);
+  const handoffSegmentIdRef = useRef<string | undefined>(undefined);
+  const imagePlaybackAnchorRef = useRef<{ segmentId: string; projectMs: number; wallMs: number } | undefined>(undefined);
   const skipNextProjectSyncRef = useRef(false);
   const selectedScopes = useMemo(
     () => [...(scope.intro ? ["INTRO" as const] : []), ...(scope.main ? ["MAIN" as const] : [])],
@@ -185,6 +255,9 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     [cues, selectedScopes],
   );
   const overlappingIds = useMemo(() => overlappingCueIds(visibleCues), [visibleCues]);
+  useEffect(() => {
+    console.info("[SUBTITLE_UI]", { projectId: project.id, loaded: project.subtitleCues.length, renderedRows: visibleCues.length, drafts: cues.filter((cue) => cue.reviewStatus === "DRAFT").length });
+  }, [project.id, project.subtitleCues.length, visibleCues.length]);
   const selected = cues.find((cue) => cue.id === selectedId && selectedScopes.includes(cueScope(cue)));
   const selectedTimelineDurationMs =
     selected && cueScope(selected) === "INTRO"
@@ -209,69 +282,137 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     reviewableVisibleCues.length > 0 &&
     reviewableVisibleCues.every((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED");
 
+  const playbackScope: SubtitleTimelineScope = useIntroTimelinePreview ? "INTRO" : sourcePlaybackScope;
+  const playbackSegments = useMemo(() => buildSubtitlePlaybackSegments(project, playbackScope), [project, playbackScope]);
   const sourceSelection = useMemo(() => {
-    if (!selected || useIntroTimelinePreview) return undefined;
-    const cueDurationMs = Math.max(100, selected.endMs - selected.startMs);
-    if (selected.sourceAssetId) {
-      const asset = project.sources.find((item) => item.id === selected.sourceAssetId);
-      if (asset) {
-        if (asset.kind === "IMAGE")
-          return { asset, sourceStartMs: 0, sourceEndMs: asset.imageDurationMs ?? cueDurationMs };
-        const durationMs = asset.mediaInfo?.durationMs ?? asset.previewRange?.outMs;
-        const sourceStartMs = Math.max(
-          0,
-          Math.min(Math.max(0, (durationMs ?? selected.sourceInMs ?? 0) - 100), selected.sourceInMs ?? 0),
-        );
-        const requestedEndMs = Math.max(sourceStartMs + 100, selected.sourceOutMs ?? sourceStartMs + cueDurationMs);
-        const sourceEndMs = durationMs ? Math.min(durationMs, requestedEndMs) : requestedEndMs;
-        if (sourceEndMs - sourceStartMs >= 100) return { asset, sourceStartMs, sourceEndMs };
-      }
-    }
-    const plan =
-      cueScope(selected) === "INTRO"
-        ? buildTimelinePlan({ ...project, timelineOrder: [] }, { includeIntro: true })
-        : buildTimelinePlan(project);
-    const clip = plan.clips
-      .filter((item) => selected.startMs >= item.outputStartMs && selected.startMs < item.outputEndMs)
-      .at(-1);
-    if (clip) {
-      const asset = project.sources.find((item) => item.id === clip.assetId);
-      if (!asset) return undefined;
-      if (asset.kind === "IMAGE") return { asset, sourceStartMs: 0, sourceEndMs: clip.outMs - clip.inMs };
-      const sourceStartMs = Math.max(
-        clip.inMs,
-        Math.min(clip.outMs - 100, clip.inMs + selected.startMs - clip.outputStartMs),
-      );
-      const sourceEndMs = Math.max(sourceStartMs + 100, Math.min(clip.outMs, sourceStartMs + cueDurationMs));
-      return { asset, sourceStartMs, sourceEndMs };
-    }
-    return undefined;
-  }, [project, selected, useIntroTimelinePreview]);
+    if (useIntroTimelinePreview) return undefined;
+    const segment = playbackSegmentAt(playbackSegments, cursor) ?? playbackSegments[0];
+    return segment ? {
+      asset: segment.asset,
+      sourceStartMs: segment.sourceStartMs,
+      sourceEndMs: segment.sourceEndMs,
+      projectStartMs: segment.projectStartMs,
+      projectEndMs: segment.projectEndMs,
+      ownershipEndMs: segment.ownershipEndMs,
+      segmentId: segment.id,
+    } : undefined;
+  }, [cursor, playbackSegments, useIntroTimelinePreview]);
+  const activeSourcePreview = useMemo(() => {
+    if (!preview || !sourceSelection || preview.assetId !== sourceSelection.asset.id) return undefined;
+    if (sourceSelection.asset.kind === "IMAGE") return preview.variant === "IMAGE_PREVIEW" ? preview : undefined;
+    return preview.variant === "VIDEO_CLIP_PROXY" || preview.variant === "VIDEO_PROXY" ? preview : undefined;
+  }, [preview, sourceSelection?.asset.id, sourceSelection?.asset.kind]);
 
   const activeOverlayCue = useMemo(() => {
-    if (useIntroTimelinePreview)
-      return cues.find(
-        (cue) =>
-          cueScope(cue) === "INTRO" && cue.reviewStatus !== "REJECTED" && cue.startMs <= cursor && cue.endMs > cursor,
-      );
-    return selected?.reviewStatus === "REJECTED" ? undefined : selected;
-  }, [cues, cursor, selected, useIntroTimelinePreview]);
+    return activeSubtitleCueAt(cues, playbackScope, cursor);
+  }, [cues, cursor, playbackScope]);
+  const navigationCueId = selected && cueScope(selected) === playbackScope ? selectedId : activeOverlayCue?.id;
+
+  useEffect(() => {
+    const list = cueListRef.current;
+    if (!list) return;
+    const markManual = () => {
+      manualFollowUntilRef.current = Date.now() + 4_000;
+      if (manualFollowTimerRef.current !== undefined) window.clearTimeout(manualFollowTimerRef.current);
+      manualFollowTimerRef.current = window.setTimeout(() => setFollowResumeRevision((revision) => revision + 1), 4_000);
+    };
+    const onScroll = () => {
+      if (Date.now() < programmaticFollowUntilRef.current) return;
+      markManual();
+    };
+    const onManualScroll = () => markManual();
+    list.addEventListener("scroll", onScroll, { passive: true });
+    list.addEventListener("wheel", onManualScroll, { passive: true });
+    list.addEventListener("pointerdown", onManualScroll, { passive: true });
+    return () => {
+      list.removeEventListener("scroll", onScroll); list.removeEventListener("wheel", onManualScroll); list.removeEventListener("pointerdown", onManualScroll);
+      if (manualFollowTimerRef.current !== undefined) window.clearTimeout(manualFollowTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeOverlayCue) return;
+    if (Date.now() < manualFollowUntilRef.current) return;
+    const list = cueListRef.current;
+    const row = cueRowRefs.current.get(activeOverlayCue.id);
+    if (!list || !row) return;
+    programmaticFollowUntilRef.current = Date.now() + 1_200;
+    const listRect = list.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const relativeCenter = rowRect.height > 0
+      ? list.scrollTop + rowRect.top - listRect.top + rowRect.height / 2
+      : row.offsetTop + row.clientHeight / 2;
+    const top = Math.max(0, relativeCenter - list.clientHeight * 0.45);
+    if (typeof list.scrollTo === "function") list.scrollTo({ top, behavior: "smooth" });
+    else list.scrollTop = top;
+    console.info("[SUBTITLE] focus", { workspace: "project", cueId: activeOverlayCue.id, reason: followResumeRevision ? "manual-override-expired-or-active-change" : "active-change", top });
+  }, [activeOverlayCue?.id, followResumeRevision]);
 
   useEffect(() => {
     window.sourceApp.onAiAnalysisProgress(setProgress);
     window.sourceApp.onSubtitlePreviewProgress(setPreviewProgress);
+    window.sourceApp.onSubtitleVisualAnalysisProgress?.(setVisualProgress);
     void window.sourceApp
       .getUserPreferences()
       .then((preferences) => {
         setScope(preferences.subtitleGenerationScope);
+        setSourcePlaybackScope(preferences.subtitleGenerationScope.main ? "MAIN" : "INTRO");
         setSubtitleStyle(preferences.subtitlePreviewStyle);
       })
       .catch(() => undefined);
     return () => {
       window.sourceApp.clearAiAnalysisProgressListeners();
       window.sourceApp.clearSubtitlePreviewProgressListeners();
+      window.sourceApp.clearSubtitleVisualAnalysisProgressListeners?.();
     };
   }, []);
+
+  useEffect(() => {
+    setVisualTitle(project.aiStoryContext.topic ?? "");
+    setVisualDescription(project.aiStoryContext.storySummary ?? "");
+  }, [project.id, project.aiStoryContext.topic, project.aiStoryContext.storySummary]);
+
+  useEffect(() => {
+    void window.sourceApp
+      .getSubtitleAnalysisVideo?.()
+      .then(setAnalysisVideo)
+      .catch(() => undefined);
+    void window.sourceApp.getStandaloneSubtitleWorkspace?.().then((workspace) => setStandaloneWorkspace(workspace ?? undefined)).catch(() => undefined);
+  }, [project.id]);
+
+  const chooseAnalysisVideo = async () => {
+    try {
+      const selected = await window.sourceApp.chooseSubtitleAnalysisVideo?.();
+      if (selected) setAnalysisVideo(selected);
+    } catch (selectionError) {
+      setError(selectionError instanceof Error ? selectionError.message : String(selectionError));
+    }
+  };
+
+  const prepareProjectAiCheck = async () => {
+    if (!projectAiCheckEnabled || !window.sourceApp.prepareProjectSubtitleAiCheck) return;
+    if (localDirty && !await save()) return;
+    setBusy(true); setError(undefined);
+    try {
+      const workspace = await window.sourceApp.prepareProjectSubtitleAiCheck();
+      setStandaloneWorkspace(workspace);
+      setNotice("已用目前 projectId 的成功輸出建立 AI 逐筆檢查工作區；所有建議仍需人工保留、套用、編輯或略過。");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusy(false); }
+  };
+
+  const importStandaloneSrtReview = async () => {
+    if (!window.sourceApp.importStandaloneSubtitleWorkspaceFromSrt) return;
+    setBusy(true); setError(undefined);
+    try {
+      const workspace = await window.sourceApp.importStandaloneSubtitleWorkspaceFromSrt();
+      if (workspace) {
+        setStandaloneWorkspace(workspace);
+        setNotice("已將既有 SRT 複製到所選影片的獨立 AI draft 工作區；來源 SRT 與目前專案字幕都不會被修改。");
+      }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusy(false); }
+  };
 
   useEffect(() => {
     if (skipNextProjectSyncRef.current) {
@@ -343,12 +484,40 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
       }
     };
   }, [
+    sourceSelection?.segmentId,
     sourceSelection?.asset.id,
     sourceSelection?.asset.kind,
     sourceSelection?.sourceStartMs,
     sourceSelection?.sourceEndMs,
     useIntroTimelinePreview,
   ]);
+
+  useEffect(() => {
+    if (!activeSourcePreview?.url || sourceSelection?.asset.kind !== "VIDEO" || !continuePlaybackRef.current || useIntroTimelinePreview) return;
+    let cancelled = false;
+    let attempts = 0;
+    let timer: number | undefined;
+    const resume = () => {
+      if (cancelled || !continuePlaybackRef.current) return;
+      const player = videoRef.current;
+      if (!player) {
+        if (attempts++ < 40) timer = window.setTimeout(resume, 50);
+        return;
+      }
+      player.play().then(() => { continuePlaybackRef.current = false; }).catch(() => {
+        if (attempts++ < 40) timer = window.setTimeout(resume, 100);
+      });
+    };
+    timer = window.setTimeout(resume, 0);
+    return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer); };
+  }, [activeSourcePreview?.url, sourceSelection?.segmentId, sourceSelection?.asset.kind, useIntroTimelinePreview]);
+
+  useEffect(() => {
+    if (useIntroTimelinePreview || sourceSelection?.asset.kind !== "IMAGE" || !continuePlaybackRef.current) return;
+    continuePlaybackRef.current = false;
+    handoffSegmentIdRef.current = undefined;
+    setPreviewPlaying(true);
+  }, [sourceSelection?.segmentId, sourceSelection?.asset.kind, useIntroTimelinePreview]);
 
   const updateScope = (key: keyof SubtitleGenerationScope, checked: boolean) => {
     const next = { ...scope, [key]: checked };
@@ -358,6 +527,8 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     }
     setError(undefined);
     setScope(next);
+    if (!next.main) setSourcePlaybackScope("INTRO");
+    else if (!next.intro && sourcePlaybackScope === "INTRO") setSourcePlaybackScope("MAIN");
     if (!next.intro) setUseIntroTimelinePreview(false);
     void window.sourceApp
       .updateUserPreferences({ subtitleGenerationScope: next })
@@ -660,6 +831,75 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     }
   };
 
+  const startVisualAnalysis = async (confirmed = false) => {
+    const start = window.sourceApp.startSubtitleVisualAnalysis;
+    if (!start) {
+      setError("目前版本尚未連接字幕視覺分析工作。更新後即可從此處啟動。 ");
+      return;
+    }
+    if (visualSrtPolicy === "CANCEL") {
+      setNotice("已依正式 SRT 保護選項取消；沒有啟動分析或修改字幕。");
+      return;
+    }
+    try {
+      setError(undefined);
+      const options: SubtitleVisualAnalysisOptions = {
+        provider: visualProvider, intervalSeconds: Math.max(1, Math.min(60, Math.round(visualIntervalSeconds) || 2)),
+        density: visualDensity, displayLanguage: visualDraftLanguage as SubtitleVisualAnalysisOptions["displayLanguage"],
+        detectSceneChanges, deduplicateFrames, title: visualTitle.trim(), description: visualDescription.trim(), scopes: selectedScopes,
+      };
+      if (window.sourceApp.getSubtitleVisualPreflight && !confirmed) {
+        setVisualPreflight(await window.sourceApp.getSubtitleVisualPreflight(options));
+        return;
+      }
+      if (visualPreflight) {
+        options.analysisMode = visualPreflight.recommendedMode;
+        options.srtPolicy = visualSrtPolicy === "BACKUP" ? "BACKUP" : "SAVE_AS";
+      }
+      setVisualPreflight(undefined);
+      setVisualProgress({
+        status: "RUNNING",
+        rawFrames: 0,
+        sceneFrames: 0,
+        deduplicatedFrames: 0,
+        sentFrames: 0,
+        requests: 0,
+        elapsedMs: 0,
+        tokens: 0,
+        cacheHits: 0,
+        temporaryBytes: 0,
+      });
+      const result = await start(options);
+      if (result?.workspace) setStandaloneWorkspace(result.workspace);
+    } catch (reason) {
+      setVisualProgress((current) => ({
+        ...current,
+        status: "FAILED",
+        error: reason instanceof Error ? reason.message : String(reason),
+      }));
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
+  const controlVisualAnalysis = async (action: "pause" | "resume" | "cancel") => {
+    try {
+      const operation =
+        action === "pause"
+          ? window.sourceApp.pauseSubtitleVisualAnalysis
+          : action === "resume"
+            ? window.sourceApp.resumeSubtitleVisualAnalysis
+            : window.sourceApp.cancelSubtitleVisualAnalysis;
+      if (!operation) throw new Error("此版本尚未提供字幕視覺分析工作控制。");
+      if (action === "resume") setVisualProgress((current) => ({ ...current, status: "RUNNING", error: undefined }));
+      const result = await operation();
+      if (result && "workspace" in result && result.workspace) setStandaloneWorkspace(result.workspace);
+      if (action === "pause") setVisualProgress((current) => ({ ...current, status: "PAUSED" }));
+      if (action === "cancel") setVisualProgress((current) => ({ ...current, status: "CANCELLED" }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
   const saveStyle = async () => {
     setBusy(true);
     setError(undefined);
@@ -691,6 +931,43 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     } finally {
       setBusy(false);
       setExporting(false);
+    }
+  };
+
+  const saveAiDraftFile = async () => {
+    if (!window.sourceApp.saveSubtitleAiDraft || !window.sourceApp.promoteSubtitleAiDraft) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      const output = await window.sourceApp.chooseSubtitleOutput(fileName(selectedScopes));
+      if (!output) return;
+      const saved = await window.sourceApp.saveSubtitleAiDraft(output.token, selectedScopes);
+      setSavedDraftToken({ token: output.token, officialExists: saved.officialExists });
+      setNotice(`已安全保存 ${saved.cueCount} 筆待確認字幕：${saved.draftPath}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const promoteSavedAiDraft = async () => {
+    if (!savedDraftToken || !window.sourceApp.promoteSubtitleAiDraft) return;
+    const message = savedDraftToken.officialExists
+      ? "正式 SRT 已存在。繼續會先建立時間戳備份，再升級已逐筆確認的草稿。"
+      : "將已逐筆確認的 AI 草稿升級為正式 SRT？";
+    if (!window.confirm(message)) return;
+    setBusy(true);
+    try {
+      const promoted = await window.sourceApp.promoteSubtitleAiDraft(savedDraftToken.token, visualSrtPolicy === "OVERWRITE" ? "OVERWRITE" : "BACKUP");
+      setSavedDraftToken(undefined);
+      setNotice(
+        `已升級為正式 SRT：${promoted.outputPath}${promoted.backupPath ? `；舊檔備份：${promoted.backupPath}` : ""}`,
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -852,21 +1129,123 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     setCursor(moved?.startMs ?? 0);
   };
 
+  const isEditableVisualDraft = (cue: SubtitleCue | undefined): cue is SubtitleCue =>
+    cue?.origin === "AI_VISUAL" && cue.reviewStatus === "DRAFT";
+  const orderedActiveCues = visibleCues
+    .filter((cue) => cueScope(cue) === (selected ? cueScope(selected) : "MAIN") && cue.reviewStatus !== "REJECTED")
+    .sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs);
+  const selectedCueIndex = selected ? orderedActiveCues.findIndex((cue) => cue.id === selected.id) : -1;
+  const previousVisualDraft = selectedCueIndex > 0 ? orderedActiveCues[selectedCueIndex - 1] : undefined;
+  const nextVisualDraft = selectedCueIndex >= 0 ? orderedActiveCues[selectedCueIndex + 1] : undefined;
+  const canMergePrevious = isEditableVisualDraft(selected) && isEditableVisualDraft(previousVisualDraft);
+  const canMergeNext = isEditableVisualDraft(selected) && isEditableVisualDraft(nextVisualDraft);
+
+  const mergeVisualDraft = async (neighbor: SubtitleCue | undefined) => {
+    if (!isEditableVisualDraft(selected) || !isEditableVisualDraft(neighbor) || busy) return;
+    const first = selected.startMs <= neighbor.startMs ? selected : neighbor;
+    const second = first.id === selected.id ? neighbor : selected;
+    const merged: SubtitleCue = {
+      ...first,
+      startMs: Math.min(first.startMs, second.startMs),
+      endMs: Math.max(first.endMs, second.endMs),
+      text: [first.text.trim(), second.text.trim()].filter(Boolean).join("\n"),
+      visualSummary: [first.visualSummary, second.visualSummary].filter(Boolean).join("；") || undefined,
+      eventSummary: [first.eventSummary, second.eventSummary].filter(Boolean).join("；") || undefined,
+      peopleSummary: [...new Set([...(first.peopleSummary ?? []), ...(second.peopleSummary ?? [])])],
+      locationSummary: [...new Set([...(first.locationSummary ?? []), ...(second.locationSummary ?? [])])],
+      animalSpecies: [...new Set([...(first.animalSpecies ?? []), ...(second.animalSpecies ?? [])])],
+      reviewStatus: "DRAFT",
+      userEdited: true,
+    };
+    const next = cues.flatMap((cue) =>
+      cue.id === first.id ? [merged] : cue.id === second.id ? [] : [cue],
+    );
+    const updated = await persistCueList(next, "相鄰畫面情境草稿已合併並保存；合併結果仍待確認。");
+    if (updated) {
+      setSelectedId(merged.id);
+      setSelectedIds(new Set([merged.id]));
+      selectionAnchorId.current = merged.id;
+    }
+  };
+
+  const splitVisualDraft = async () => {
+    if (!isEditableVisualDraft(selected) || busy) return;
+    const text = selected.text.trim();
+    if (text.length < 2 || selected.endMs - selected.startMs < 2) return;
+    const target = Math.floor(text.length / 2);
+    const whitespaceBreaks = [...text.matchAll(/\s+/g)].map((match) => match.index ?? 0);
+    const splitAt = whitespaceBreaks.length
+      ? whitespaceBreaks.reduce((closest, position) =>
+          Math.abs(position - target) < Math.abs(closest - target) ? position : closest,
+        whitespaceBreaks[0])
+      : target;
+    const firstText = text.slice(0, splitAt).trim();
+    const secondText = text.slice(splitAt).trim();
+    if (!firstText || !secondText) return;
+    const midpointMs = Math.round((selected.startMs + selected.endMs) / 2);
+    const secondCue: SubtitleCue = {
+      ...selected,
+      id: crypto.randomUUID(),
+      startMs: midpointMs,
+      text: secondText,
+      reviewStatus: "DRAFT",
+      userEdited: true,
+    };
+    const firstCue: SubtitleCue = {
+      ...selected,
+      endMs: midpointMs,
+      text: firstText,
+      reviewStatus: "DRAFT",
+      userEdited: true,
+    };
+    const next = cues.flatMap((cue) =>
+      cue.id === selected.id ? [firstCue, secondCue] : [cue],
+    );
+    const updated = await persistCueList(next, "畫面情境草稿已在時間中點拆分並保存；兩筆仍待確認。");
+    if (updated) {
+      setSelectedId(firstCue.id);
+      setSelectedIds(new Set([firstCue.id]));
+      selectionAnchorId.current = firstCue.id;
+    }
+  };
+
+  const applyLocalVisualCorrection = async () => {
+    if (!isEditableVisualDraft(selected) || busy) return;
+    const correctedText = localCorrectionText.trim();
+    if (!correctedText) {
+      setError("請輸入要套用的字幕文字。");
+      return;
+    }
+    const next = cues.map((cue) =>
+      cue.id === selected.id
+        ? { ...cue, text: correctedText, reviewStatus: "DRAFT" as const, userEdited: true }
+        : cue,
+    );
+    if (await persistCueList(next, "已將本機輸入的修正文案保存為待確認草稿。")) {
+      setLocalCorrectionText("");
+    }
+  };
+
+  const regenerateSelectedVisualDrafts = async () => {
+    const regenerate = window.sourceApp.regenerateSubtitleVisualCue;
+    const instruction = localCorrectionText.trim();
+    const targets = cues.filter((cue) => selectedIds.has(cue.id) && isEditableVisualDraft(cue)).slice(0, 10);
+    if (!regenerate || !targets.length || !instruction || busy) return;
+    if (!window.confirm(`將為 ${targets.length} 筆草稿各取附近最多 3 張畫面並呼叫所選 AI 服務。繼續？`)) return;
+    setBusy(true); setError(undefined);
+    try {
+      const replacements = new Map<string, Awaited<ReturnType<typeof regenerate>>>();
+      for (const cue of targets) replacements.set(cue.id, await regenerate({ cueId: cue.id, instruction, provider: visualProvider, displayLanguage: visualDraftLanguage as SubtitleVisualAnalysisOptions["displayLanguage"] }));
+      const next = cues.map((cue) => replacements.has(cue.id) ? { ...cue, text: replacements.get(cue.id)!.text, reviewStatus: "DRAFT" as const, userEdited: true, aiConfidence: Math.round(replacements.get(cue.id)!.confidence * 100) } : cue);
+      await persistCueList(next, `已依指示重新產生 ${replacements.size} 筆畫面字幕草稿；仍需逐筆確認。`);
+      setLocalCorrectionText("");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusy(false); }
+  };
+
   const deleteSelectedCues = async () => {
     await deleteCueIds(selectedIds, `選取的 ${selectedIds.size} 筆字幕`);
   };
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Delete" || !selected) return;
-      const target = event.target;
-      if (target instanceof Element && target.matches("input, textarea, select, [contenteditable='true']")) return;
-      event.preventDefault();
-      void deleteSelectedCue();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selected?.id, cues, busy, generating, buildingPreview]);
 
   const selectCue = (cue: SubtitleCue, event?: ReactMouseEvent<HTMLButtonElement>) => {
     const anchorIndex = selectionAnchorId.current
@@ -884,12 +1263,84 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     setSelectedIds(nextIds);
     if (!event?.shiftKey) selectionAnchorId.current = cue.id;
     setSelectedId(cue.id);
-    setCursor(cue.startMs);
-    const player = videoRef.current;
-    if (player && useIntroTimelinePreview && cueScope(cue) === "INTRO") player.currentTime = cue.startMs / 1000;
   };
 
-  const handleTimeUpdate = () => {
+  const jumpToProjectTime = (timeMs: number, requestedScope = playbackScope, forceSourcePreview = false) => {
+    const duration = requestedScope === "INTRO" ? introDurationMs : timelineDurationMs;
+    const nextClock = Math.max(0, Math.min(duration, Math.round(timeMs)));
+    const requestedSegments = requestedScope === playbackScope
+      ? playbackSegments
+      : buildSubtitlePlaybackSegments(project, requestedScope);
+    if (requestedScope !== sourcePlaybackScope) setSourcePlaybackScope(requestedScope);
+    if (forceSourcePreview) setUseIntroTimelinePreview(false);
+    setCursor(nextClock);
+    manualFollowUntilRef.current = 0;
+    if (manualFollowTimerRef.current !== undefined) window.clearTimeout(manualFollowTimerRef.current);
+    setFollowResumeRevision((revision) => revision + 1);
+    const segment = playbackSegmentAt(requestedSegments, nextClock);
+    const player = videoRef.current;
+    continuePlaybackRef.current = false;
+    handoffSegmentIdRef.current = undefined;
+    if (player && !player.paused) player.pause();
+    setPreviewPlaying(false);
+    if (player && useIntroTimelinePreview && !forceSourcePreview) player.currentTime = nextClock / 1000;
+    else if (player && segment && sourceSelection?.segmentId === segment.id) {
+      const previewStartMs = activeSourcePreview?.variant === "VIDEO_CLIP_PROXY" ? (activeSourcePreview.sourceStartMs ?? segment.sourceStartMs) : 0;
+      player.currentTime = Math.max(0, (projectClockToSourceMs(segment, nextClock) - previewStartMs) / 1000);
+    }
+  };
+
+  const returnToCurrentCue = () => {
+    manualFollowUntilRef.current = 0;
+    if (manualFollowTimerRef.current !== undefined) window.clearTimeout(manualFollowTimerRef.current);
+    manualFollowTimerRef.current = undefined;
+    setFollowResumeRevision((revision) => revision + 1);
+  };
+
+  const jumpToCue = (cue: SubtitleCue) => {
+    setSelectedId(cue.id);
+    setSelectedIds(new Set([cue.id]));
+    selectionAnchorId.current = cue.id;
+    jumpToProjectTime(cue.startMs, cueScope(cue), true);
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (standaloneWorkspace) return;
+      const editing = isTextEditingTarget(event.target);
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault();
+        void save();
+        return;
+      }
+      if (editing) return;
+      if (event.code === "Space") {
+        event.preventDefault();
+        togglePlayback();
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        jumpToProjectTime(cursor + (event.key === "ArrowLeft" ? -2_000 : 2_000));
+      } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        event.preventDefault();
+        const target = adjacentCue(cues, playbackScope, navigationCueId, event.key === "ArrowUp" ? -1 : 1);
+        if (target) selectCue(target);
+      } else if (event.key === "Delete" && selected) {
+        event.preventDefault();
+        void deleteSelectedCue();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [standaloneWorkspace, selected?.id, selectedId, navigationCueId, cues, cursor, playbackScope, playbackSegments, sourceSelection?.segmentId, activeSourcePreview?.url, busy, generating, buildingPreview]);
+
+  useEffect(() => {
+    if (!standaloneWorkspace) return;
+    continuePlaybackRef.current = false;
+    videoRef.current?.pause();
+    setPreviewPlaying(false);
+  }, [standaloneWorkspace?.id]);
+
+  const handleTimeUpdate = (forceResume = false) => {
     const player = videoRef.current;
     if (!player) return;
     if (useIntroTimelinePreview && introPreview) {
@@ -905,25 +1356,73 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
       if (active && active.id !== selectedId) setSelectedId(active.id);
       return;
     }
-    if (!selected || !sourceSelection) return;
+    if (!sourceSelection) return;
     const previewSourceStartMs =
-      preview?.variant === "VIDEO_CLIP_PROXY" ? (preview.sourceStartMs ?? sourceSelection.sourceStartMs) : 0;
+      activeSourcePreview?.variant === "VIDEO_CLIP_PROXY" ? (activeSourcePreview.sourceStartMs ?? sourceSelection.sourceStartMs) : 0;
     const sourceTimeMs = previewSourceStartMs + player.currentTime * 1000;
-    setCursor(Math.min(selected.endMs, selected.startMs + Math.max(0, sourceTimeMs - sourceSelection.sourceStartMs)));
-    if (sourceSelection.sourceEndMs > sourceSelection.sourceStartMs && sourceTimeMs >= sourceSelection.sourceEndMs) {
-      player.pause();
-      player.currentTime = Math.max(0, (sourceSelection.sourceStartMs - previewSourceStartMs) / 1000);
+    const segment = playbackSegments.find((item) => item.id === sourceSelection.segmentId);
+    if (!segment) return;
+    if (handoffSegmentIdRef.current === segment.id) return;
+    const nextCursor = sourceTimeToProjectClockMs(segment, sourceTimeMs);
+    setCursor(nextCursor);
+    const ownershipSourceEndMs = projectClockToSourceMs(segment, segment.ownershipEndMs);
+    if (sourceTimeMs >= ownershipSourceEndMs - 1) {
+      const currentIndex = playbackSegments.findIndex((item) => item.id === segment.id);
+      const next = playbackSegments[currentIndex + 1];
+      if (next) {
+        handoffSegmentIdRef.current = segment.id;
+        continuePlaybackRef.current = continuePlaybackRef.current || forceResume || !player.paused;
+        player.pause();
+        setCursor((current) => Math.max(current, next.projectStartMs));
+      } else {
+        player.pause();
+        setCursor(segment.ownershipEndMs);
+      }
     }
   };
 
   const togglePlayback = () => {
     const player = videoRef.current;
     if (player) void (player.paused ? player.play() : Promise.resolve(player.pause()));
+    else if (sourceSelection?.asset.kind === "IMAGE") setPreviewPlaying((playing) => {
+      continuePlaybackRef.current = false;
+      return !playing;
+    });
   };
-  const displayedDurationMs =
-    useIntroTimelinePreview && introPreview ? introPreview.durationMs : selectedTimelineDurationMs;
-  const scrubberMinimumMs = useIntroTimelinePreview ? 0 : (selected?.startMs ?? 0);
-  const scrubberMaximumMs = useIntroTimelinePreview ? displayedDurationMs : (selected?.endMs ?? displayedDurationMs);
+  useEffect(() => {
+    if (!previewPlaying || useIntroTimelinePreview || sourceSelection?.asset.kind !== "IMAGE") return;
+    imagePlaybackAnchorRef.current = {
+      segmentId: sourceSelection.segmentId,
+      projectMs: Math.max(sourceSelection.projectStartMs, Math.min(cursor, sourceSelection.ownershipEndMs)),
+      wallMs: performance.now(),
+    };
+    const timer = window.setInterval(() => {
+      const anchor = imagePlaybackAnchorRef.current;
+      if (!anchor || anchor.segmentId !== sourceSelection.segmentId) return;
+      setCursor((current) => {
+        const nextClock = Math.max(current, anchor.projectMs + (performance.now() - anchor.wallMs) * playbackRate);
+        if (nextClock < sourceSelection.ownershipEndMs) return nextClock;
+        const index = playbackSegments.findIndex((item) => item.id === sourceSelection.segmentId);
+        const next = playbackSegments[index + 1];
+        if (next) {
+          continuePlaybackRef.current = true;
+          return Math.max(current, next.projectStartMs);
+        }
+        window.clearInterval(timer);
+        setPreviewPlaying(false);
+        return sourceSelection.ownershipEndMs;
+      });
+    }, 50);
+    return () => {
+      window.clearInterval(timer);
+      if (imagePlaybackAnchorRef.current?.segmentId === sourceSelection.segmentId) imagePlaybackAnchorRef.current = undefined;
+    };
+  }, [previewPlaying, useIntroTimelinePreview, sourceSelection?.segmentId, sourceSelection?.asset.kind, playbackRate, playbackSegments]);
+  const displayedDurationMs = useIntroTimelinePreview && introPreview
+    ? introPreview.durationMs
+    : playbackScope === "INTRO" ? introDurationMs : timelineDurationMs;
+  const scrubberMinimumMs = 0;
+  const scrubberMaximumMs = displayedDurationMs;
   const previewCanvasUnit = 100 / 480;
   const resolvedOverlayPosition = resolveSubtitleCuePosition(
     activeOverlayCue?.position,
@@ -965,14 +1464,30 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
             <span className="eyebrow">AI SUBTITLE REVIEW · 480P SYNC PREVIEW</span>
             <h2>片頭／正片畫面與故事字幕審核</h2>
             <p>
-              AI 新字幕預設已確認，可直接預覽；素材換序或插入時會依目前 {project.timelineTransitionSeconds}{" "}
-              秒疊化同步搬移字幕，仍可逐項修改。
+              AI 新字幕只會建立待確認草稿；確認後才可成為正式 SRT。素材換序或插入時會依目前{" "}
+              {project.timelineTransitionSeconds} 秒疊化同步搬移字幕。
             </p>
           </div>
           <button className="icon-button" onClick={requestClose} aria-label="關閉">
             ×
           </button>
         </header>
+        <div
+          className="subtitle-review-body"
+          role="region"
+          aria-label="字幕審核內容，可使用 Page Up、Page Down、Home 與 End 捲動"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (!(event.key === "PageUp" || event.key === "PageDown" || event.key === "Home" || event.key === "End")) return;
+            const target = event.target;
+            if (target instanceof Element && target.matches("input, textarea, select, [contenteditable='true']")) return;
+            event.preventDefault();
+            const body = event.currentTarget;
+            const top = event.key === "Home" ? 0 : event.key === "End" ? body.scrollHeight :
+              body.scrollTop + (event.key === "PageUp" ? -1 : 1) * Math.max(120, body.clientHeight * 0.8);
+            body.scrollTo({ top, behavior: "smooth" });
+          }}
+        >
         {needsReview && (
           <div className="subtitle-global-warning" role="alert">
             ⚠ 片頭、正片順序或 IN／OUT 已改變；全部字幕時間需要重新複核。
@@ -1022,6 +1537,9 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
             <button className="settings-button" type="button" onClick={onOpenAiSettings}>
               開啟 AI 帳號設定
             </button>
+            <button className="secondary-button" type="button" onClick={() => setError(undefined)}>
+              收起錯誤
+            </button>
           </section>
         )}
         <div className="subtitle-studio-toolbar">
@@ -1037,6 +1555,25 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
             </span>
           </div>
           <div className="subtitle-ai-actions">
+            <div className="subtitle-analysis-video" aria-label="AI 字幕分析影片">
+              <strong>分析影片</strong>
+              <span>{analysisVideo?.fileName ?? "尚未找到可用的成功成品"}</span>
+              {analysisVideo?.durationMs ? (
+                <small>
+                  {formatDuration(analysisVideo.durationMs)} · {analysisVideo.width}×{analysisVideo.height} · {analysisVideo.frameRate ?? "FPS ?"} · {analysisVideo.videoCodec ?? "codec ?"}
+                </small>
+              ) : null}
+              {analysisVideo?.outputPath ? (
+                <details>
+                  <summary>完整檔案資訊</summary>
+                  <small>{analysisVideo.outputPath}</small>
+                  <small>{analysisVideo.sizeBytes ? `${(analysisVideo.sizeBytes / 1024 ** 3).toFixed(2)} GiB` : "大小未知"} · 建立 {analysisVideo.createdAt ?? "未知"} · 修改 {analysisVideo.modifiedAt ?? "未知"}</small>
+                </details>
+              ) : null}
+              <button className="secondary-button" type="button" onClick={() => void chooseAnalysisVideo()}>
+                選擇影片／重新分析
+              </button>
+            </div>
             <fieldset className="subtitle-scope">
               <legend>產生／顯示範圍</legend>
               <label>
@@ -1126,6 +1663,221 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
             </button>
           </div>
         </div>
+        <section className="subtitle-visual-job" aria-label="字幕畫面分析工作">
+          <div className="subtitle-visual-job-heading">
+            <div>
+              <strong>全片畫面字幕分析</strong>
+              <small>ChatGPT 視覺需另行設定 OpenAI API；ChatGPT/Codex 登入不等於 API 憑證。Gemini 僅在此處選用時啟用。</small>
+            </div>
+            <span className={`subtitle-job-status is-${visualProgress.status.toLowerCase()}`} aria-live="polite">
+              {visualProgress.status === "RUNNING"
+                ? "分析中"
+                : visualProgress.status === "PAUSED"
+                  ? "已暫停"
+                  : visualProgress.status === "COMPLETED"
+                    ? "已完成"
+                    : visualProgress.status === "CANCELLED"
+                      ? "已取消"
+                      : visualProgress.status === "FAILED"
+                        ? "失敗"
+                        : "尚未開始"}
+            </span>
+          </div>
+          <div className="subtitle-visual-job-fields">
+            <label>
+              分析服務
+              <select
+                aria-label="字幕畫面分析服務"
+                value={visualProvider}
+                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                onChange={(event) => setVisualProvider(event.target.value as MaterialAnalysisProvider)}
+              >
+                <option value="CHATGPT">ChatGPT 視覺（預設，需 OpenAI API 設定）</option>
+                <option value="GEMINI">Gemini（選用）</option>
+              </select>
+            </label>
+            <label>
+              既有正式 SRT 保護
+              <select
+                aria-label="既有正式 SRT 保護方式"
+                value={visualSrtPolicy}
+                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                onChange={(event) => setVisualSrtPolicy(event.target.value as typeof visualSrtPolicy)}
+              >
+                <option value="BACKUP">先備份再升級（預設）</option>
+                <option value="SAVE_AS">另存新檔</option>
+                <option value="OVERWRITE">確認後覆寫</option>
+                <option value="CANCEL">取消，不開始分析</option>
+              </select>
+            </label>
+            <label>
+              產生語言
+              <select aria-label="字幕畫面分析語言" value={visualDraftLanguage} onChange={(event) => setVisualDraftLanguage(event.target.value)}>
+                <option value="zh-TW">繁體中文（台灣，預設）</option><option value="zh-CN">簡體中文</option><option value="en">English</option><option value="ja">日本語</option><option value="ko">한국어</option>
+              </select>
+            </label>
+            <label>
+              取樣間隔（秒）
+              <input
+                aria-label="畫面取樣間隔"
+                type="number"
+                min="1"
+                max="60"
+                value={visualIntervalSeconds}
+                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                onChange={(event) =>
+                  setVisualIntervalSeconds(Math.max(1, Math.min(60, Math.round(Number(event.target.value) || 1))))
+                }
+              />
+            </label>
+            <label>
+              畫面密度
+              <select
+                aria-label="字幕分析畫面密度"
+                value={visualDensity}
+                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                onChange={(event) => setVisualDensity(event.target.value as SubtitleVisualDensity)}
+              >
+                <option value="LOW">低</option>
+                <option value="STANDARD">標準</option>
+                <option value="DETAILED">詳細</option>
+              </select>
+            </label>
+            <label className="subtitle-visual-context">
+              影片標題
+              <input
+                aria-label="字幕分析影片標題"
+                value={visualTitle}
+                maxLength={240}
+                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                onChange={(event) => setVisualTitle(event.target.value)}
+              />
+            </label>
+            <label className="subtitle-visual-context">
+              影片描述／故事背景
+              <textarea
+                aria-label="字幕分析影片描述"
+                value={visualDescription}
+                maxLength={4000}
+                rows={2}
+                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                onChange={(event) => setVisualDescription(event.target.value)}
+              />
+            </label>
+            <label className="subtitle-visual-toggle">
+              <input
+                aria-label="偵測場景變化"
+                type="checkbox"
+                checked={detectSceneChanges}
+                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                onChange={(event) => setDetectSceneChanges(event.target.checked)}
+              />{" "}
+              場景變化補點
+            </label>
+            <label className="subtitle-visual-toggle">
+              <input
+                aria-label="去除重複畫面"
+                type="checkbox"
+                checked={deduplicateFrames}
+                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                onChange={(event) => setDeduplicateFrames(event.target.checked)}
+              />{" "}
+              感知去重
+            </label>
+            <label className="subtitle-visual-toggle">
+              <input
+                aria-label="AI 檢查現有字幕"
+                type="checkbox"
+                checked={projectAiCheckEnabled}
+                disabled={visualProgress.status === "RUNNING"}
+                onChange={(event) => setProjectAiCheckEnabled(event.target.checked)}
+              />{" "}
+              AI 檢查現有字幕（預設關閉）
+            </label>
+          </div>
+          <div className="subtitle-visual-job-controls">
+            <small>
+              分析先建立 AI 待確認草稿，不會覆寫正式 SRT。相容影片可更新專案草稿；外部或時間線不相容影片會建立獨立字幕工作區，供檢視、修改與另存 SRT。
+            </small>
+            {(visualProgress.status === "IDLE" ||
+              visualProgress.status === "COMPLETED" ||
+              visualProgress.status === "CANCELLED" ||
+              visualProgress.status === "FAILED") && (
+              <button
+                className="ai-intro-button"
+                type="button"
+                disabled={(!analysisVideo?.outputPath && !canGenerate) || generating || busy}
+                onClick={() => void startVisualAnalysis()}
+              >
+                開始畫面分析
+              </button>
+            )}
+            {visualProgress.status === "RUNNING" && (
+              <button className="secondary-button" type="button" onClick={() => void controlVisualAnalysis("pause")}>
+                暫停
+              </button>
+            )}
+            {(visualProgress.status === "PAUSED" || visualProgress.status === "FAILED") && (
+              <button className="secondary-button" type="button" onClick={() => void controlVisualAnalysis("resume")}>
+                繼續
+              </button>
+            )}
+            {(visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED") && (
+              <button className="cancel-button" type="button" onClick={() => void controlVisualAnalysis("cancel")}>
+                取消分析
+              </button>
+            )}
+            <span>
+              原始 {visualProgress.rawFrames} · 場景 {visualProgress.sceneFrames} · 去重{" "}
+              {visualProgress.deduplicatedFrames} · 已送出 {visualProgress.sentFrames} 張
+            </span>
+            <span>
+              請求 {visualProgress.requests} · 經過 {formatDuration(visualProgress.elapsedMs)} · Token{" "}
+              {visualProgress.tokens} · 快取命中 {visualProgress.cacheHits}
+            </span>
+            <span>暫存 {visualProgress.temporaryBytes.toLocaleString()} bytes</span>
+            <span>{visualProgress.phase} {visualProgress.mode} {visualProgress.modelId ? `模型 ${visualProgress.modelId}` : ""}</span>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={!projectAiCheckEnabled || busy || analysisVideo?.reason !== "PROJECT_CONCAT"}
+              onClick={() => void prepareProjectAiCheck()}
+            >
+              建立現有字幕 AI 檢查工作區
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={busy || !analysisVideo?.outputPath}
+              onClick={() => void importStandaloneSrtReview()}
+            >
+              所選影片＋匯入既有 SRT（獨立草稿）
+            </button>
+            {projectAiCheckEnabled && analysisVideo?.reason !== "PROJECT_CONCAT" && <small>
+              目前只有 legacy／外部影片，沒有帶目前 projectId 的成功輸出；為避免錯誤時間軸套回，請先建立新的專案輸出，或在獨立影片工作區檢查而不修改專案。
+            </small>}
+          </div>
+          {visualProgress.error && (
+            <small className="subtitle-visual-job-error" role="alert">
+              {visualProgress.error}
+            </small>
+          )}
+        </section>
+        {visualPreflight && <section className="subtitle-visual-job" aria-label="字幕分析確認">
+          <h3>開始前確認</h3>
+          <p>{visualPreflight.videoPath}</p>
+          <p>影片 {formatDuration(visualPreflight.videoDurationMs)}｜專案 {formatDuration(visualPreflight.projectDurationMs)}｜差 {(visualPreflight.differenceMs / 1000).toFixed(3)} 秒｜容差 {(visualPreflight.toleranceMs / 1000).toFixed(1)} 秒</p>
+          <p>{visualPreflight.warning ?? "專案輸出與時間線相容，可使用片段脈絡。"}</p>
+          <label>分析模式 <select aria-label="字幕分析模式" value={visualPreflight.recommendedMode} onChange={(event) => setVisualPreflight({ ...visualPreflight, recommendedMode: event.target.value as SubtitleVisualPreflight["recommendedMode"] })}>
+            <option value="VIDEO_FIRST">影片時間軸：獨立草稿，不修改專案</option>
+            {visualPreflight.recommendedMode === "PROJECT_AWARE" && <option value="PROJECT_AWARE">專案時間軸：更新待確認草稿</option>}
+          </select></label>
+          <p>每 {visualIntervalSeconds} 秒｜預估 {visualPreflight.rawFrameEstimate} 張（去重前）｜{visualPreflight.provider}｜模型 {visualPreflight.modelId ?? "開始時解析"}</p>
+          <p>既有 SRT {visualPreflight.existingSrtCount} 筆｜專案字幕 {visualPreflight.projectSubtitleCount} 筆｜僅建立草稿；正式 SRT 不覆寫</p>
+          <button type="button" onClick={() => void startVisualAnalysis(true)}>確認並開始分析</button>
+          <button type="button" onClick={() => setVisualPreflight(undefined)}>取消</button>
+        </section>}
+        {standaloneWorkspace && <StandaloneSubtitleReview workspace={standaloneWorkspace} videoUrl={standaloneWorkspace.previewUrl} onUpdated={setStandaloneWorkspace} onProjectUpdated={onProjectUpdated} onError={setError} />}
         {overlappingIds.size > 0 && (
           <div className="subtitle-overlap-warning" role="alert">
             ⚠ 有 {overlappingIds.size}{" "}
@@ -1146,7 +1898,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
               <button
                 className="confirm-cue"
                 type="button"
-                disabled={!preview || busy}
+                disabled={!activeSourcePreview || busy}
                 onClick={() => void confirmReviewAndAdvance()}
               >
                 ✓ 一致，確認、保存並下一筆
@@ -1175,7 +1927,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
           </div>
         )}
         <div className="subtitle-review-layout">
-          <aside className="subtitle-cue-list">
+          <aside className="subtitle-cue-list" ref={cueListRef} data-testid="project-subtitle-cue-list">
             {!visibleCues.length && (
               <div className="empty-mini">
                 <strong>所選範圍還沒有字幕</strong>
@@ -1234,8 +1986,11 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
               const disabled = busy || generating || buildingPreview;
               return (
                 <div
-                  className={`subtitle-cue-row ${overlappingIds.has(cue.id) ? "has-time-overlap" : ""}`}
+                  className={`subtitle-cue-row ${cue.id === activeOverlayCue?.id ? "is-active" : ""} ${overlappingIds.has(cue.id) ? "has-time-overlap" : ""}`}
                   key={cue.id}
+                  ref={(node) => { if (node) cueRowRefs.current.set(cue.id, node); else cueRowRefs.current.delete(cue.id); }}
+                  data-cue-id={cue.id}
+                  onDoubleClick={() => jumpToCue(cue)}
                 >
                   <div
                     className={`subtitle-cue-card ${selectedIds.has(cue.id) ? "is-selected" : ""} status-${cue.reviewStatus ?? "CONFIRMED"}`}
@@ -1247,6 +2002,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                       aria-pressed={selectedIds.has(cue.id)}
                       title="點一下選取；按住 Shift 可連續複選"
                       onClick={(event) => selectCue(cue, event)}
+                      onDoubleClick={(event) => { event.stopPropagation(); jumpToCue(cue); }}
                     >
                       <span>{String(index + 1).padStart(2, "0")}</span>
                     </button>
@@ -1264,8 +2020,8 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                     />
                     <em>{overlappingIds.has(cue.id) ? "時間重疊" : statusLabel(cue.reviewStatus)}</em>
                     <small>
-                      {cueScope(cue) === "INTRO" ? "片頭" : "正片"} · {formatDuration(cue.startMs)} →{" "}
-                      {formatDuration(cue.endMs)} · <span>{cueOrigin(cue)}</span> · 每行{" "}
+                      {cueScope(cue) === "INTRO" ? "片頭" : "正片"} · {formatExactCueTime(cue.startMs)} →{" "}
+                      {formatExactCueTime(cue.endMs)} · 時長 {formatCueDuration(cue.startMs, cue.endMs)} · <span>{cueOrigin(cue)}</span> · 每行{" "}
                       {cue.lineWidthChars ?? defaultSubtitleLineWidth(cue.text)} 字
                       {cue.lineWidthChars === undefined ? "（自動）" : "（單筆）"} · 位置 X{" "}
                       {cue.position?.xPercent ?? 50}%／Y{" "}
@@ -1273,6 +2029,15 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                     </small>
                   </div>
                   <div className="subtitle-cue-row-actions" role="group" aria-label={`第 ${index + 1} 筆字幕操作`}>
+                    <button
+                      type="button"
+                      aria-label={`跳到第 ${index + 1} 筆字幕`}
+                      title="明確跳到這筆字幕的開始時間"
+                      disabled={disabled}
+                      onClick={() => jumpToCue(cue)}
+                    >
+                      ▶ 跳到
+                    </button>
                     <button
                       type="button"
                       className="subtitle-cue-row-confirm"
@@ -1350,7 +2115,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                   onClick={togglePlayback}
                   onPlay={() => setPreviewPlaying(true)}
                   onPause={() => setPreviewPlaying(false)}
-                  onTimeUpdate={handleTimeUpdate}
+                  onTimeUpdate={() => handleTimeUpdate(false)}
                 />
               )}
               {!useIntroTimelinePreview && !selected && (
@@ -1358,7 +2123,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                   <p>從左側選取一筆字幕，或產生 480P 片頭預覽。</p>
                 </div>
               )}
-              {!useIntroTimelinePreview && selected && sourceSelection && !preview && !previewError && (
+              {!useIntroTimelinePreview && selected && sourceSelection && !activeSourcePreview && !previewError && (
                 <div className="large-loading">
                   <span className="spinner" />
                   <p>正在準備唯讀 proxy 預覽…</p>
@@ -1375,36 +2140,41 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                   <p>這筆字幕尚無可直接播放的影片來源；片頭可先建立整體 480P 代理。</p>
                 </div>
               )}
-              {!useIntroTimelinePreview && selected && sourceSelection?.asset.kind === "IMAGE" && preview && (
+              {!useIntroTimelinePreview && selected && sourceSelection?.asset.kind === "IMAGE" && activeSourcePreview && (
                 <img
                   className="subtitle-source-image"
-                  src={preview.url}
+                  src={activeSourcePreview.url}
                   alt={`字幕對應畫面 ${sourceSelection.asset.fileName}`}
                 />
               )}
-              {!useIntroTimelinePreview && selected && sourceSelection?.asset.kind === "VIDEO" && preview && (
+              {!useIntroTimelinePreview && selected && sourceSelection?.asset.kind === "VIDEO" && activeSourcePreview && (
                 <video
-                  key={`${preview.url}:${selected.id}`}
+                  key={`${activeSourcePreview.url}:${sourceSelection.segmentId}`}
                   ref={videoRef}
-                  src={preview.url}
+                  src={activeSourcePreview.url}
                   preload="auto"
                   aria-label="字幕快速區段 Proxy 預覽"
                   onClick={togglePlayback}
                   onLoadedMetadata={(event) => {
                     const previewStartMs =
-                      preview.variant === "VIDEO_CLIP_PROXY"
-                        ? (preview.sourceStartMs ?? sourceSelection.sourceStartMs)
+                      activeSourcePreview.variant === "VIDEO_CLIP_PROXY"
+                        ? (activeSourcePreview.sourceStartMs ?? sourceSelection.sourceStartMs)
                         : 0;
-                    event.currentTarget.currentTime = Math.max(
-                      0,
-                      (sourceSelection.sourceStartMs - previewStartMs) / 1000,
-                    );
+                    const segment = playbackSegments.find((item) => item.id === sourceSelection.segmentId);
+                    const sourceTimeMs = segment ? projectClockToSourceMs(segment, cursor) : sourceSelection.sourceStartMs;
+                    event.currentTarget.playbackRate = playbackRate;
+                    event.currentTarget.currentTime = Math.max(0, (sourceTimeMs - previewStartMs) / 1000);
+                    if (continuePlaybackRef.current) {
+                      void event.currentTarget.play().catch(() => undefined);
+                    }
                   }}
                   onPlay={(event) => {
+                    continuePlaybackRef.current = false;
+                    handoffSegmentIdRef.current = undefined;
                     setPreviewPlaying(true);
                     const previewStartMs =
-                      preview.variant === "VIDEO_CLIP_PROXY"
-                        ? (preview.sourceStartMs ?? sourceSelection.sourceStartMs)
+                      activeSourcePreview.variant === "VIDEO_CLIP_PROXY"
+                        ? (activeSourcePreview.sourceStartMs ?? sourceSelection.sourceStartMs)
                         : 0;
                     const sourceTimeMs = previewStartMs + event.currentTarget.currentTime * 1000;
                     if (sourceTimeMs < sourceSelection.sourceStartMs || sourceTimeMs >= sourceSelection.sourceEndMs)
@@ -1414,7 +2184,9 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                       );
                   }}
                   onPause={() => setPreviewPlaying(false)}
-                  onTimeUpdate={handleTimeUpdate}
+                  onCanPlay={(event) => { if (continuePlaybackRef.current) void event.currentTarget.play().catch(() => undefined); }}
+                  onTimeUpdate={() => handleTimeUpdate(false)}
+                  onEnded={() => handleTimeUpdate(true)}
                 />
               )}
               {activeOverlayCue && (
@@ -1438,15 +2210,30 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
             <div className="subtitle-time-scrubber">
               <button
                 type="button"
-                disabled={sourceSelection?.asset.kind === "IMAGE" || (!preview && !introPreview)}
+                disabled={!activeSourcePreview && !introPreview}
                 onClick={togglePlayback}
               >
                 {previewPlaying ? "❚❚ 暫停" : "▶ 播放"}
               </button>
               <span>
-                {useIntroTimelinePreview ? "片頭" : selected && cueScope(selected) === "INTRO" ? "片頭片段" : "正片"}{" "}
+                {useIntroTimelinePreview ? "片頭" : playbackScope === "INTRO" ? "片頭片段" : "正片"}{" "}
                 {formatDuration(cursor)} / {formatDuration(displayedDurationMs)}
               </span>
+              <label>
+                速度
+                <select
+                  aria-label="字幕預覽播放速度"
+                  value={playbackRate}
+                  onChange={(event) => { const rate = Number(event.target.value); setPlaybackRate(rate); if (videoRef.current) videoRef.current.playbackRate = rate; }}
+                >
+                  <option value="0.5">0.5×</option>
+                  <option value="0.75">0.75×</option>
+                  <option value="1">1×</option>
+                  <option value="1.25">1.25×</option>
+                  <option value="1.5">1.5×</option>
+                  <option value="2">2×</option>
+                </select>
+              </label>
               <input
                 aria-label="字幕預覽時間"
                 type="range"
@@ -1456,27 +2243,22 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                 value={Math.max(scrubberMinimumMs, Math.min(cursor, scrubberMaximumMs))}
                 onChange={(event) => {
                   const value = Number(event.target.value);
-                  setCursor(value);
-                  const player = videoRef.current;
-                  if (player) {
-                    const previewStartMs =
-                      preview?.variant === "VIDEO_CLIP_PROXY"
-                        ? (preview.sourceStartMs ?? sourceSelection?.sourceStartMs ?? 0)
-                        : 0;
-                    player.currentTime = useIntroTimelinePreview
-                      ? value / 1000
-                      : sourceSelection
-                        ? Math.max(
-                            0,
-                            (sourceSelection.sourceStartMs +
-                              Math.max(0, value - (selected?.startMs ?? 0)) -
-                              previewStartMs) /
-                              1000,
-                          )
-                        : player.currentTime;
-                  }
+                  jumpToProjectTime(value);
                 }}
               />
+              <div className="subtitle-review-playback-buttons" role="group" aria-label="字幕預覽定位">
+                <button type="button" aria-label="上一筆字幕" disabled={(!activeSourcePreview && !introPreview) || !adjacentCue(cues, playbackScope, navigationCueId, -1)} onClick={() => {
+                  const target = adjacentCue(cues, playbackScope, navigationCueId, -1);
+                  if (target) jumpToCue(target);
+                }}>上一筆字幕</button>
+                <button type="button" aria-label="下一筆字幕" disabled={(!activeSourcePreview && !introPreview) || !adjacentCue(cues, playbackScope, navigationCueId, 1)} onClick={() => {
+                  const target = adjacentCue(cues, playbackScope, navigationCueId, 1);
+                  if (target) jumpToCue(target);
+                }}>下一筆字幕</button>
+                <button type="button" aria-label="倒退兩秒" disabled={!activeSourcePreview && !introPreview} onClick={() => jumpToProjectTime(cursor - 2_000)}>−2 秒</button>
+                <button type="button" aria-label="前進兩秒" disabled={!activeSourcePreview && !introPreview} onClick={() => jumpToProjectTime(cursor + 2_000)}>+2 秒</button>
+                <button type="button" aria-label="回到目前字幕" disabled={!activeOverlayCue} onClick={returnToCurrentCue}>回到目前字幕</button>
+              </div>
               <div className="subtitle-preview-mode">
                 {project.introSegments.length > 0 && (
                   <button
@@ -1634,6 +2416,63 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
                     />
                   </label>
                 </div>
+                {isEditableVisualDraft(selected) && (
+                  <section className="cue-visual-draft-tools" aria-label="AI 畫面情境草稿工具">
+                    <h3>畫面情境草稿調整</h3>
+                    <label>
+                      字幕語言（也用於下一次畫面分析）
+                      <select
+                        aria-label="修正文案語言"
+                        value={visualDraftLanguage}
+                        onChange={(event) => setVisualDraftLanguage(event.target.value)}
+                      >
+                        <option value="zh-TW">繁體中文</option>
+                        <option value="zh-CN">簡體中文</option>
+                        <option value="en">English</option>
+                        <option value="ja">日本語</option>
+                        <option value="ko">한국어</option>
+                      </select>
+                    </label>
+                    <label>
+                      修正內容／AI 指示（「套用本機」不呼叫 AI；「重新產生」才會呼叫）
+                      <textarea
+                        aria-label="本機修正指示"
+                        value={localCorrectionText}
+                        onChange={(event) => setLocalCorrectionText(event.target.value)}
+                        placeholder="輸入這筆字幕的最終文案"
+                      />
+                    </label>
+                    <div className="cue-review-actions">
+                      <button
+                        type="button"
+                        disabled={busy || !localCorrectionText.trim()}
+                        onClick={() => void applyLocalVisualCorrection()}
+                      >
+                        套用本機修正文案
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || !localCorrectionText.trim() || !window.sourceApp.regenerateSubtitleVisualCue}
+                        onClick={() => void regenerateSelectedVisualDrafts()}
+                      >
+                        依指示用附近畫面重新產生（最多 10 筆）
+                      </button>
+                      <button type="button" disabled={busy || !canMergePrevious} onClick={() => void mergeVisualDraft(previousVisualDraft)}>
+                        與前一筆畫面草稿合併
+                      </button>
+                      <button type="button" disabled={busy || !canMergeNext} onClick={() => void mergeVisualDraft(nextVisualDraft)}>
+                        與下一筆畫面草稿合併
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || selected.text.trim().length < 2 || selected.endMs - selected.startMs < 2}
+                        onClick={() => void splitVisualDraft()}
+                      >
+                        在時間中點拆分
+                      </button>
+                    </div>
+                  </section>
+                )}
                 {(selected.visualSummary ||
                   selected.eventSummary ||
                   selected.peopleSummary?.length ||
@@ -1746,6 +2585,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
             {notice}
           </div>
         )}
+        </div>
         <footer className="settings-footer">
           <p>
             每筆確認、取消確認、上下移與刪除都會立即保存；底部按鈕只用來保存尚未確認的文字／時間修改。來源保持唯讀。
@@ -1763,6 +2603,22 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
             >
               保存未確認修改
             </button>
+            <button
+              className="secondary-button"
+              disabled={busy || generating || buildingPreview || !counts.draft || !window.sourceApp.saveSubtitleAiDraft}
+              onClick={() => void saveAiDraftFile()}
+            >
+              保存 {counts.draft} 筆 .ai-draft.srt
+            </button>
+            {savedDraftToken && (
+              <button
+                className="primary-button"
+                disabled={busy || generating || buildingPreview || counts.draft > 0}
+                onClick={() => void promoteSavedAiDraft()}
+              >
+                升級已確認草稿為正式 SRT
+              </button>
+            )}
             <button
               className="primary-button"
               disabled={busy || generating || buildingPreview || !counts.confirmed}

@@ -148,6 +148,32 @@ afterAll(async () => {
 });
 
 describe("preview cache integration", () => {
+  it("places only new proxy jobs on the selected TEMP root and reads old roots without copying", async () => {
+    const video = store.getProject().sources.find((asset) => asset.sourcePath === videoPath)!;
+    const firstRoot = path.join(root, "temp-e", "cache", "previews");
+    const secondRoot = path.join(root, "temp-c", "cache", "previews");
+    let nextRoot = firstRoot;
+    const distributed = new PreviewCache(
+      path.join(root, "app-data", "cache", "previews"),
+      store,
+      sources,
+      undefined,
+      undefined,
+      { readRoots: () => [firstRoot, secondRoot], chooseWriteRoot: async () => nextRoot },
+    );
+    const first = await distributed.ensureClip(video.id, 101, 521);
+    const firstKey = /video_clip_proxy\/([a-f0-9]{64})/.exec(first.url)?.[1];
+    expect(firstKey).toBeTruthy();
+    expect(await distributed.resolveClipExisting(video.id, firstKey!)).toContain(firstRoot);
+    nextRoot = secondRoot;
+    expect((await distributed.ensureClip(video.id, 101, 521)).cacheStatus).toBe("HIT");
+    const second = await distributed.ensureClip(video.id, 522, 922);
+    const secondKey = /video_clip_proxy\/([a-f0-9]{64})/.exec(second.url)?.[1];
+    expect(secondKey).toBeTruthy();
+    expect(await distributed.resolveClipExisting(video.id, secondKey!)).toContain(secondRoot);
+    expect(await stat(await distributed.resolveClipExisting(video.id, firstKey!))).toBeTruthy();
+  }, 30_000);
+
   it("creates image and video thumbnails plus a seekable low-resolution video proxy", async () => {
     const project = store.getProject();
     const image = project.sources.find((asset) => asset.kind === "IMAGE")!;

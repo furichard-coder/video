@@ -164,4 +164,31 @@ describe("actual FFmpeg audio processing", () => {
     expect(cleaned.removedFiles).toBeGreaterThanOrEqual(1);
     await expect(stat(stalePartial)).rejects.toMatchObject({ code: "ENOENT" });
   }, 30_000);
+
+  it("keeps audio previews on their assigned TEMP root when later jobs switch roots", async () => {
+    const fakeStore = {
+      getProject: () => ({
+        timelineRevision: 21,
+        sources: [{ id: "c".repeat(64), sourcePath: source, fileName: "stereo.mp4", kind: "VIDEO" }],
+      }),
+    } as unknown as ProjectStore;
+    const firstRoot = path.join(root, "audio-temp-e");
+    const secondRoot = path.join(root, "audio-temp-c");
+    let nextRoot = firstRoot;
+    const service = new AudioPreviewService(path.join(root, "audio-preview-legacy"), fakeStore, undefined, {
+      readRoots: () => [firstRoot, secondRoot],
+      chooseWriteRoot: async () => nextRoot,
+    });
+    await service.initialize();
+    const request = {
+      assetId: "c".repeat(64), durationMs: 1_000,
+      options: { ...DEFAULT_AUDIO_PROCESSING_OPTIONS, mode: "ORIGINAL_STEREO" as const },
+    };
+    const first = await service.create({ ...request, startMs: 100 });
+    expect(await service.resolveExisting(first.cacheKey)).toContain(firstRoot);
+    nextRoot = secondRoot;
+    expect((await service.create({ ...request, startMs: 100 })).cacheStatus).toBe("HIT");
+    const second = await service.create({ ...request, startMs: 300 });
+    expect(await service.resolveExisting(second.cacheKey)).toContain(secondRoot);
+  }, 30_000);
 });

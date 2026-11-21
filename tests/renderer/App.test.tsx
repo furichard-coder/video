@@ -2881,7 +2881,7 @@ describe("App source workflow", () => {
       endMs: 1_500,
       text: "我們抵達河內老城",
       origin: "AI_SPEECH" as const,
-      reviewStatus: "CONFIRMED" as const,
+      reviewStatus: "DRAFT" as const,
       sourceAssetId: video.id,
       sourceInMs: 500,
       sourceOutMs: 1_500,
@@ -2897,6 +2897,17 @@ describe("App source workflow", () => {
     };
     const generatedProject = { ...structuredClone(project), subtitleCues: [draft] };
     const api = mockApi();
+    api.getSubtitleAnalysisVideo = vi.fn(async () => ({
+      reason: "PROJECT_CONCAT" as const,
+      jobId: "final-job",
+      outputPath: "C:\\renders\\final.mp4",
+      fileName: "final.mp4",
+      durationMs: 9_000,
+      width: 3840,
+      height: 2160,
+      videoCodec: "h264",
+    }));
+    api.chooseSubtitleAnalysisVideo = vi.fn(async () => null);
     vi.mocked(api.generateAiSubtitles).mockResolvedValue({
       project: generatedProject,
       generatedCount: 1,
@@ -2914,6 +2925,8 @@ describe("App source workflow", () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /CC 字幕/ }));
     const dialog = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
+    expect(await within(dialog).findByText("final.mp4")).toBeInTheDocument();
+    expect(within(dialog).getByText(/AI 新字幕只會建立待確認草稿/)).toBeInTheDocument();
     expect(within(dialog).getByRole("checkbox", { name: "同時分析素材語音" })).not.toBeChecked();
     fireEvent.change(within(dialog).getByLabelText("AI 目標字幕數"), { target: { value: "150" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "AI 知識型字幕草稿" }));
@@ -2927,7 +2940,8 @@ describe("App source workflow", () => {
     expect(within(dialog).getByText("抵達老城")).toBeInTheDocument();
     expect(within(dialog).getByText("河內老城")).toBeInTheDocument();
     expect(within(dialog).getByText("街道名稱需人工確認")).toBeInTheDocument();
-    await waitFor(() => expect(api.ensureClipPreview).toHaveBeenCalledWith(video.id, 500, 1_500));
+    // Continuous Review prepares the timeline clip, not only the cue's 1s span.
+    await waitFor(() => expect(api.ensureClipPreview).toHaveBeenCalledWith(video.id, 0, 12_000));
     fireEvent.click(within(dialog).getByRole("button", { name: "確認並保存第 1 筆字幕" }));
     await waitFor(() =>
       expect(api.setSubtitleCues).toHaveBeenCalledWith([
@@ -2963,6 +2977,36 @@ describe("App source workflow", () => {
     expect(await within(dialog).findByRole("region", { name: "逐筆 Proxy 字幕校對" })).toHaveTextContent("第 1／1 筆");
     expect(within(dialog).getByRole("button", { name: "不一致，修改文字／時間" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /匯出 0 筆已確認 SRT/ })).toBeDisabled();
+  });
+
+  it("keeps playback scope stable on edit selection and changes it only on explicit cue jump", async () => {
+    const introSegment = {
+      id: "scope-intro-segment", assetId: video.id, fileName: video.fileName,
+      inMs: 0, outMs: 3_000, score: 90, reasons: ["scope regression"],
+    };
+    const mainCue = {
+      id: "scope-main-cue", startMs: 1_000, endMs: 2_000, text: "正片編輯",
+      timelineScope: "MAIN" as const, origin: "MANUAL" as const, reviewStatus: "DRAFT" as const,
+    };
+    const introCue = {
+      id: "scope-intro-cue", startMs: 500, endMs: 1_500, text: "片頭編輯",
+      timelineScope: "INTRO" as const, origin: "MANUAL" as const, reviewStatus: "DRAFT" as const,
+    };
+    const scopedProject = { ...structuredClone(project), introSegments: [introSegment], subtitleCues: [mainCue, introCue] };
+    const api = mockApi(scopedProject);
+    Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /CC 字幕/ }));
+    const dialog = await screen.findByRole("dialog", { name: "AI 字幕審核與 SRT" });
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "片頭字幕" }));
+    const clockLabel = () => dialog.querySelector(".subtitle-time-scrubber > span");
+    await waitFor(() => expect(clockLabel()).toHaveTextContent("正片"));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "選取字幕 片頭編輯" }));
+    expect(clockLabel()).toHaveTextContent("正片");
+
+    fireEvent.doubleClick(within(dialog).getByRole("button", { name: "選取字幕 片頭編輯" }));
+    await waitFor(() => expect(clockLabel()).toHaveTextContent("片頭片段"));
   });
 
   it("keeps the shared preview history collapsed on the subtitle page until requested", async () => {

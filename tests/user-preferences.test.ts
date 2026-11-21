@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -19,6 +19,11 @@ describe("user preferences", () => {
     const store = new UserPreferencesStore(await root());
     await store.initialize();
     expect(store.snapshot().renderDefaults).toMatchObject({
+      tempLocations: [
+        { role: "PRIMARY", path: "E:\\temp\\SceneryWalker", enabled: true },
+        { role: "FALLBACK", path: path.join(os.tmpdir(), "SceneryWalker"), allowFallback: true, enabled: true },
+      ],
+      tempLocationSelection: "AUTO",
       videoCodec: "H264_QSV",
       includeWatermark: true,
       mainBgmScopes: { intro: true, main: true },
@@ -73,6 +78,11 @@ describe("user preferences", () => {
         transitionSeconds: 0.7,
         resolution: "4K",
         renderTemporaryFolder: path.join(dataRoot, "Render TEMP"),
+        tempLocations: [
+          { id: "primary", path: path.join(dataRoot, "E temp"), role: "PRIMARY", enabled: true, allowFallback: true, reserveBytes: 30 * 1024 ** 3 },
+          { id: "fallback", path: path.join(dataRoot, "C temp"), role: "FALLBACK", enabled: true, allowFallback: true, reserveBytes: 30 * 1024 ** 3 },
+        ],
+        tempLocationSelection: "AUTO",
         prependIntro: false,
         autoUpload: false,
         introPreviewIncludeBgm: true,
@@ -108,6 +118,11 @@ describe("user preferences", () => {
         transitionSeconds: 0.7,
         resolution: "4K",
         renderTemporaryFolder: path.join(dataRoot, "Render TEMP"),
+        tempLocations: [
+          { id: "primary", path: path.join(dataRoot, "E temp"), role: "PRIMARY", enabled: true, allowFallback: true, reserveBytes: 30 * 1024 ** 3 },
+          { id: "fallback", path: path.join(dataRoot, "C temp"), role: "FALLBACK", enabled: true, allowFallback: true, reserveBytes: 30 * 1024 ** 3 },
+        ],
+        tempLocationSelection: "AUTO",
         prependIntro: false,
         autoUpload: false,
         introPreviewIncludeBgm: true,
@@ -162,7 +177,44 @@ describe("user preferences", () => {
     await expect(store.update({ renderDefaults: { renderTemporaryFolder: "relative-temp" } })).rejects.toThrow(
       /絕對路徑/,
     );
+    await expect(store.update({ renderDefaults: { tempLocations: [{ id: "bad", path: "relative", role: "PRIMARY", enabled: true }] } })).rejects.toThrow(/格式或路徑無效/);
     expect(store.snapshot().viewMode).toBe("LIST");
+  });
+
+  it("migrates a legacy single TEMP path into the primary slot and defaults fallback selection to AUTO", async () => {
+    const dataRoot = await root();
+    const store = new UserPreferencesStore(dataRoot);
+    await store.initialize();
+    await readFile(store.settingsPath, "utf8");
+    const legacyPath = path.join(dataRoot, "legacy TEMP");
+    await store.update({ renderDefaults: { renderTemporaryFolder: legacyPath } });
+    const locations = store.snapshot().renderDefaults.tempLocations ?? [];
+    expect(locations[0]).toMatchObject({ id: "primary", role: "PRIMARY", path: legacyPath });
+    expect(locations[1]).toMatchObject({ id: "fallback", role: "FALLBACK", allowFallback: true });
+    expect(store.snapshot().renderDefaults.tempLocationSelection).toBe("AUTO");
+  });
+
+  it("migrates the existing E:\\temp 20 GiB and C: 30 GiB reserves without changing other custom values", async () => {
+    const dataRoot = await root();
+    const first = new UserPreferencesStore(dataRoot);
+    await first.initialize();
+    const saved = JSON.parse(await readFile(first.settingsPath, "utf8"));
+    saved.renderDefaults.tempLocations = [
+      { id: "primary", path: "E:\\temp", role: "PRIMARY", enabled: true, allowFallback: true, reserveBytes: 20 * 1024 ** 3 },
+      { id: "fallback", path: path.join(os.tmpdir(), "SceneryWalker"), role: "FALLBACK", enabled: true, allowFallback: true, reserveBytes: 30 * 1024 ** 3 },
+    ];
+    await writeFile(first.settingsPath, JSON.stringify(saved), "utf8");
+    const reopened = new UserPreferencesStore(dataRoot);
+    await reopened.initialize();
+    expect(reopened.snapshot().renderDefaults.tempLocations).toMatchObject([
+      { path: "E:\\temp", reserveBytes: 1 * 1024 ** 3 },
+      { path: path.join(os.tmpdir(), "SceneryWalker"), reserveBytes: 2 * 1024 ** 3 },
+    ]);
+    const custom = await reopened.setRenderTempLocations([
+      { id: "primary", path: "E:\\temp", role: "PRIMARY", enabled: true, allowFallback: true, reserveBytes: 5 * 1024 ** 3 },
+      { id: "fallback", path: path.join(os.tmpdir(), "SceneryWalker"), role: "FALLBACK", enabled: true, allowFallback: true, reserveBytes: 7 * 1024 ** 3 },
+    ]);
+    expect(custom.renderDefaults.tempLocations?.map((item) => item.reserveBytes)).toEqual([5 * 1024 ** 3, 7 * 1024 ** 3]);
   });
 
   it("keeps post-success power actions explicit opt-in and persists a deliberate choice", async () => {

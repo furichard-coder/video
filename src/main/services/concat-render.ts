@@ -26,6 +26,12 @@ import type {
   InsertionAudioPlan,
   InsertionSfxEvent,
   ProjectManifest,
+  ResumeCompatibilityReport,
+  ResumeStorageAnalysis,
+  ResumeStorageExecutionResult,
+  RenderTempLocationConfig,
+  TemporaryArtifactInventory,
+  TemporaryArtifactInventoryItem,
   SystemResourceSnapshot,
 } from "../../shared/domain";
 import {
@@ -77,7 +83,12 @@ import {
   estimateResumeAdditionalPeak,
   isEnospcError,
   remainingAdditionalWriteBytes,
+  hardSafetyLimitBytes,
+  volumeRoot,
 } from "./render-disk-space";
+import { probeRenderTempLocations, selectRenderTempForNextJob } from "./render-temp-scheduler";
+import { artifactDestination, buildResumeStoragePlan } from "./render-storage-recovery";
+import { scanRegisteredTemporaryArtifacts } from "./temporary-artifact-inventory";
 import {
   estimatedIntermediateBytes,
   intermediateBitrateArgs,
@@ -88,6 +99,24 @@ import {
 export interface ConcatInput {
   sourcePath: string;
   sourceVideoCodec?: string;
+  /** Path-independent source identity for new checkpoint keys. */
+  sourceRenderIdentity?: {
+    sizeBytes: number;
+    modifiedAt: string;
+    durationMs?: number;
+    videoCodec?: string;
+    width?: number;
+    height?: number;
+    frameRate?: string;
+    rotationDegrees?: number;
+    audioCodec?: string;
+    audioSampleRate?: number;
+    audioChannels?: number;
+    audioChannelLayout?: string;
+  };
+  /** v0.79-v0.81 recovery evidence; never used for new v3 identity. */
+  legacyCheckpointKey?: string;
+  sourceStatMatchesManifest?: boolean;
   assetId?: string;
   startMs?: number;
   durationMs: number;
@@ -112,6 +141,10 @@ export interface ConcatInput {
   checkpointKey?: string;
   insertionAudioInstanceId?: string;
   insertionAudioScope?: "INTRO" | "MAIN";
+}
+
+export function pictureBaseStageRequired(persistentBase: { outputPath: string } | undefined): boolean {
+  return !persistentBase;
 }
 export interface BgmRenderInput extends BgmTrack {
   loop?: boolean;
@@ -1077,16 +1110,119 @@ function checkpointKey(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 24);
 }
 
+function legacyInputCheckpointKey(input: ConcatInput, index: number): string {
+  const {
+    mainStartCard: card,
+    checkpointKey: _newCheckpointKey,
+    sourceRenderIdentity: _newSourceIdentity,
+    sourceStatMatchesManifest: _sourceEvidence,
+    legacyCheckpointKey: _legacyKey,
+    ...legacyStableInput
+  } = input;
+  return checkpointKey({
+    index,
+    ...legacyStableInput,
+    ...(card ? { mainStartCard: {
+      durationSeconds: card.durationSeconds,
+      line1: card.line1,
+      line2: card.line2,
+      line1FontSize1080p: card.line1FontSize1080p,
+      line2FontSize1080p: card.line2FontSize1080p,
+      lineGap1080p: card.lineGap1080p,
+      overlayOpacityPercent: card.overlayOpacityPercent,
+      transitionStyle: card.transitionStyle,
+      sourceDurationMs: card.sourceDurationMs,
+    } } : {}),
+  });
+}
+
+export function legacyLevelOneIdsForProject(project: ProjectManifest, request: ConcatRenderRequest, maximumInputs: number): string[] | undefined {
+  if (request.purpose !== "CONCAT" || !request.clipSelections?.length) return undefined;
+  const intro = introSegmentsForOutput(project.introSegments, project.introSegmentMaxDurationMs);
+  const assetsById = new Map(project.sources.map((asset) => [asset.id, asset]));
+  const selectedColorPreset = colorPreset(project.colorSettings.introPresetId);
+  const inputs: ConcatInput[] = request.orderedAssetIds.map((assetId, index) => {
+    const asset = assetsById.get(assetId);
+    const range = request.clipSelections![index];
+    if (!asset || !range || range.assetId !== asset.id || asset.metadataState !== "READY") throw new Error("Current Project does not match checkpoint selections.");
+    const isIntro = Boolean(request.prependIntro) && index < intro.length;
+    const startMs = Math.round(range.inMs);
+    const durationMs = Math.round(range.outMs) - startMs;
+    return {
+      sourcePath: asset.sourcePath,
+      sourceVideoCodec: asset.mediaInfo?.videoCodec,
+      assetId: asset.id,
+      startMs,
+      durationMs,
+      hasAudio: asset.kind === "VIDEO" && Boolean(asset.mediaInfo?.audioCodec),
+      isImage: asset.kind === "IMAGE",
+      isPortrait: asset.mediaInfo?.isPortrait,
+      orientationRotationDegrees: asset.mediaInfo?.rotationDegrees,
+      photoSoundEnabled: false,
+      ...(isIntro
+        ? { insertionAudioInstanceId: intro[index]?.id, insertionAudioScope: "INTRO" as const }
+        : range.mediaInsertionId
+          ? { insertionAudioInstanceId: range.mediaInsertionId, insertionAudioScope: "MAIN" as const }
+          : {}),
+      volumeSegments: asset.volumeSegments ?? [],
+      zoomSegments: asset.zoomSegments ?? [],
+      colorFilters: isIntro || project.colorSettings.applyToMain ? [...selectedColorPreset.ffmpegFilters] : [],
+    };
+  });
+  const mainStartCard = request.prependIntro
+    ? validateMainStartCardOptions(request.mainStartCard ?? DEFAULT_MAIN_START_CARD_OPTIONS)
+    : undefined;
+  if (mainStartCard) {
+    const firstMain = inputs[intro.length];
+    const introIndex = mainStartCard.backgroundIntroSegmentId
+      ? intro.findIndex((segment) => segment.id === mainStartCard.backgroundIntroSegmentId)
+      : -1;
+    const background = introIndex >= 0 ? inputs[introIndex] : firstMain;
+    if (!background) return undefined;
+    inputs.splice(intro.length, 0, {
+      ...background,
+      durationMs: mainStartCard.durationSeconds * 1000,
+      hasAudio: false,
+      photoSoundEnabled: false,
+      volumeSegments: [],
+      zoomSegments: [],
+      mainStartCard: { ...mainStartCard, sourceDurationMs: background.durationMs, line1TextFilePath: "", line2TextFilePath: "", fontFilePath: "" },
+    });
+  }
+  const leafKeys = inputs.map(legacyInputCheckpointKey);
+  const ids: string[] = [];
+  for (let index = 0; index < leafKeys.length; index += maximumInputs)
+    ids.push(checkpointKey({ segmentPipelineVersion: 2, level: 0, inputs: leafKeys.slice(index, index + maximumInputs), transitionSeconds: request.transitionSeconds, resolution: request.resolution, portrait: false }));
+  return ids;
+}
+
+function canonicalSerialize(value: unknown): string {
+  const normalize = (item: unknown): unknown => {
+    if (Array.isArray(item)) return item.map(normalize);
+    if (!item || typeof item !== "object") return item;
+    return Object.fromEntries(Object.entries(item as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, normalize(entry)]));
+  };
+  return JSON.stringify(normalize(value));
+}
+
 function renderRequestSignature(projectId: string, projectUpdatedAt: string, request: ConcatRenderRequest): string {
   const {
     outputToken: _outputToken,
     resourceWarningAcknowledged: _ack,
     resumeCheckpointId: _resume,
+    renderTemporaryFolder: _renderTemporaryFolder,
+    tempLocations: _tempLocations,
+    tempLocationSelection: _tempLocationSelection,
+    estimatedPeakDiskBytes: _estimatedPeakDiskBytes,
+    estimatedFinalOutputBytes: _estimatedFinalOutputBytes,
     ...stable
   } = request;
   return createHash("sha256")
     .update(
-      JSON.stringify({
+      canonicalSerialize({
         projectId,
         projectUpdatedAt,
         orientationNormalizerVersion: ORIENTATION_NORMALIZER_VERSION,
@@ -1098,13 +1234,56 @@ function renderRequestSignature(projectId: string, projectUpdatedAt: string, req
 }
 
 function projectWithoutInsertionAudio(project: ProjectManifest): unknown {
-  const { updatedAt: _updatedAt, ...stable } = structuredClone(project);
-  stable.mediaInsertions = stable.mediaInsertions.map(({ insertionAudio: _audio, ...item }) => item);
-  stable.introSegments = stable.introSegments.map(({ insertionAudio: _audio, ...item }) => item);
-  stable.sources = stable.sources.map(({ mainAudioGates: _gates, photoSoundEnabled: _sfx, dubWithBgm: _dub, ...asset }) => asset);
-  stable.bgmTracks = [];
-  stable.mainStartCue = { enabled: false, durationMs: 0 };
-  return stable;
+  const {
+    schemaVersion: _schemaVersion,
+    name: _name,
+    sourcePolicy: _sourcePolicy,
+    previewPolicy: _previewPolicy,
+    previewerVersion: _previewerVersion,
+    sortMode: _sortMode,
+    createdAt: _createdAt,
+    updatedAt: _updatedAt,
+    pendingAssetIds: _pendingAssetIds,
+    placementDecisions: _placementDecisions,
+    recentMainRemovals: _recentMainRemovals,
+    introExcludedSegmentIds: _introExcludedSegmentIds,
+    recentIntroRemovals: _recentIntroRemovals,
+    aiStoryContext: _aiStoryContext,
+    aiPublishAssets: _aiPublishAssets,
+    introAnalysisResult: _introAnalysisResult,
+    musicSuggestionResult: _musicSuggestionResult,
+    timelineRevision: _timelineRevision,
+    subtitleTimelineRevision: _subtitleTimelineRevision,
+    mainTimelineRevision: _mainTimelineRevision,
+    introTimelineRevision: _introTimelineRevision,
+    mainSubtitleReviewRevision: _mainSubtitleReviewRevision,
+    introSubtitleReviewRevision: _introSubtitleReviewRevision,
+    ...stable
+  } = structuredClone(project);
+  const mutable = stable as unknown as Record<string, any>;
+  mutable.mediaInsertions = mutable.mediaInsertions.map(({ insertionAudio: _audio, ...item }: any) => item);
+  mutable.introSegments = mutable.introSegments.map(({ insertionAudio: _audio, ...item }: any) => item);
+  mutable.sources = mutable.sources.map(({
+    sourcePath: _sourcePath,
+    sourceIdentity: _sourceIdentity,
+    fileName: _fileName,
+    extension: _extension,
+    fileCreatedAt: _fileCreatedAt,
+    addedAt: _addedAt,
+    addedOrder: _addedOrder,
+    sourcePolicy: _assetSourcePolicy,
+    previewPolicy: _assetPreviewPolicy,
+    previewCacheKey: _previewCacheKey,
+    metadataState: _metadataState,
+    metadataError: _metadataError,
+    mainAudioGates: _gates,
+    photoSoundEnabled: _sfx,
+    dubWithBgm: _dub,
+    ...asset
+  }: any) => asset);
+  mutable.bgmTracks = [];
+  mutable.mainStartCue = { enabled: false, durationMs: 0 };
+  return mutable;
 }
 
 /** Stable signature for picture plus timeline-correct source audio. All post-mix gates/BGM/SFX/final DSP are excluded. */
@@ -1116,10 +1295,15 @@ export function pictureBaseRenderSignature(project: ProjectManifest, request: Co
     audioProcessing: _audioProcessing,
     includeBgm: _includeBgm,
     bgmScopes: _bgmScopes,
+    renderTemporaryFolder: _renderTemporaryFolder,
+    tempLocations: _tempLocations,
+    tempLocationSelection: _tempLocationSelection,
+    estimatedPeakDiskBytes: _estimatedPeakDiskBytes,
+    estimatedFinalOutputBytes: _estimatedFinalOutputBytes,
     ...stableRequest
   } = request;
   return createHash("sha256")
-    .update(JSON.stringify({
+    .update(canonicalSerialize({
       project: projectWithoutInsertionAudio(project),
       request: stableRequest,
       orientationNormalizerVersion: ORIENTATION_NORMALIZER_VERSION,
@@ -1136,7 +1320,7 @@ export function finalInsertionAudioSignature(
   postBgmTracks: readonly BgmRenderInput[] = [],
 ): string {
   return createHash("sha256")
-    .update(JSON.stringify({
+    .update(canonicalSerialize({
       pictureSignature,
       plan,
       postBgmTracks,
@@ -1237,8 +1421,314 @@ export class ConcatRenderService {
     return this.checkpoints.offer(this.store.getProject().id);
   }
 
+  async analyzeResumeCompatibility(
+    checkpointId: string,
+    configuredLocations: readonly RenderTempLocationConfig[] = [],
+  ): Promise<ResumeCompatibilityReport> {
+    const project = this.store.getProject();
+    let checkpoint = await this.checkpoints.load(project.id);
+    if (!checkpoint || (checkpoint.checkpointId !== checkpointId && checkpoint.recoveryMigration?.sourceCheckpointId !== checkpointId))
+      throw new Error("找不到可分析的 Resume checkpoint。");
+    const hasMissingCompletedArtifact = (await Promise.all(checkpoint.segments.map(async (segment) => {
+      if (segment.status !== "COMPLETED") return false;
+      const item = await stat(segment.outputPath).catch(() => undefined);
+      return !item?.isFile() || Boolean(segment.sizeBytes && item.size !== segment.sizeBytes);
+    }))).some(Boolean);
+    if (hasMissingCompletedArtifact) {
+      const roots = [...configuredLocations, ...(checkpoint.tempLocations ?? [])]
+        .filter((item) => item.enabled !== false)
+        .map((item) => item.path);
+      if (roots.length) {
+        const preview = await this.checkpoints.discoverAndRemapCompletedArtifacts(
+          project.id, checkpoint.checkpointId, roots, true, false,
+        );
+        for (const segment of checkpoint.segments) {
+          const relocated = preview.remappedPaths?.[segment.id];
+          if (relocated) segment.outputPath = relocated;
+        }
+      }
+    }
+    const currentPictureSignature = pictureBaseRenderSignature(project, checkpoint.request);
+    const pictureProvenSame = checkpoint.pictureBaseSignature === currentPictureSignature;
+    const validity = await Promise.all(checkpoint.segments.map(async (segment) =>
+      segment.status === "COMPLETED" && await this.checkpoints.validateSegment(segment),
+    ));
+    const reusable = checkpoint.segments.filter((_segment, index) => validity[index]);
+    const referencedAssets = [...new Set(checkpoint.request.orderedAssetIds)].map((id) => project.sources.find((asset) => asset.id === id));
+    const sourceContinuity = referencedAssets.every(Boolean) && (await Promise.all(referencedAssets.map(async (asset) => {
+      if (!asset) return false;
+      const observed = await stat(asset.sourcePath).catch(() => undefined);
+      return Boolean(observed?.isFile()) && observed!.size === asset.sizeBytes &&
+        observed!.mtime.toISOString() === asset.fileModifiedAt && Date.parse(asset.fileModifiedAt) <= Date.parse(checkpoint.createdAt);
+    }))).every(Boolean);
+    const maximumInputs = checkpoint.request.runtimePolicy?.maxVisualInputsPerStage ?? 10;
+    const expectedLegacyIds = legacyLevelOneIdsForProject(project, checkpoint.request, maximumInputs);
+    const completedLevelOne = checkpoint.segments.filter((segment) => segment.level === 1 && segment.status === "COMPLETED").sort((left, right) => left.index - right.index);
+    const legacyIdsMatch = Boolean(expectedLegacyIds?.length) && expectedLegacyIds!.length === completedLevelOne.length &&
+      completedLevelOne.every((segment, index) => segment.id === expectedLegacyIds![index]);
+    const semanticallyValidatedLegacySegments = !pictureProvenSame && sourceContinuity && legacyIdsMatch &&
+      completedLevelOne.length > 0 && completedLevelOne.every((segment) => reusable.includes(segment));
+    const unknownReason = "Legacy checkpoint does not contain an old canonical Project snapshot; content change cannot be inferred from a whole-project hash.";
+    const renderDomain = (label: string) => ({
+      status: pictureProvenSame ? "SAME" as const : "UNKNOWN" as const,
+      oldValue: checkpoint.pictureBaseSignature,
+      newValue: currentPictureSignature,
+      renderAffecting: true,
+      reason: pictureProvenSame ? `${label} canonical picture fingerprint matches.` : unknownReason,
+    });
+    return {
+      checkpointId: checkpoint.checkpointId,
+      // Physical validity alone does not prove semantic ownership of a
+      // timeline range. The render path additionally requires deterministic
+      // segment keys before it reuses any of these files.
+      decision: pictureProvenSame ? "FULL_RESUME" : semanticallyValidatedLegacySegments ? "VALIDATED_SEGMENT_REUSE" : "NEEDS_ANALYSIS",
+      video: renderDomain("Video"),
+      timeline: renderDomain("Timeline"),
+      baseAudio: renderDomain("Base audio"),
+      storage: {
+        status: "IGNORED",
+        oldValue: checkpoint.request.renderTemporaryFolder ?? path.dirname(checkpoint.workRoot),
+        newValue: checkpoint.request.tempLocations?.map((item) => item.path).join(" | ") ?? checkpoint.request.renderTemporaryFolder,
+        renderAffecting: false,
+        reason: "Artifact storage location is excluded from render identity.",
+      },
+      uploadSettings: { status: "IGNORED", renderAffecting: false, reason: "YouTube/upload/UI settings are not render identity." },
+      appVersion: { status: "IGNORED", oldValue: checkpoint.checkpointProducer ?? "legacy", newValue: "v0.82", renderAffecting: false, reason: "App version requires migration, not re-rendering." },
+      reusableSegmentCount: pictureProvenSame ? reusable.length : semanticallyValidatedLegacySegments ? completedLevelOne.length : 0,
+      invalidSegmentCount: checkpoint.segments.length - reusable.length,
+      reusableDurationMs: (pictureProvenSame ? reusable : semanticallyValidatedLegacySegments ? completedLevelOne : []).reduce((sum, segment) => sum + segment.durationMs, 0),
+      partialRecovery: checkpoint.recoverablePartial ? "UNKNOWN" : "NOT_FOUND",
+      migrationRequired: checkpoint.checkpointProducer !== "v0.82",
+      sourceCheckpointPreserved: checkpoint.checkpointProducer !== "v0.82" || Boolean(checkpoint.recoveryMigration?.sourcePreserved),
+    };
+  }
+
   discardResume(checkpointId: string) {
     return this.checkpoints.discard(this.store.getProject().id, checkpointId);
+  }
+
+  remapResumeSegments(checkpointId: string, fromRoot: string, toRoot: string) {
+    return this.checkpoints.remapCompletedSegments(this.store.getProject().id, checkpointId, fromRoot, toRoot);
+  }
+
+  async scanAndRemapManuallyMovedArtifacts(
+    checkpointId: string,
+    configuredLocations: readonly RenderTempLocationConfig[],
+  ) {
+    const project = this.store.getProject();
+    const checkpoint = await this.checkpoints.load(project.id);
+    if (!checkpoint) throw new Error("找不到可重新掃描的 Resume checkpoint。");
+    const writable = checkpoint.checkpointProducer === "v0.82"
+      ? checkpoint
+      : await this.checkpoints.importResumeRecoveryCopy(project.id, checkpointId);
+    if (!writable) throw new Error("無法建立安全的 checkpoint migration copy。");
+    await this.checkpoints.appendDiagnostic(writable, { event: "[RESUME] VERIFYING_MOVED_ARTIFACTS" });
+    return this.checkpoints.discoverAndRemapCompletedArtifacts(
+      project.id,
+      writable.checkpointId,
+      [...configuredLocations, ...(writable.tempLocations ?? [])]
+        .filter((item) => item.enabled !== false)
+        .map((item) => item.path),
+    );
+  }
+
+  async analyzeResumeStorage(
+    checkpointId: string,
+    configuredLocations: readonly RenderTempLocationConfig[],
+  ): Promise<ResumeStorageAnalysis> {
+    const project = this.store.getProject();
+    const checkpoint = await this.checkpoints.load(project.id);
+    if (!checkpoint || (checkpoint.checkpointId !== checkpointId && checkpoint.recoveryMigration?.sourceCheckpointId !== checkpointId))
+      throw new Error("找不到可分析空間的 Resume checkpoint。");
+    const locations = configuredLocations.length ? configuredLocations : checkpoint.tempLocations ?? [];
+    const statuses = await probeRenderTempLocations(locations);
+    const completed = checkpoint.segments.filter((segment) => segment.status === "COMPLETED");
+    const ownedRoots = (checkpoint.ownedWorkRoots ?? [checkpoint.workRoot]).map((root) => path.resolve(root));
+    const items: TemporaryArtifactInventoryItem[] = completed.map((segment) => {
+      const resolved = path.resolve(segment.outputPath);
+      const appOwned = ownedRoots.some((root) => resolved.startsWith(root + path.sep));
+      const safelyRelocatable = Boolean(segment.sha256);
+      return {
+        artifactId: segment.id,
+        projectId: checkpoint.projectId,
+        resumeId: checkpoint.checkpointId,
+        artifactType: "COMPLETED_SEGMENT" as const,
+        fileName: path.basename(resolved),
+        path: resolved,
+        drive: volumeRoot(resolved),
+        sizeBytes: Math.max(0, segment.sizeBytes ?? 0),
+        createdAt: segment.completedAt,
+        modifiedAt: segment.completedAt,
+        status: "RESUME_REQUIRED" as const,
+        referencedByCurrentCheckpoint: true,
+        safeToDelete: false,
+        safeToMove: safelyRelocatable,
+        reason: appOwned
+          ? "目前 Resume 需要；僅可在明確同意後用 copy-verify-checkpoint-delete 搬移。"
+          : safelyRelocatable
+            ? "目前 Resume 與舊 checkpoint 共用；搬移會保存內容指紋 relocation registry，使舊 checkpoint 仍可驗證新位置。"
+            : "目前 Resume 與舊 checkpoint 共用且缺少內容指紋；不得刪除或搬移來源。",
+        contentFingerprint: segment.sha256,
+      };
+    });
+    if (checkpoint.recoverablePartial) items.push({
+      artifactId: `partial:${checkpoint.checkpointId}`,
+      projectId: checkpoint.projectId,
+      resumeId: checkpoint.checkpointId,
+      artifactType: "PARTIAL",
+      fileName: path.basename(checkpoint.recoverablePartial.path),
+      path: checkpoint.recoverablePartial.path,
+      drive: volumeRoot(checkpoint.recoverablePartial.path),
+      sizeBytes: checkpoint.recoverablePartial.sizeBytes,
+      createdAt: checkpoint.recoverablePartial.recordedAt,
+      modifiedAt: checkpoint.recoverablePartial.recordedAt,
+      status: "RECOVERABLE_PARTIAL",
+      referencedByCurrentCheckpoint: true,
+      safeToDelete: false,
+      safeToMove: false,
+      reason: "Partial 尚可能恢復，未完成內容驗證前一律保留。",
+      contentFingerprint: undefined,
+    });
+    const knownInventory: TemporaryArtifactInventory = {
+      capturedAt: new Date().toISOString(),
+      roots: [...new Set(locations.map((location) => path.resolve(location.path)))],
+      items,
+      totalBytes: items.reduce((sum, item) => sum + item.sizeBytes, 0),
+      immediatelyReclaimableBytes: items.filter((item) => item.safeToDelete).reduce((sum, item) => sum + item.sizeBytes, 0),
+      movableBytes: items.filter((item) => item.safeToMove).reduce((sum, item) => sum + item.sizeBytes, 0),
+    };
+    const inventory = await scanRegisteredTemporaryArtifacts(
+      locations.map((location) => location.path),
+      knownInventory,
+      project.sources.map((asset) => asset.sourcePath),
+    );
+    const expectedDurationMs = checkpoint.request.estimatedDurationMs ?? completed.reduce((sum, segment) => sum + segment.durationMs, 0);
+    const externalBytes = checkpoint.recoveryMigration?.validatedExternalSegmentBytes ?? 0;
+    const externalDurationMs = checkpoint.recoveryMigration?.validatedExternalSegmentDurationMs ?? 0;
+    const legacyPeakBytes = Math.max(
+      checkpoint.request.estimatedPeakDiskBytes ?? 0,
+      checkpoint.request.estimatedFinalOutputBytes ?? 0,
+    );
+    const recovery = checkpoint.recoveryMigration
+      ? estimateResumeAdditionalPeak({
+          legacyPeakBytes,
+          validatedExternalSegmentBytes: externalBytes,
+          validatedExternalSegmentDurationMs: externalDurationMs,
+          expectedDurationMs,
+          estimatedFinalOutputBytes: checkpoint.request.estimatedFinalOutputBytes ?? 0,
+        })
+      : undefined;
+    const remainingVideoBytes = checkpoint.audioMaster?.status === "COMPLETED" ? 0 : recovery?.baseMasterBytes ?? legacyPeakBytes;
+    const remainingAudioBytes = Math.ceil((Math.max(0, expectedDurationMs) / 1_000) * 192_000 + 512 * 1024 ** 2);
+    const finalOutputBytes = recovery?.finalVideoBytes ?? checkpoint.request.estimatedFinalOutputBytes ?? 0;
+    const partialBytes = checkpoint.recoverablePartial?.sizeBytes ?? 0;
+    const peakAdditionalBytes = recovery?.peakAdditionalBytes ?? Math.max(remainingVideoBytes, finalOutputBytes + remainingAudioBytes);
+    const primary = statuses.find((item) => item.role === "PRIMARY") ?? statuses[0];
+    if (!primary) throw new Error("沒有可分析的 Render TEMP 位置。");
+    const fallback = statuses.find((item) => item.role === "FALLBACK" && item.allowFallback !== false);
+    const nextJobBytes = Math.max(1, remainingVideoBytes || finalOutputBytes);
+    const moveCandidates = items.filter((item) => item.safeToMove && item.drive === primary.volume && fallback).map((item) => ({
+      artifactId: item.artifactId,
+      sourcePath: item.path,
+      destinationPath: artifactDestination(fallback!.path, checkpoint.workRoot, item.path),
+      sizeBytes: item.sizeBytes,
+      sourceLocationId: primary.id,
+      destinationLocationId: fallback!.id,
+      reason: item.reason,
+    }));
+    const plan = buildResumeStoragePlan({
+      checkpointId: checkpoint.checkpointId,
+      primary,
+      fallback,
+      peakAdditionalBytes,
+      nextJobBytes,
+      cleanupCandidates: inventory.items,
+      moveCandidates,
+    });
+    const volumes = statuses.map((status) => {
+      const volumeItems = items.filter((item) => item.drive === status.volume);
+      return {
+        locationId: status.id,
+        path: status.path,
+        volume: status.volume,
+        role: status.role,
+        freeBytes: status.freeBytes,
+        capacityBytes: status.capacityBytes,
+        softReserveBytes: status.reserveBytes ?? 0,
+        hardSafetyLimitBytes: hardSafetyLimitBytes(status.path),
+        tempUsageBytes: volumeItems.reduce((sum, item) => sum + item.sizeBytes, 0),
+        activeBytes: 0,
+        completedBytes: volumeItems.filter((item) => item.artifactType === "COMPLETED_SEGMENT").reduce((sum, item) => sum + item.sizeBytes, 0),
+        movableBytes: volumeItems.filter((item) => item.safeToMove).reduce((sum, item) => sum + item.sizeBytes, 0),
+        schedulableBytes: status.schedulableBytes,
+        writable: status.unavailableReason !== "UNWRITABLE",
+        osSafetyHealthy: status.unavailableReason !== "UNWRITABLE" && status.freeBytes > hardSafetyLimitBytes(status.path),
+      };
+    });
+    return {
+      capturedAt: new Date().toISOString(),
+      checkpointId: checkpoint.checkpointId,
+      currentStage: checkpoint.diskState?.status,
+      currentOutputPath: checkpoint.diskState?.failedPath,
+      volumes,
+      estimate: {
+        remainingVideoBytes,
+        remainingAudioBytes,
+        intermediatePeakBytes: remainingVideoBytes,
+        finalOutputBytes,
+        partialBytes,
+        peakConcurrentTempBytes: peakAdditionalBytes,
+        softReserveBytes: primary.reserveBytes ?? 0,
+        peakAdditionalBytes,
+      },
+      inventory,
+      plan,
+      canResumeWithoutCleanup: plan.action === "RESUME" || plan.action === "REDIRECT_FUTURE_JOBS",
+      completedSegmentCount: completed.length,
+      completedSegmentBytes: completed.reduce((sum, segment) => sum + Math.max(0, segment.sizeBytes ?? 0), 0),
+      resumeFromSegmentIndex: checkpoint.segments.findIndex((segment) => segment.status !== "COMPLETED"),
+      failureKind: checkpoint.diskState?.status === "FAILED_ENOSPC" ? "FFMPEG_ENOSPC_-28" : checkpoint.concatStatus === "PAUSED_DISK_SPACE" ? "APP_PREEMPTIVE_DISK_PAUSE" : undefined,
+      failedPath: checkpoint.diskState?.failedPath,
+      recoveryState: plan.action === "RESUME" || plan.action === "REDIRECT_FUTURE_JOBS"
+        ? "READY_TO_RESUME"
+        : plan.action === "PROPOSE_MOVE"
+          ? "MOVE_REQUIRED"
+          : "WAITING_FOR_USER_MOVE",
+    };
+  }
+
+  async executeResumeStoragePlan(
+    checkpointId: string,
+    planId: string,
+    artifactIds: readonly string[],
+    configuredLocations: readonly RenderTempLocationConfig[],
+  ): Promise<ResumeStorageExecutionResult> {
+    const before = await this.analyzeResumeStorage(checkpointId, configuredLocations);
+    if (before.plan.planId !== planId) throw new Error("空間方案已過期，請重新分析後再確認。");
+    if (before.plan.action !== "PROPOSE_MOVE" || !before.plan.requiresUserConfirmation)
+      throw new Error("目前方案沒有可執行的 Artifact 搬移。");
+    const allowed = new Set(before.plan.moveItems.map((item) => item.artifactId));
+    if (!artifactIds.length || artifactIds.some((id) => !allowed.has(id))) throw new Error("搬移清單不符合最新分析方案。");
+    const destination = configuredLocations.find((item) => item.id === before.plan.targetLocationId);
+    if (!destination) throw new Error("搬移目的 TEMP 已不存在。");
+    const projectId = this.store.getProject().id;
+    const sourceCheckpoint = await this.checkpoints.load(projectId);
+    const writableCheckpoint = sourceCheckpoint?.checkpointProducer === "v0.82"
+      ? sourceCheckpoint
+      : await this.checkpoints.importResumeRecoveryCopy(projectId, checkpointId);
+    if (!writableCheckpoint) throw new Error("無法建立安全的 checkpoint migration copy。");
+    await this.checkpoints.authorizeRecoveryTempLocation(projectId, writableCheckpoint.checkpointId, destination);
+    const result = await this.checkpoints.migrateCompletedArtifacts(
+      projectId,
+      writableCheckpoint.checkpointId,
+      artifactIds,
+      destination.path,
+    );
+    return {
+      checkpointId: writableCheckpoint.checkpointId,
+      ...result,
+      analysis: await this.analyzeResumeStorage(writableCheckpoint.checkpointId, configuredLocations),
+    };
   }
 
   discardReusableVideoMaster() {
@@ -1249,29 +1739,47 @@ export class ConcatRenderService {
     checkpointId: string,
     signal: AbortSignal | undefined,
     onProgress: (progress: ConcatRenderProgress) => void,
+    tempLocations?: ConcatRenderRequest["tempLocations"],
+    tempLocationSelection?: ConcatRenderRequest["tempLocationSelection"],
   ): Promise<ConcatRenderResult> {
     const project = this.store.getProject();
     let checkpoint = await this.checkpoints.load(project.id);
     if (
       checkpoint &&
-      checkpoint.checkpointId === checkpointId &&
-      checkpoint.checkpointProducer !== "v0.80" &&
-      !checkpoint.recoveryMigration &&
-      checkpoint.concatStatus === "PAUSED_DISK_SPACE"
+      (checkpoint.checkpointId === checkpointId || checkpoint.recoveryMigration?.sourceCheckpointId === checkpointId) &&
+      checkpoint.checkpointProducer !== "v0.82"
     ) {
-      checkpoint = await this.checkpoints.importV079RecoveryCopy(project.id, checkpointId);
+      checkpoint = await this.checkpoints.importResumeRecoveryCopy(project.id, checkpointId);
     }
     if (
       !checkpoint ||
       (checkpoint.checkpointId !== checkpointId && checkpoint.recoveryMigration?.sourceCheckpointId !== checkpointId)
     )
       throw new Error("找不到可續轉的工作，可能已完成或被捨棄。");
+    const roots = [...(tempLocations ?? []), ...(checkpoint.tempLocations ?? [])]
+      .filter((item) => item.enabled !== false)
+      .map((item) => item.path);
+    const hasMissingCompletedArtifact = (await Promise.all(checkpoint.segments.map(async (segment) => {
+      if (segment.status !== "COMPLETED") return false;
+      const item = await stat(segment.outputPath).catch(() => undefined);
+      return !item?.isFile() || Boolean(segment.sizeBytes && item.size !== segment.sizeBytes);
+    }))).some(Boolean);
+    if (hasMissingCompletedArtifact && roots.length) {
+      await this.checkpoints.appendDiagnostic(checkpoint, { event: "[RESUME] SEARCHING_RELOCATED_ARTIFACTS", roots });
+      const recovery = await this.checkpoints.discoverAndRemapCompletedArtifacts(project.id, checkpoint.checkpointId, roots, true);
+      if (recovery.missingArtifactIds.length || recovery.invalidCandidates.length)
+        throw new Error(`Resume Artifact 復原未完成：仍缺少 ${recovery.missingArtifactIds.length} 個片段。`);
+      checkpoint = await this.checkpoints.load(project.id);
+      if (!checkpoint) throw new Error("重新 Mapping 後無法讀回 Resume checkpoint。");
+    }
     return this.render(
       {
         ...structuredClone(checkpoint.request),
         outputToken: "resume-checkpoint",
         resumeCheckpointId: checkpoint.checkpointId,
         resourceWarningAcknowledged: true,
+        ...(tempLocations?.length ? { tempLocations: structuredClone(tempLocations) } : {}),
+        ...(tempLocationSelection ? { tempLocationSelection } : {}),
       },
       checkpoint.outputPath,
       signal,
@@ -1314,16 +1822,61 @@ export class ConcatRenderService {
     // Resume from the deepest fully materialized level. Earlier levels may have
     // been dependency-collected after their validated replacements were saved.
     const expectedByLevel: number[] = [];
+    const expectedIdsByLevel: string[][] = [];
+    const expectedLegacyIdsByLevel: string[][] = [];
     let expectedCount = originalInputs.length;
+    let expectedInputKeys: unknown[] = originalInputs.map((input) => input.checkpointKey);
+    let expectedLegacyInputKeys: unknown[] = originalInputs.map((input) => input.legacyCheckpointKey);
+    let expectedLevel = 0;
     while (expectedCount > maximumInputs) {
-      expectedCount = Math.ceil(expectedCount / maximumInputs);
+      const groupedKeys: unknown[][] = [];
+      const groupedLegacyKeys: unknown[][] = [];
+      for (let index = 0; index < expectedInputKeys.length; index += maximumInputs)
+        groupedKeys.push(expectedInputKeys.slice(index, index + maximumInputs));
+      for (let index = 0; index < expectedLegacyInputKeys.length; index += maximumInputs)
+        groupedLegacyKeys.push(expectedLegacyInputKeys.slice(index, index + maximumInputs));
+      const expectedIds = groupedKeys.map((inputs) => checkpointKey({
+        segmentPipelineVersion: 3,
+        level: expectedLevel,
+        inputs,
+        transitionSeconds,
+        resolution,
+        portrait,
+      }));
+      const expectedLegacyIds = groupedLegacyKeys.map((inputs) => checkpointKey({
+        segmentPipelineVersion: 2,
+        level: expectedLevel,
+        inputs,
+        transitionSeconds,
+        resolution,
+        portrait,
+      }));
+      expectedInputKeys = expectedIds;
+      expectedLegacyInputKeys = expectedLegacyIds;
+      expectedCount = expectedInputKeys.length;
       expectedByLevel.push(expectedCount);
+      expectedIdsByLevel.push(expectedIds);
+      expectedLegacyIdsByLevel.push(expectedLegacyIds);
+      expectedLevel += 1;
     }
     for (let candidateLevel = expectedByLevel.length; candidateLevel >= 1; candidateLevel -= 1) {
       const candidates = checkpoint.segments
         .filter((segment) => segment.level === candidateLevel && segment.status === "COMPLETED")
         .sort((left, right) => left.index - right.index);
       if (candidates.length !== expectedByLevel[candidateLevel - 1]) continue;
+      // A technically valid MKV is not sufficient proof that it belongs to
+      // this timeline. Match the deterministic per-level render keys before
+      // accepting a whole completed level from a legacy checkpoint.
+      const expectedIds = expectedIdsByLevel[candidateLevel - 1];
+      const v3KeysMatch = candidates.every((segment, index) => segment.id === expectedIds[index]);
+      const legacySourceEvidenceValid = (checkpoint.checkpointProducer !== "v0.82" || Boolean(checkpoint.recoveryMigration)) && originalInputs.every((input) =>
+        input.sourceStatMatchesManifest === true &&
+        Boolean(input.sourceRenderIdentity?.modifiedAt) &&
+        Date.parse(input.sourceRenderIdentity!.modifiedAt) <= Date.parse(checkpoint.createdAt),
+      );
+      const legacyIds = expectedLegacyIdsByLevel[candidateLevel - 1];
+      const legacyKeysMatch = legacySourceEvidenceValid && candidates.every((segment, index) => segment.id === legacyIds[index]);
+      if (!v3KeysMatch && !legacyKeysMatch) continue;
       const validity = await Promise.all(candidates.map((segment) => this.checkpoints.validateSegment(segment)));
       if (!validity.every(Boolean)) continue;
       current = candidates.map((segment) => ({
@@ -1347,6 +1900,8 @@ export class ConcatRenderService {
     let lastDiskSnapshotAt = 0;
     let requestedDiskPause: DiskSpacePauseError | undefined;
     let wavePeakResources: Awaited<ReturnType<typeof captureSystemResources>> | undefined;
+    const committedBytesByVolume: Record<string, number> = {};
+    let locationSelectionTail = Promise.resolve();
 
     while (current.length > maximumInputs) {
       const groups = groupLowMemoryInputs(current, maximumInputs);
@@ -1378,16 +1933,13 @@ export class ConcatRenderService {
         let stagePlan = stagePlanFor(qsvIndexes);
         const stem = `level-${level + 1}-part-${String(groupIndex + 1).padStart(3, "0")}`;
         const segmentId = checkpointKey({
-          segmentPipelineVersion: 2,
+          segmentPipelineVersion: 3,
           level,
           inputs: stageInputs.map((input) => input.checkpointKey),
           transitionSeconds,
           resolution,
           portrait,
         });
-        const stageOutputPath = path.join(checkpoint.workRoot, `${stem}-${segmentId}.mkv`);
-        const partialStagePath = path.join(checkpoint.workRoot, `.${stem}-${segmentId}.partial.mkv`);
-        const filterScriptPath = path.join(checkpoint.workRoot, `.${stem}-${segmentId}.filtergraph.txt`);
         let preserveStagePartial = false;
         let segment = checkpoint.segments.find((item) => item.id === segmentId);
         if (segment?.status === "COMPLETED" && (await this.checkpoints.validateSegment(segment))) {
@@ -1415,6 +1967,60 @@ export class ConcatRenderService {
           });
           return stagePlan.expectedDurationMs;
         }
+        const estimatedJobBytes = estimatedIntermediateBytes(
+          stagePlan.expectedDurationMs,
+          resolution,
+          runtimePolicy.resourceProfile ?? "BALANCED",
+        );
+        let selectedLocation: ReturnType<typeof selectRenderTempForNextJob>;
+        const previousSelection = locationSelectionTail;
+        let releaseSelection!: () => void;
+        locationSelectionTail = new Promise<void>((resolve) => { releaseSelection = resolve; });
+        await previousSelection;
+        try {
+          const configs = checkpoint.request.tempLocations?.length
+            ? checkpoint.request.tempLocations
+            : checkpoint.tempLocations?.length
+              ? checkpoint.tempLocations
+            : [{ id: "primary", path: path.dirname(checkpoint.workRoot), role: "PRIMARY" as const, enabled: true, allowFallback: true }];
+          const statuses = await probeRenderTempLocations(configs, committedBytesByVolume);
+          selectedLocation = selectRenderTempForNextJob(
+            statuses.map((status) => ({
+              config: status,
+              freeBytes: status.freeBytes,
+              capacityBytes: status.capacityBytes,
+              committedBytes: status.committedBytes,
+              writable: status.unavailableReason !== "UNWRITABLE",
+            })),
+            estimatedJobBytes,
+            checkpoint.request.tempLocationSelection ?? "AUTO",
+          );
+          if (selectedLocation) {
+            committedBytesByVolume[selectedLocation.volume] =
+              (committedBytesByVolume[selectedLocation.volume] ?? 0) + estimatedJobBytes;
+          }
+        } finally {
+          releaseSelection();
+        }
+        if (!selectedLocation) {
+          const snapshot = await diskMonitor.snapshot("BEFORE_SEGMENT_ASSIGNMENT", segmentId);
+          throw new DiskSpacePauseError(
+            "所有 Render TEMP 磁碟都無法在保留安全空間後容納下一個片段；已在排程前安全暫停。",
+            snapshot,
+          );
+        }
+        const locationRoot = path.resolve(selectedLocation.path) === path.resolve(path.dirname(checkpoint.workRoot))
+          ? checkpoint.workRoot
+          : path.join(selectedLocation.path, path.basename(checkpoint.workRoot));
+        await mkdir(locationRoot, { recursive: true });
+        checkpoint.ownedWorkRoots ??= [checkpoint.workRoot];
+        if (!checkpoint.ownedWorkRoots.some((root) => path.resolve(root) === path.resolve(locationRoot))) {
+          checkpoint.ownedWorkRoots.push(locationRoot);
+        }
+        const stageOutputPath = path.join(locationRoot, `${stem}-${segmentId}.mkv`);
+        const partialStagePath = path.join(locationRoot, `.${stem}-${segmentId}.partial.mkv`);
+        const filterScriptPath = path.join(locationRoot, `.${stem}-${segmentId}.filtergraph.txt`);
+        await diskMonitor.reserveTempJob(segmentId, selectedLocation.locationId, partialStagePath, estimatedJobBytes);
         if (!segment) {
           segment = {
             id: segmentId,
@@ -1422,6 +2028,8 @@ export class ConcatRenderService {
             index: groupIndex + 1,
             status: "PENDING",
             outputPath: stageOutputPath,
+            tempLocationId: selectedLocation.locationId,
+            volume: selectedLocation.volume,
             durationMs: stagePlan.expectedDurationMs,
             renderProfile: checkpoint.mode,
             codec: videoCodec.endsWith("_NVENC") ? "H264_NVENC" : videoCodec.endsWith("_QSV") ? "H264_QSV" : "H264",
@@ -1435,6 +2043,8 @@ export class ConcatRenderService {
           segment.status = "PENDING";
           segment.lastError = undefined;
           segment.outputPath = stageOutputPath;
+          segment.tempLocationId = selectedLocation.locationId;
+          segment.volume = selectedLocation.volume;
           segment.durationMs = stagePlan.expectedDurationMs;
         }
         await this.checkpoints.save(checkpoint);
@@ -1655,6 +2265,11 @@ export class ConcatRenderService {
           }
           throw error;
         } finally {
+          diskMonitor.releaseTempJob(segmentId);
+          committedBytesByVolume[selectedLocation.volume] = Math.max(
+            0,
+            (committedBytesByVolume[selectedLocation.volume] ?? 0) - estimatedJobBytes,
+          );
           if (!preserveStagePartial) await rm(partialStagePath, { force: true });
           await rm(filterScriptPath, { force: true });
         }
@@ -2004,6 +2619,14 @@ export class ConcatRenderService {
       assetsById.set(assetId, await this.sources.ensureMetadata(assetId, signal));
     }
     const assets = request.orderedAssetIds.map((assetId) => assetsById.get(assetId)!);
+    const sourceStatMatchesManifest = new Map<string, boolean>();
+    await Promise.all([...assetsById.values()].map(async (asset) => {
+      const observed = await stat(asset.sourcePath);
+      sourceStatMatchesManifest.set(
+        asset.id,
+        observed.isFile() && observed.size === asset.sizeBytes && observed.mtime.toISOString() === asset.fileModifiedAt,
+      );
+    }));
     if (
       assets.some(
         (asset) => asset.metadataState !== "READY" || (asset.kind === "VIDEO" && !asset.mediaInfo?.durationMs),
@@ -2063,6 +2686,21 @@ export class ConcatRenderService {
       return {
         sourcePath: asset.sourcePath,
         sourceVideoCodec: asset.mediaInfo?.videoCodec,
+        sourceRenderIdentity: {
+          sizeBytes: asset.sizeBytes,
+          modifiedAt: asset.fileModifiedAt,
+          durationMs: asset.mediaInfo?.durationMs,
+          videoCodec: asset.mediaInfo?.videoCodec,
+          width: asset.mediaInfo?.width,
+          height: asset.mediaInfo?.height,
+          frameRate: asset.mediaInfo?.frameRate,
+          rotationDegrees: asset.mediaInfo?.rotationDegrees,
+          audioCodec: asset.mediaInfo?.audioCodec,
+          audioSampleRate: asset.mediaInfo?.audioSampleRate,
+          audioChannels: asset.mediaInfo?.audioChannels,
+          audioChannelLayout: asset.mediaInfo?.audioChannelLayout,
+        },
+        sourceStatMatchesManifest: sourceStatMatchesManifest.get(asset.id) === true,
         assetId: asset.id,
         startMs,
         durationMs: outMs - startMs,
@@ -2129,7 +2767,14 @@ export class ConcatRenderService {
       if (input.photoSoundEnabled) input.photoSoundInputIndex = shutterInputIndex++;
     }
     inputs.forEach((input, index) => {
-      const { mainStartCard: card, ...stableInput } = input;
+      const {
+        mainStartCard: card,
+        sourcePath: _artifactLocation,
+        assetId: _pathDerivedAssetId,
+        legacyCheckpointKey: _legacyCheckpointKey,
+        sourceStatMatchesManifest: _sourceStatEvidence,
+        ...stableInput
+      } = input;
       input.checkpointKey = checkpointKey({
         index,
         ...stableInput,
@@ -2149,6 +2794,7 @@ export class ConcatRenderService {
             }
           : {}),
       });
+      input.legacyCheckpointKey = legacyInputCheckpointKey(input, index);
     });
     const requestedBgmScopes = validateBgmScopeSelection(request.bgmScopes);
     const bgmScopesApplied: BgmScopeSelection =
@@ -2283,32 +2929,50 @@ export class ConcatRenderService {
 
     let partialPath = "";
     let filterScriptPath = "";
-    const audioPartialPath = path.join(parsed.dir, `.${parsed.name}.${renderId}.final-audio.partial.mp4`);
+    let audioPartialPath = "";
     let audioFilterScriptPath = "";
     const runtimePolicy = runtimePolicyFor(request, inputs.length);
     request.runtimePolicy = runtimePolicy;
     const segmentedActive = inputs.length > runtimePolicy.maxVisualInputsPerStage;
     const lowMemoryActive = request.lowMemorySegmented === true && segmentedActive;
     const signature = renderRequestSignature(currentProject.id, currentProject.updatedAt, request);
-    const pictureBaseSignature = pictureBaseRenderSignature(currentProject, request);
-    const finalAudioSignature = finalInsertionAudioSignature(pictureBaseSignature, insertionAudioPlan, request, activePostBgmTracks);
+    let pictureBaseSignature = pictureBaseRenderSignature(currentProject, request);
+    let finalAudioSignature = finalInsertionAudioSignature(pictureBaseSignature, insertionAudioPlan, request, activePostBgmTracks);
     let checkpoint: RenderCheckpointRecord | undefined;
+    let resumeRequiresSegmentValidation = false;
+    let resumeStoredPictureSignature: string | undefined;
+    let resumeStoredProjectUpdatedAt: string | undefined;
     const existing = await this.checkpoints.load(currentProject.id);
     if (request.resumeCheckpointId) {
       checkpoint = existing;
       if (!checkpoint || checkpoint.checkpointId !== request.resumeCheckpointId)
         throw new Error("續轉 checkpoint 已不存在，請重新開始轉檔。");
-      if (
-        checkpoint.pictureBaseSignature
-          ? checkpoint.pictureBaseSignature !== pictureBaseSignature
-          : checkpoint.signature !== signature || checkpoint.projectUpdatedAt !== currentProject.updatedAt
-      ) throw new Error("影像、時間線或基礎音軌已變更，舊 checkpoint 不可安全套用；請捨棄後重新轉檔。");
+      resumeStoredPictureSignature = checkpoint.pictureBaseSignature;
+      resumeStoredProjectUpdatedAt = checkpoint.projectUpdatedAt;
+      const originalSignatureMatches = checkpoint.pictureBaseSignature
+        ? checkpoint.pictureBaseSignature === pictureBaseSignature
+        : checkpoint.signature === signature && checkpoint.projectUpdatedAt === currentProject.updatedAt;
+      // v0.79/v0.80 included TEMP paths in the picture hash. Permit a
+      // copy-on-write continuation when the project revision is unchanged and
+      // the canonical picture request (excluding only storage settings) matches.
+      const samePictureAfterTempChange = checkpoint.projectUpdatedAt === currentProject.updatedAt &&
+        pictureBaseRenderSignature(currentProject, checkpoint.request) === pictureBaseSignature;
+      resumeRequiresSegmentValidation = !originalSignatureMatches && !samePictureAfterTempChange;
+      if (checkpoint.pictureBaseSignature && !resumeRequiresSegmentValidation) {
+        // Keep the verified legacy base-master key. Re-keying would discard a
+        // reusable picture master and could re-encode many hours of video.
+        pictureBaseSignature = checkpoint.pictureBaseSignature;
+        finalAudioSignature = finalInsertionAudioSignature(pictureBaseSignature, insertionAudioPlan, request, activePostBgmTracks);
+      }
     } else if (existing) {
-      if (existing.pictureBaseSignature !== pictureBaseSignature) {
-        // A new explicit render is allowed to supersede an unrelated failed
-        // job. Only the isolated checkpoint work root is removed; persistent
-        // verified picture masters and user media are never touched.
-        await this.checkpoints.discard(currentProject.id, existing.checkpointId);
+      const samePictureAfterTempChange = existing.projectUpdatedAt === currentProject.updatedAt &&
+        pictureBaseRenderSignature(currentProject, existing.request) === pictureBaseSignature;
+      if (existing.pictureBaseSignature !== pictureBaseSignature && !samePictureAfterTempChange) {
+        // Never delete a pre-v0.82 recovery checkpoint merely because a broad
+        // legacy hash changed. A new v0.82 record is written beside it; only a
+        // v0.82-owned superseded job may be cleaned through the normal path.
+        if (existing.checkpointProducer === "v0.82")
+          await this.checkpoints.discard(currentProject.id, existing.checkpointId);
         checkpoint = await this.checkpoints.create(
           currentProject.id,
           currentProject.updatedAt,
@@ -2318,7 +2982,13 @@ export class ConcatRenderService {
           request,
           request.renderTemporaryFolder,
         );
-      } else checkpoint = existing;
+      } else {
+        checkpoint = existing;
+        if (existing.pictureBaseSignature) {
+          pictureBaseSignature = existing.pictureBaseSignature;
+          finalAudioSignature = finalInsertionAudioSignature(pictureBaseSignature, insertionAudioPlan, request, activePostBgmTracks);
+        }
+      }
     } else {
       checkpoint = await this.checkpoints.create(
         currentProject.id,
@@ -2336,12 +3006,53 @@ export class ConcatRenderService {
     checkpoint.projectUpdatedAt = currentProject.updatedAt;
     checkpoint.outputPath = outputPath;
     checkpoint.request = { ...structuredClone(request), outputToken: "persisted-checkpoint" };
+    if (request.tempLocations?.length) {
+      // Keep historical authorized parents for safe cleanup of old work roots,
+      // while only the latest request locations participate in new-job routing.
+      const historical = checkpoint.tempLocations ?? [];
+      checkpoint.tempLocations = [...historical];
+      for (const location of request.tempLocations) {
+        if (!checkpoint.tempLocations.some((item) => path.resolve(item.path).toLowerCase() === path.resolve(location.path).toLowerCase()))
+          checkpoint.tempLocations.push(structuredClone(location));
+      }
+    }
     checkpoint.mode = runtimePolicy.mode;
     checkpoint.concatStatus = "PENDING";
     checkpoint.lastError = undefined;
-    partialPath = path.join(checkpoint.workRoot, `.${parsed.name}.${renderId}.base.partial.mkv`);
-    filterScriptPath = path.join(checkpoint.workRoot, `.${parsed.name}.${renderId}.filtergraph.txt`);
-    audioFilterScriptPath = path.join(checkpoint.workRoot, `.${parsed.name}.${renderId}.audio.filtergraph.txt`);
+    if (resumeRequiresSegmentValidation) {
+      // Legacy checkpoints did not persist a canonical project snapshot, so a
+      // whole-project hash mismatch cannot identify video/timeline/base-audio
+      // independently. Continue only through deterministic segment-key +
+      // ffprobe/size/hash validation. An old base master is deliberately not
+      // re-keyed or reused without a proven picture match.
+      await this.checkpoints.appendDiagnostic(checkpoint, {
+        event: "RESUME_PROJECT_HASH_UNKNOWN_SELECTIVE_VALIDATION",
+        storedPictureBaseSignature: resumeStoredPictureSignature,
+        currentPictureBaseSignature: pictureBaseSignature,
+        storedProjectUpdatedAt: resumeStoredProjectUpdatedAt,
+        currentProjectUpdatedAt: currentProject.updatedAt,
+        decision: "VALIDATE_AND_REUSE_MATCHING_SEGMENTS",
+      });
+    }
+    // The primary may have been unplugged since the previous run. Re-anchor
+    // only future work on the first currently writable location; completed
+    // E:/C: segment paths, old checkpoint media and recovery source stay put.
+    const writableConfigs = request.tempLocations?.length ? request.tempLocations : checkpoint.tempLocations ?? [];
+    if (writableConfigs.length) {
+      const writableStatuses = await probeRenderTempLocations(writableConfigs);
+      const writableRoot = selectRenderTempForNextJob(
+        writableStatuses.map((status) => ({
+          config: status,
+          freeBytes: status.freeBytes,
+          capacityBytes: status.capacityBytes,
+          committedBytes: status.committedBytes,
+          writable: status.unavailableReason !== "UNWRITABLE",
+        })),
+        1,
+        request.tempLocationSelection ?? "AUTO",
+      );
+      if (writableRoot) await this.checkpoints.switchWorkRootForFutureJobs(checkpoint, writableRoot.path);
+    }
     const legacyEstimatedPeakDiskBytes = Math.max(
       request.estimatedPeakDiskBytes ?? 0,
       (runtimePolicy.estimatedWorkingBytesPerJob ?? 0) * Math.max(1, Math.ceil(inputs.length / runtimePolicy.maxVisualInputsPerStage)),
@@ -2367,6 +3078,7 @@ export class ConcatRenderService {
     const diskMonitor = new RenderDiskMonitor({
       tempRoot: checkpoint.workRoot,
       outputPath,
+      tempLocations: checkpoint.request.tempLocations ?? checkpoint.tempLocations,
       estimatedRemainingWriteBytes: ({ renderTempBytes, finalOutputBytes }) =>
         remainingAdditionalWriteBytes(estimatedPeakDiskBytes, {
           newWorkRootBytes: renderTempBytes,
@@ -2378,9 +3090,59 @@ export class ConcatRenderService {
               : 0,
           finalOutputBytes,
         }),
-      estimatedFinalOutputBytes: request.estimatedFinalOutputBytes,
+      // A recovery final stream-copies the quality-mode picture master. Its
+      // output is therefore at least the estimated base size, not the much
+      // smaller delivery-bitrate estimate (42.6 GB in the v0.80 incident).
+      estimatedFinalOutputBytes: recoveryDiskEstimate?.finalVideoBytes ?? request.estimatedFinalOutputBytes,
       diagnosticPath: checkpoint.diagnosticLogPath,
     });
+    const allocateStageRoot = async (stageId: string, estimatedBytes: number) => {
+      const configs = checkpoint!.request.tempLocations?.length
+        ? checkpoint!.request.tempLocations
+        : checkpoint!.tempLocations?.length
+          ? checkpoint!.tempLocations
+        : [{ id: "primary", path: path.dirname(checkpoint!.workRoot), role: "PRIMARY" as const, enabled: true, allowFallback: true }];
+      const statuses = await probeRenderTempLocations(configs);
+      const selected = selectRenderTempForNextJob(
+        statuses.map((status) => ({
+          config: status,
+          freeBytes: status.freeBytes,
+          capacityBytes: status.capacityBytes,
+          committedBytes: status.committedBytes,
+          writable: status.unavailableReason !== "UNWRITABLE",
+        })),
+        estimatedBytes,
+        checkpoint!.request.tempLocationSelection ?? "AUTO",
+      );
+      if (!selected) {
+        const snapshot = await diskMonitor.snapshot(`BEFORE_${stageId.toUpperCase()}_ASSIGNMENT`, stageId);
+        throw new DiskSpacePauseError(
+          `沒有任何 Render TEMP 磁碟可在保留安全空間後容納 ${stageId}；未啟動 FFmpeg。`,
+          snapshot,
+        );
+      }
+      const root = path.resolve(selected.path) === path.resolve(path.dirname(checkpoint!.workRoot))
+        ? checkpoint!.workRoot
+        : path.join(selected.path, path.basename(checkpoint!.workRoot));
+      await mkdir(root, { recursive: true });
+      checkpoint!.ownedWorkRoots ??= [checkpoint!.workRoot];
+      if (!checkpoint!.ownedWorkRoots.some((item) => path.resolve(item) === path.resolve(root))) {
+        checkpoint!.ownedWorkRoots.push(root);
+      }
+      return { ...selected, root };
+    };
+    const estimatedBaseStageBytes = recoveryDiskEstimate?.baseMasterBytes ?? Math.max(
+      request.estimatedFinalOutputBytes ?? 0,
+      runtimePolicy.estimatedWorkingBytesPerJob ?? 0,
+    );
+    const persistentBase = await this.checkpoints.loadVideoBaseMaster(currentProject.id, pictureBaseSignature);
+    if (pictureBaseStageRequired(persistentBase)) {
+      const baseStageLocation = await allocateStageRoot("base-master", estimatedBaseStageBytes);
+      partialPath = path.join(baseStageLocation.root, `.${parsed.name}.${renderId}.base.partial.mkv`);
+      filterScriptPath = path.join(baseStageLocation.root, `.${parsed.name}.${renderId}.filtergraph.txt`);
+      await diskMonitor.reserveTempJob("base-master", baseStageLocation.locationId, partialPath, estimatedBaseStageBytes);
+      checkpoint.stagePaths = { ...checkpoint.stagePaths, basePartialPath: partialPath, baseFilterScriptPath: filterScriptPath };
+    }
     await this.checkpoints.save(checkpoint);
     await this.checkpoints.appendDiagnostic(checkpoint, {
       event: request.resumeCheckpointId || existing ? "RESUME_STARTED" : "RENDER_STARTED",
@@ -2539,7 +3301,6 @@ export class ConcatRenderService {
       }
       let baseMasterPath: string | undefined;
       let runResult: { cancelled?: boolean } | void = undefined;
-      const persistentBase = await this.checkpoints.loadVideoBaseMaster(currentProject.id, pictureBaseSignature);
       if (persistentBase) {
         baseMasterPath = persistentBase.outputPath;
         resumedSegmentCount += 1;
@@ -2697,7 +3458,10 @@ export class ConcatRenderService {
             plan.expectedDurationMs,
             videoCodec,
             request.resolution,
-            path.dirname(checkpoint.workRoot),
+            // Keep the durable master beside (not inside) the disposable
+            // checkpoint root selected for this stage. complete()/discard()
+            // recursively removes owned work roots after success.
+            path.dirname(path.dirname(partialPath)),
           );
           baseMasterPath = saved.outputPath;
           checkpoint.audioMaster = {
@@ -2738,6 +3502,23 @@ export class ConcatRenderService {
       if (cancelled) completedDurationMs = (await new MediaProbe().probe(baseMasterPath!)).durationMs ?? completedDurationMs;
       let audioRemuxedWithoutVideoEncode = true;
       let finalAudioInfo: BasicMediaInfo;
+      diskMonitor.releaseTempJob("base-master");
+      const estimatedAudioStageBytes = recoveryDiskEstimate?.finalVideoBytes ?? Math.max(
+        request.estimatedFinalOutputBytes ?? 0,
+        checkpoint.audioMaster?.sizeBytes ?? 0,
+      );
+      const audioStageLocation = await allocateStageRoot("audio-temp", estimatedAudioStageBytes);
+      audioPartialPath = path.join(audioStageLocation.root, `.${parsed.name}.${renderId}.final-audio.partial.mp4`);
+      audioFilterScriptPath = path.join(audioStageLocation.root, `.${parsed.name}.${renderId}.audio.filtergraph.txt`);
+      await diskMonitor.reserveTempJob("audio-temp", audioStageLocation.locationId, audioPartialPath, estimatedAudioStageBytes);
+      checkpoint.stagePaths = {
+        ...checkpoint.stagePaths,
+        audioPartialPath,
+        audioFilterScriptPath,
+      };
+      await this.checkpoints.save(checkpoint);
+      await rm(audioPartialPath, { force: true });
+      await rm(audioFilterScriptPath, { force: true });
       await assertDiskBoundary("BEFORE_FINAL_MUX", "最終音訊混音／封裝");
       await this.renderCommands?.waitAtSafeBoundary(signal, "画面已完成，插入素材音讯后处理尚未启动，已安全暂停。");
       if (audioProcessing.mode === "PRESERVE_MULTICHANNEL" && preserveNativeAsset) {
@@ -2787,6 +3568,23 @@ export class ConcatRenderService {
           getActiveProcessIds: () => [...activeFfmpegPids],
           encoderName: "video/audio stream copy",
           decoderName: "not decoded",
+          onResourceSnapshot: async (snapshot) => {
+            checkpoint.latestResources = snapshot;
+            const disk = await diskMonitor.snapshot("AUDIO_TEMP_RUNNING", "保持原始多聲道封裝");
+            snapshot.diskUsage = disk;
+            checkpoint.diskState = {
+              status: "RUNNING",
+              lastSnapshot: disk,
+              requiredAdditionalBytes: disk.requiredAdditionalBytes,
+              completedSegmentCount: checkpoint.segments.filter((item) => item.status === "COMPLETED").length,
+              resumable: true,
+            };
+            await this.checkpoints.save(checkpoint);
+            if (disk.pressureLevel === "EMERGENCY") {
+              preserveAudioPartial = true;
+              throw new DiskSpacePauseError("Audio TEMP 所在磁碟已低於安全需求，已停止並保留 partial。", disk, audioPartialPath);
+            }
+          },
         });
         finalAudioInfo = await new MediaProbe().probe(audioPartialPath);
         if (finalAudioInfo.audioChannels !== preserveNativeAsset.mediaInfo?.audioChannels)
@@ -2827,6 +3625,23 @@ export class ConcatRenderService {
           getActiveProcessIds: () => [...activeFfmpegPids],
           encoderName: `audio ${audioProcessing.codec.toLowerCase()} / video stream copy`,
           decoderName: "audio software decode / video not decoded",
+          onResourceSnapshot: async (snapshot) => {
+            checkpoint.latestResources = snapshot;
+            const disk = await diskMonitor.snapshot("AUDIO_TEMP_RUNNING", "最終音訊混音／封裝");
+            snapshot.diskUsage = disk;
+            checkpoint.diskState = {
+              status: "RUNNING",
+              lastSnapshot: disk,
+              requiredAdditionalBytes: disk.requiredAdditionalBytes,
+              completedSegmentCount: checkpoint.segments.filter((item) => item.status === "COMPLETED").length,
+              resumable: true,
+            };
+            await this.checkpoints.save(checkpoint);
+            if (disk.pressureLevel === "EMERGENCY") {
+              preserveAudioPartial = true;
+              throw new DiskSpacePauseError("Audio TEMP 所在磁碟已低於安全需求，已停止並保留 partial。", disk, audioPartialPath);
+            }
+          },
         });
         finalAudioInfo = await new MediaProbe().probe(audioPartialPath);
         if (finalAudioInfo.audioChannels !== post.channels)
@@ -2841,6 +3656,7 @@ export class ConcatRenderService {
         expectedDurationMs: basePlan.expectedDurationMs,
       });
       await finalizePartialOutput(audioPartialPath, outputPath);
+      diskMonitor.releaseTempJob("audio-temp");
       const outputStat = await stat(outputPath);
       if (!outputStat.isFile() || outputStat.size <= 0) throw new Error("輸出檔案驗證失敗。");
       const terminalTiming = await elapsedTracker.finish(cancelled ? "CANCELLED" : "COMPLETED");

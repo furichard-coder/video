@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AiAccountProfile, AiStoryContext, SubtitleRenderLanguage } from "../../shared/domain";
+import { AiModelCatalogService, getAiModelCatalogRoot } from "./ai-model-catalog";
 import {
   PUBLISH_JSON_SCHEMA,
   normalizePublishResponse,
@@ -184,13 +185,35 @@ function outputText(value: unknown): string {
 }
 
 export class OpenAiProvider {
-  constructor(private readonly fetcher: FetchLike = fetch) {}
+  private readonly modelCatalog: AiModelCatalogService;
+
+  constructor(
+    private readonly fetcher: FetchLike = fetch,
+    catalogRootDir = getAiModelCatalogRoot(),
+  ) {
+    this.modelCatalog = new AiModelCatalogService(catalogRootDir, fetcher);
+  }
+
+  private async resolveVisionAccount(
+    account: AiAccountProfile & { apiKey: string },
+  ): Promise<AiAccountProfile & { apiKey: string }> {
+    if (account.visionModel.trim().toLowerCase() !== "auto") return account;
+    let visionModel: string;
+    try { visionModel = await this.modelCatalog.resolve("OPENAI", account.apiKey, account.visionModel); }
+    catch {
+      const test = await this.modelCatalog.test("OPENAI", account.apiKey, "auto");
+      if (!test.ok || !test.modelId) throw new Error(test.message);
+      visionModel = test.modelId;
+    }
+    return { ...account, visionModel };
+  }
 
   async generatePublishAssets(
     input: PublishGenerationInput,
     account: AiAccountProfile & { apiKey: string },
     signal?: AbortSignal,
   ): Promise<{ draft: PublishGeneratedDraft; model: string; requestId?: string }> {
+    account = await this.resolveVisionAccount(account);
     const content: Array<Record<string, unknown>> = [
       {
         type: "input_text",
@@ -249,6 +272,11 @@ export class OpenAiProvider {
     account: AiAccountProfile & { apiKey: string },
     signal?: AbortSignal,
   ): Promise<OpenAiConnectionDiagnostic> {
+    if (account.visionModel.trim().toLowerCase() === "auto") {
+      const result = await this.modelCatalog.test("OPENAI", account.apiKey, "auto");
+      if (!result.ok || !result.modelId) throw new Error(result.message);
+      return { checks: ["API Key 驗證", `圖片／結構化故事模型 ${result.modelId}`], requestIds: [] };
+    }
     const requestIds: string[] = [];
     const response = await this.fetcher(`${OPENAI_BASE_URL}/models`, {
       method: "GET",
@@ -289,6 +317,7 @@ export class OpenAiProvider {
     account: AiAccountProfile & { apiKey: string },
     signal?: AbortSignal,
   ): Promise<string[]> {
+    account = await this.resolveVisionAccount(account);
     if (
       !Array.isArray(texts) ||
       texts.length < 1 ||
@@ -465,6 +494,7 @@ export class OpenAiProvider {
     account: AiAccountProfile & { apiKey: string },
     signal?: AbortSignal,
   ): Promise<StoryFrameAnalysis> {
+    account = await this.resolveVisionAccount(account);
     if (!request.frames.length) throw new Error("沒有可供 AI 判斷的畫面取樣。");
     const contextText = [
       `專案主題：${request.context.topic || "未提供"}`,
@@ -578,6 +608,7 @@ export class OpenAiProvider {
     account: AiAccountProfile & { apiKey: string },
     signal?: AbortSignal,
   ): Promise<{ suggestions: MusicSuggestionCandidate[]; warnings: string[] }> {
+    account = await this.resolveVisionAccount(account);
     const topicSummary = [context.topic, context.locations.join("、"), context.storySummary, context.audiencePromise]
       .map((item) => item.trim())
       .filter(Boolean)

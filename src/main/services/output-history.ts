@@ -82,6 +82,9 @@ function sanitizeRecord(value: unknown): StoredOutput | undefined {
       typeof item.projectName === "string" && item.projectName.trim()
         ? item.projectName.trim().slice(0, 160)
         : undefined,
+    projectId:
+      typeof item.projectId === "string" && /^[a-zA-Z0-9-]{8,80}$/.test(item.projectId) ? item.projectId : undefined,
+    successful: typeof item.successful === "boolean" ? item.successful : undefined,
     aspectRatio:
       item.aspectRatio === "PORTRAIT_9_16" || item.aspectRatio === "LANDSCAPE_16_9" ? item.aspectRatio : undefined,
     attemptElapsedMs:
@@ -144,7 +147,7 @@ export class OutputHistoryStore {
     }
   }
 
-  async registerRender(result: ConcatRenderResult, projectName?: string): Promise<PreviewOutputRecord> {
+  async registerRender(result: ConcatRenderResult, projectName?: string, projectId?: string): Promise<PreviewOutputRecord> {
     const record: StoredOutput = {
       jobId: result.jobId,
       outputPath: path.resolve(result.outputPath),
@@ -159,6 +162,9 @@ export class OutputHistoryStore {
       cancelled: result.cancelled,
       includedIntroSegmentCount: result.includedIntroSegmentCount,
       projectName,
+      projectId:
+        typeof projectId === "string" && /^[a-zA-Z0-9-]{8,80}$/.test(projectId) ? projectId : undefined,
+      successful: result.cancelled !== true && result.sizeBytes > 0,
       aspectRatio: result.aspectRatio,
       attemptElapsedMs: result.attemptElapsedMs,
       cumulativeElapsedMs: result.cumulativeElapsedMs,
@@ -217,6 +223,7 @@ export class OutputHistoryStore {
           resolution,
           videoCodec,
           aspectRatio: portrait ? "PORTRAIT_9_16" : "LANDSCAPE_16_9",
+          successful: true,
         });
         known.add(key);
         addedCount += 1;

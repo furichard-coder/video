@@ -5,6 +5,8 @@ import { runProcess } from "./process-runner";
 interface ProbeStream {
   codec_type?: string;
   codec_name?: string;
+  pix_fmt?: string;
+  color_range?: string;
   width?: number;
   height?: number;
   avg_frame_rate?: string;
@@ -82,6 +84,8 @@ export class MediaProbe {
       durationMs: durationSeconds ? Math.round(durationSeconds * 1000) : undefined,
       frameRate: video?.avg_frame_rate || video?.r_frame_rate,
       videoCodec: video?.codec_name,
+      pixelFormat: video?.pix_fmt,
+      colorRange: video?.color_range,
       audioCodec: audio?.codec_name,
       audioChannels: audio?.channels,
       audioChannelLayout: audio?.channel_layout,

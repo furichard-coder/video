@@ -258,6 +258,37 @@ describe("OpenAI provider adapter", () => {
     });
   });
 
+  it("probes Auto with an image and uses the verified model for later vision-model calls", async () => {
+    const autoAccount = { ...account, visionModel: "auto" };
+    const catalogRoot = await root();
+    const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const value = String(url);
+      if (value.endsWith("/models"))
+        return new Response(
+          JSON.stringify({
+            data: [
+              { id: "gpt-4.1", created: 100 },
+              { id: "gpt-6.1", created: 80 },
+            ],
+          }),
+          { status: 200 },
+        );
+      const body = JSON.parse(String(init?.body));
+      if (body.input?.[0]?.content?.some((part: { type: string }) => part.type === "input_image")) {
+        expect(body.text.format.type).toBe("json_schema");
+        expect(body.model).toBe("gpt-6.1");
+        return new Response(JSON.stringify({ output_text: '{"ok":true}' }), { status: 200 });
+      }
+      expect(body.model).toBe("gpt-6.1");
+      return new Response(JSON.stringify({ output_text: '{"translations":["Hello"]}' }), { status: 200 });
+    });
+    const provider = new OpenAiProvider(fetcher as typeof fetch, catalogRoot);
+    const diagnostic = await provider.testStoryConnection(autoAccount);
+    expect(diagnostic.checks).toContain("圖片／結構化故事模型 gpt-6.1");
+    await expect(provider.translateTexts(["你好"], "en", autoAccount)).resolves.toEqual(["Hello"]);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
   it("preserves browser microphone mime type and language without exposing the key", async () => {
     const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const file = (init?.body as FormData).get("file") as File;

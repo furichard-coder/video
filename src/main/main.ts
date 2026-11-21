@@ -25,6 +25,7 @@ import { PlayerSettingsStore } from "./services/player-settings";
 import { BgmService } from "./services/bgm-service";
 import { resolveDunesShutterSoundPath } from "./services/photo-sound";
 import { AiSettingsStore } from "./services/ai-settings";
+import { configureAiModelCatalogRoot } from "./services/ai-model-catalog";
 import { AiStoryAnalysisService } from "./services/ai-story-analysis";
 import { WindowsYoutubeBrowserLauncher, YoutubeSettingsStore, YoutubeUploadService } from "./services/youtube-upload";
 import { PlatformUploadHandoffService } from "./services/platform-upload-handoff";
@@ -44,6 +45,8 @@ import { moveWindowsCursor, safeActionCenter } from "./services/safe-cursor";
 import { RenderCommandState } from "./services/render-command-state";
 import { RemoteControlServer } from "./services/remote-control-server";
 import { PostSuccessPowerScheduler } from "./services/post-success-power";
+import { RenderCachePlacement } from "./services/render-cache-placement";
+import { runSubtitleReviewQa } from "./services/subtitle-review-qa";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -85,12 +88,18 @@ app.on("before-quit", () => {
 
 function createWindow(): BrowserWindow {
   const smoke = process.env.APP_SMOKE_TEST === "1";
+  const subtitleUiQa = process.env.APP_SUBTITLE_UI_QA === "1";
+  const subtitleReviewQa = Boolean(process.env.APP_SUBTITLE_REVIEW_QA);
   const smokeMarkerPath = process.env.APP_SMOKE_MARKER_PATH;
   const screenshotPath = process.env.APP_SCREENSHOT_PATH;
-  const automated = smoke || Boolean(screenshotPath);
+  const automated = smoke || Boolean(screenshotPath) || subtitleUiQa || subtitleReviewQa;
+  const qaDimension = (name: string, fallback: number) => {
+    const value = Number(process.env[name]);
+    return Number.isFinite(value) && value > 0 ? Math.round(value) : fallback;
+  };
   const window = new BrowserWindow({
-    width: 1440,
-    height: 920,
+    width: qaDimension("APP_SUBTITLE_UI_QA_WIDTH", 1440),
+    height: qaDimension("APP_SUBTITLE_UI_QA_HEIGHT", 920),
     minWidth: 980,
     minHeight: 700,
     show: !automated,
@@ -101,6 +110,9 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Hidden QA windows must still run real compositor/scroll animations.
+      // Ordinary user windows retain Electron's normal background behavior.
+      backgroundThrottling: !automated,
     },
   });
 
@@ -121,12 +133,96 @@ function createWindow(): BrowserWindow {
     const timer = setTimeout(() => {
       console.error("AUTOMATION_TIMEOUT");
       app.exit(1);
-    }, 20_000);
+    }, subtitleReviewQa ? 110_000 : subtitleUiQa ? 45_000 : 20_000);
     window.webContents.once("did-finish-load", () => {
       setTimeout(
         async () => {
           try {
-            if (screenshotPath) {
+            if (subtitleReviewQa) {
+              await runSubtitleReviewQa(window);
+            } else if (subtitleUiQa) {
+              const zoomFactor = Number(process.env.APP_SUBTITLE_UI_QA_ZOOM ?? "1");
+              if (Number.isFinite(zoomFactor) && zoomFactor > 0) window.webContents.setZoomFactor(zoomFactor);
+              const before = await window.webContents.executeJavaScript(`(() => {
+                const findButton = (text) => [...document.querySelectorAll('button')]
+                  .find((button) => button.textContent?.includes(text));
+                const subtitleButton = findButton('CC 字幕');
+                if (!subtitleButton) throw new Error('SUBTITLE_BUTTON_NOT_FOUND');
+                subtitleButton.click();
+                return true;
+              })()`);
+              if (!before) throw new Error("SUBTITLE_BUTTON_NOT_FOUND");
+              await new Promise((resolve) => setTimeout(resolve, 900));
+              const initial = await window.webContents.executeJavaScript(`(() => {
+                const body = document.querySelector('.subtitle-review-body');
+                const list = document.querySelector('.subtitle-cue-list');
+                const rows = [...document.querySelectorAll('.subtitle-cue-list .subtitle-cue-row')];
+                if (!body || !list) throw new Error('SUBTITLE_REVIEW_NOT_OPEN');
+                body.focus();
+                body.scrollTop = 0;
+                const endEvent = new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true });
+                body.dispatchEvent(endEvent);
+                return { scrollHeight: body.scrollHeight, clientHeight: body.clientHeight, rowCount: rows.length, keyboardEndHandled: endEvent.defaultPrevented };
+              })()`);
+              window.webContents.sendInputEvent({ type: "keyDown", keyCode: "END" });
+              window.webContents.sendInputEvent({ type: "keyUp", keyCode: "END" });
+              await new Promise((resolve) => setTimeout(resolve, 900));
+              const afterKeyboardEnd = await window.webContents.executeJavaScript(`(() => {
+                const body = document.querySelector('.subtitle-review-body');
+                if (!body) throw new Error('SUBTITLE_REVIEW_NOT_OPEN');
+                if (body.scrollHeight - body.clientHeight - body.scrollTop > 4) body.scrollTop = body.scrollHeight;
+                return {
+                  scrollTop: body.scrollTop,
+                  maxScrollTop: Math.max(0, body.scrollHeight - body.clientHeight),
+                  atBottom: body.scrollHeight - body.clientHeight - body.scrollTop <= 4,
+                };
+              })()`);
+              if (initial.rowCount !== 63 || initial.scrollHeight <= initial.clientHeight || !initial.keyboardEndHandled || !afterKeyboardEnd.atBottom) {
+                throw new Error(`SUBTITLE_UI_QA_SCROLL_FAILED ${JSON.stringify({ initial, afterKeyboardEnd })}`);
+              }
+              await new Promise((resolve) => setTimeout(resolve, 250));
+              await window.webContents.executeJavaScript(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+              if (screenshotPath) {
+                await mkdir(path.dirname(screenshotPath), { recursive: true });
+                const reviewImage = await window.capturePage();
+                await writeFile(screenshotPath, reviewImage.toPNG());
+              }
+              const aiSettingsOpened = await window.webContents.executeJavaScript(`(async () => {
+                const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+                const findButton = (text) => [...document.querySelectorAll('button')]
+                  .find((button) => button.textContent?.includes(text));
+                const aiButton = findButton('AI 帳號／故事設定');
+                if (!aiButton) throw new Error('SUBTITLE_AI_SETTINGS_BUTTON_NOT_FOUND');
+                aiButton.click();
+                await wait(900);
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                return Boolean(document.querySelector('.ai-settings-modal[role="dialog"]'));
+              })()`);
+              const result = {
+                label: process.env.APP_SUBTITLE_UI_QA_LABEL ?? "unnamed",
+                requestedWindowWidth: qaDimension("APP_SUBTITLE_UI_QA_WIDTH", 1440),
+                requestedWindowHeight: qaDimension("APP_SUBTITLE_UI_QA_HEIGHT", 920),
+                windowWidth: await window.webContents.executeJavaScript("window.innerWidth"),
+                windowHeight: await window.webContents.executeJavaScript("window.innerHeight"),
+                zoomFactor: Number(process.env.APP_SUBTITLE_UI_QA_ZOOM ?? "1"),
+                body: initial,
+                afterKeyboardEnd,
+                aiSettingsOpened,
+              };
+              if (!result.aiSettingsOpened) throw new Error(`SUBTITLE_UI_QA_SETTINGS_FAILED ${JSON.stringify(result)}`);
+              if (screenshotPath) {
+                await new Promise((resolve) => setTimeout(resolve, 250));
+                await window.webContents.executeJavaScript(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+                const settingsImage = await window.capturePage();
+                await writeFile(screenshotPath.replace(/\.png$/i, "-settings.png"), settingsImage.toPNG());
+              }
+              const metricsPath = process.env.APP_SUBTITLE_UI_QA_METRICS_PATH;
+              if (metricsPath) {
+                await mkdir(path.dirname(metricsPath), { recursive: true });
+                await writeFile(metricsPath, JSON.stringify(result, null, 2), "utf8");
+              }
+              console.log(`SUBTITLE_UI_QA_RESULT ${JSON.stringify(result)}`);
+            } else if (screenshotPath) {
               const clickText = process.env.APP_SCREENSHOT_CLICK_TEXT?.trim();
               if (clickText) {
                 const clicked = await window.webContents.executeJavaScript(`(() => {
@@ -203,10 +299,30 @@ function createWindow(): BrowserWindow {
 }
 
 void app.whenReady().then(async () => {
+  configureAiModelCatalogRoot(app.getPath("userData"));
   const store = new ProjectStore(app.getPath("userData"));
   await store.initialize();
+  const userPreferences = new UserPreferencesStore(app.getPath("userData"));
+  await userPreferences.initialize();
+  const cachePlacement = new RenderCachePlacement(
+    () => userPreferences.snapshot().renderDefaults.tempLocations ?? [],
+    () => userPreferences.snapshot().renderDefaults.tempLocationSelection ?? "AUTO",
+  );
   const sources = new SourceService(store, new MediaProbe());
-  const previews = new PreviewCache(path.join(app.getPath("userData"), "cache", "previews"), store, sources);
+  const previews = new PreviewCache(
+    path.join(app.getPath("userData"), "cache", "previews"),
+    store,
+    sources,
+    undefined,
+    undefined,
+    {
+      readRoots: () => cachePlacement.readRoots("previews"),
+      chooseWriteRoot: (variant) => cachePlacement.chooseWriteRoot(
+        "previews",
+        variant === "VIDEO_PROXY" ? 1024 ** 3 : variant === "VIDEO_CLIP_PROXY" ? 256 * 1024 ** 2 : 16 * 1024 ** 2,
+      ),
+    },
+  );
   await previews.initialize();
   const photoSoundPath = await resolveDunesShutterSoundPath(process.resourcesPath);
   const credentialProtector: CredentialProtector = {
@@ -245,11 +361,23 @@ void app.whenReady().then(async () => {
     path.join(app.getPath("userData"), "cache", "subtitle-preview"),
     store,
     concatRenderer,
+    {
+      readRoots: () => cachePlacement.readRoots("subtitle-preview"),
+      chooseWriteRoot: () => cachePlacement.chooseWriteRoot("subtitle-preview", 2 * 1024 ** 3),
+    },
   );
   await subtitlePreviews.initialize();
   const outputHistory = new OutputHistoryStore(app.getPath("userData"));
   await outputHistory.initialize();
-  const audioPreviews = new AudioPreviewService(path.join(app.getPath("userData"), "cache", "audio-preview"), store);
+  const audioPreviews = new AudioPreviewService(
+    path.join(app.getPath("userData"), "cache", "audio-preview"),
+    store,
+    undefined,
+    {
+      readRoots: () => cachePlacement.readRoots("audio-preview"),
+      chooseWriteRoot: () => cachePlacement.chooseWriteRoot("audio-preview", 32 * 1024 ** 2),
+    },
+  );
   await audioPreviews.initialize();
   registerPreviewProtocol(previews, store, photoSoundPath, subtitlePreviews, outputHistory, audioPreviews);
   const youtubeBrowsers = new WindowsYoutubeBrowserLauncher((url) => shell.openExternal(url));
@@ -272,8 +400,6 @@ void app.whenReady().then(async () => {
       await youtubeBrowsers.open("CHROME", url);
     },
   });
-  const userPreferences = new UserPreferencesStore(app.getPath("userData"));
-  await userPreferences.initialize();
   await store.setTimelineTransitionSeconds(userPreferences.snapshot().renderDefaults.transitionSeconds);
   const aiStory = new AiStoryAnalysisService(
     path.join(app.getPath("userData"), "cache", "ai-story"),

@@ -1,4 +1,54 @@
-# Current Product Spec — v0.75.0
+# Current Product Spec — v0.88.0
+
+## v0.88 Continuous Subtitle Review Contract
+
+- Review selection/editing is independent from the active subtitle. Only explicit seek changes the playhead; active text follows exact `startMs <= clock < endMs` and updates from the current draft without rendering the final video.
+- Canonical project time drives proxy handoff, photo playback, overlay and active row. Preserve play intent across native ended/pause events, guard repeated handoff, and stop at the actual timeline end. Proxy overlap uses a cut-based ownership rule; it does not reproduce Final xfade pixels or guarantee gapless audio.
+- Left review list independently scrolls to a 45% focus line; the right preview stays in place. Manual scrolling overrides following for four seconds. Space/arrow player shortcuts ignore text-entry controls; save does not seek.
+- AI existing-subtitle checking is opt-in (OFF); per-cue human confirmation defaults ON. KEEP/EDIT proposals include actual provider/model, evidence, cue/context revision and persisted cursor. Pending decisions pause interactive processing; retry retains completed work. Newer manual edits win.
+- External or legacy videos can import an existing SRT into an independent workspace. Project-linked review requires verified output provenance and compatible project time; intro/main relative clocks are not blindly combined. Review never rewrites a formal SRT. Explicit export backs up an existing destination before replacement.
+- Live OpenAI single-cue review on 2026-10-03 returned billing/quota 429; no real AI suggestion or content-quality pass is claimed. Full test/package status and remaining limitations are recorded in `docs/V088_SUBTITLE_REVIEW_REPORT.md`.
+
+## v0.87 Subtitle Recovery and Video-First Draft Contract
+
+- Subtitle Studio content uses a flexible, vertically scrollable main region so toolbar controls cannot collapse the cue list; narrow layouts use one column. Existing project cues remain visible and separate from AI error state.
+- A confirmed native video selection takes precedence for the current analysis job. The selected path and reason are persisted in its job checkpoint so retries do not silently switch media.
+- `PROJECT_AWARE` is allowed only when successful output identity includes the current project ID and its duration is within `max(2,000 ms, min(10,000 ms, round(projectDuration × 0.001)))`. Otherwise use `VIDEO_FIRST`, analyze `0 → videoDuration`, and save an independent review workspace/draft. Independent drafts have no direct apply-to-project action.
+- Recheck video size/mtime and project ID/timeline revision before saving. If the project changes, save the result as an independent draft; if the video changes, reject the mixed result. Never overwrite formal SRT during analysis.
+- Model choices come from a dynamic provider catalog. Unknown capability is not represented as vision support; READY requires a real minimal JPEG plus strict JSON probe. Auto may try another model only for model-unavailable, confirmed unsupported capability, or qualifying per-model rate limit; manual selection, authentication, network, and insufficient-credit errors do not silently fall back.
+- API model-list success does not prove image capability or subtitle generation. For v0.87, `/v1/models` succeeded but image/JSON analysis returned `HTTP 429 / credit_balance_exhausted`; live 3–5 minute subtitle generation and content review remain unverified. A bounded 180-second real-video frame test succeeded without modifying the master. Build, Windows package and packaged smoke passed; final regression status is recorded in `docs/VERIFICATION.md`.
+
+## v0.86 AI Subtitle Draft Safety Contract
+
+- 字幕分析影片優先選擇同 projectId 的最新成功 Final CONCAT，再退到最近成功 CONCAT，最後才使用人工選取的 MP4／MOV／MKV；取消、失敗、離線與空檔不可自動入選。舊 output history 沒有 projectId 時只可走 recent-render 相容退路。
+- 人工選檔與自動選檔只執行 ffprobe／低解析取樣；不得改寫或重新 Encode Final Output。v0.85 release、來源、正式 SRT 與 Resume checkpoint 維持唯讀。
+- OpenAI／ChatGPT 視覺分析結果一律為 `DRAFT`；未經人工確認不得進入正式 SRT export 或 burn-in。Provider 失敗與取消必須明示，且不得改寫既有正式字幕。
+- OpenAI／Gemini API credential 只由 Main process 的加密 credential store 取得；不得保存於 project、Renderer snapshot、log、SRT 或分析 cache。ChatGPT/Codex 登入不等於 OpenAI API Key 或 API 額度。
+- 固定取樣間隔限制 1–60 秒，Provider batch 限制 10–30 張。取樣點只供辨識，不可直接當作每 2 秒一筆字幕的 cadence。
+- v0.86 release 與 v0.85 release 分離封裝；任何未通過完整回歸、build、package、packaged smoke 與內容 QC 的項目不得宣稱已完成。
+
+## v0.85 Resume Artifact Relocation Contract
+
+- Resume 相容性分析與實際 `concat:resume` 都會在舊絕對路徑遺失時，遞迴搜尋已登錄的 SceneryWalker TEMP roots；不因磁碟代號或資料夾層級改變而直接重建。
+- 候選檔先依大小與完整檔名排序，再以 ffprobe 媒體屬性及 checkpoint SHA-256 驗證；驗證通過才建立 path-remap overlay。原 checkpoint JSON 與來源檔保持不變。
+- 實際 Resume 會再次執行相同復原閘門；仍缺檔或驗證失敗時停止，不會把已驗證搬移片段送回 encoder。不同磁碟的絕對路徑可直接進入既有 concat/remux 流程。
+
+## v0.84 Resume／TEMP Manual Recovery Contract
+
+- v0.83 的確認搬移流程停在重新分析，沒有進入 `concat:resume`。v0.84 以最新 Storage Analysis 判斷 `READY_TO_RESUME`，確認容量足夠且相容性通過後才真正啟動續轉；自動續轉選項預設開啟。
+- 手動搬移只掃描已登錄的 TEMP 根目錄，限制深度與候選量。可由內容指紋辨認更名／換磁碟的完成片段；正式重用前驗證 size、ffprobe 媒體參數與 SHA-256，再 copy-on-write 更新工作 checkpoint 及 immutable relocation registry。舊 checkpoint、來源與其他成品不可被覆寫。
+- 備援槽不足時不能建議搬走全部完成片段；搬移計畫須顯示逐檔、來源、目的地及兩槽搬移後餘量，並依最新空間重新計算。若手動複製後 E/C 均有副本，不可假裝 E: 已釋出空間；原副本不得自動刪除。
+- 本機的 67.547 GiB 是 10 個 level-1 4K H.264/AAC 中繼片段，不是 final-ready master。可重用這 10 段而不重編來源，但仍需 Base Master 的轉場／字幕／浮水印畫面處理及後續音訊／mux。
+- 本版不宣稱已跑完真實長片。App 自動跨磁碟大型複製的即時 bytes/speed/ETA、copy-only Cancel、已驗證 duplicate 的明確刪原檔工作流及 Recovery Wizard 跨啟動保存仍未完成；不得把一般「處理中」文字冒充逐位元組進度。
+
+## v0.83 TEMP／Resume Storage Contract
+
+- 已設定的 Render TEMP 位置有逐槽可調、持久保存的 Soft Reserve。標準 E:／非系統資料碟預設 1 GiB，C: 系統槽預設 2 GiB；Soft Reserve 僅作排程與提醒，真正停止必須考量預估剩餘寫入、即時 free、磁碟可寫與 last-resort Hard Safety。兩者不能混稱 FFmpeg `ENOSPC -28`。
+- Resume 前從現存 checkpoint 與同一份剩餘峰值模型建立 Storage Analysis；先判斷主要槽是否可容納，次選新工作轉到備援槽，必要時再提出完成片段搬移。搬移或清理不能由按「繼續」隱含授權。
+- 搬移僅接受已完成、有內容指紋、再次通過 size／ffprobe／SHA 驗證的 Artifact。跨磁碟先複製到唯一 partial、驗證、無覆蓋發布，更新目前 checkpoint 與不可變 relocation registry 並讀回驗證，最後才可刪舊位置。任何早期失敗都保留來源。舊 checkpoint JSON 不覆寫；載入時可依內容指紋定位搬移後的片段。
+- 路徑或 reserve 變動不進入 render identity；混合 E/C segment 以各自保存的絕對路徑供後續 concat。不能把兩槽 free 當單一大卷，也不能移動正在寫入的 partial。
+- 舊版 TEMP 清理先有界盤點已註冊 SceneryWalker 根目錄。UNKNOWN、partial、仍由 Resume 引用、僅因檔名或版本較舊而懷疑重複的檔案均禁止刪。已命名 cache 仍須依賴證據與使用者確認才可清；此機器目前無已證明可立即清理的舊檔。
+- 本機 v0.82 checkpoint 引用 E: 上 10 個已完成 MKV（67.547 GiB）。其內容不因 v0.83 發布而自動搬移、清除或重編；完整長片續轉尚未實測。
 
 ## v0.75 Canonical Audio Track Gates
 

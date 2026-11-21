@@ -483,7 +483,7 @@ export function buildRenderEstimate(
   );
   const safetyWarning =
     tempBelowReserve || outputBelowReserve
-      ? `Render TEMP 或輸出磁碟低於「各自峰值＋至少 ${Math.ceil(safetyMarginBytes / 1024 ** 3)} GB 安全餘量」；可自行確認後繼續，但有後段磁碟不足風險。`
+      ? `Render TEMP 或輸出磁碟低於目前估算的工作峰值需求。另建議額外預留約 ${Math.ceil(safetyMarginBytes / 1024 ** 3)} GB 作為規劃餘量；此建議值不等同各磁碟 Soft Reserve 或 Hard Safety Limit，實際排程與暫停依即時磁碟檢查決定。`
       : undefined;
   return {
     outputPath,

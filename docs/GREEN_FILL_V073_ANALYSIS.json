@@ -1,0 +1,34 @@
+{
+  "version": "0.73.0",
+  "analyzedAt": "2026-09-15T07:30:00+08:00",
+  "source": {
+    "path": "C:\\大雪山\\source from wayde\\VID_20260718_090633.mp4",
+    "sha256": "0CCB6ABA1DB42E2900039B59474BC017B391360ACCD97DA7073403EAA0C4EC39",
+    "codec": "h264",
+    "codedDimensions": "3840x2160",
+    "pixelFormat": "yuv420p",
+    "color": "bt709",
+    "displayMatrixRotation": -90,
+    "visualDimensions": "2160x3840"
+  },
+  "affectedOutput": {
+    "path": "C:\\大雪山\\output\\SceneryWalker_preview_20260915_0022.mp4",
+    "codec": "h264_qsv",
+    "dimensions": "640x360",
+    "sampleTimeSeconds": 8910,
+    "leftBlurSatAvg": 2.4,
+    "rightBlurSatAvgRange": [72.48, 74.0],
+    "observation": "center portrait upright; left blurred fill normal; right blurred fill has corrupted green chroma"
+  },
+  "fixedValidation": {
+    "pipeline": "CPU decode -> noautorotate -> transpose=clock once -> split/blur/layout -> h264_qsv encode",
+    "output": "artifacts/v073-investigation/v073-tunnel-safe-qsv-encode.mp4",
+    "codec": "h264",
+    "dimensions": "640x360",
+    "sampleAspectRatio": "1:1",
+    "displayAspectRatio": "16:9",
+    "pixelFormat": "yuv420p",
+    "rotationSideData": "absent",
+    "greenBlock": false
+  }
+}

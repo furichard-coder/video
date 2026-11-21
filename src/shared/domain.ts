@@ -208,12 +208,7 @@ export interface RenderPerformanceProfile {
   recommendationReason: string;
 }
 export type ConcatRenderPhase =
-  | "PREPARING"
-  | "TRANSLATING_SUBTITLES"
-  | "WAITING_FOR_MEMORY"
-  | "PAUSED_DISK_SPACE"
-  | "RENDERING"
-  | "FINALIZING";
+  "PREPARING" | "TRANSLATING_SUBTITLES" | "WAITING_FOR_MEMORY" | "PAUSED_DISK_SPACE" | "RENDERING" | "FINALIZING";
 export type PreviewRenderPurpose = "CONCAT" | "INTRO" | "CLIP" | "SHORTS";
 export type IntroAnalysisPhase = "PREPARING" | "ANALYZING" | "RANKING";
 export type KnownExternalPlayerId = "SYSTEM_DEFAULT" | "VLC" | "WINDOWS_MEDIA_PLAYER" | "MPC_HC";
@@ -394,6 +389,10 @@ export interface UserPreferences {
     postSuccessPower?: PostSuccessPowerPreference;
     /** Optional app-owned root for large resumable FFmpeg intermediates. */
     renderTemporaryFolder?: string;
+    /** v0.81 ordered multi-volume TEMP candidates. */
+    tempLocations?: RenderTempLocationConfig[];
+    /** AUTO prefers PRIMARY and uses FALLBACK only for not-yet-started jobs. */
+    tempLocationSelection?: "AUTO" | "PRIMARY" | "FALLBACK";
     introPreviewIncludeBgm: boolean;
     mainPreviewIncludeBgm: boolean;
     mainStartCard: MainStartCardOptions;
@@ -534,6 +533,8 @@ export interface BasicMediaInfo {
   durationMs?: number;
   frameRate?: string;
   videoCodec?: string;
+  pixelFormat?: string;
+  colorRange?: string;
   audioCodec?: string;
   audioChannels?: number;
   audioChannelLayout?: string;
@@ -985,6 +986,164 @@ export interface MaterialSubtitleAnalysisResult {
   analysisVersion: string;
 }
 
+export type SubtitleVisualDensity = "LOW" | "STANDARD" | "DETAILED";
+export type SubtitleVisualJobStatus = "IDLE" | "RUNNING" | "PAUSED" | "COMPLETED" | "CANCELLED" | "FAILED";
+export type SubtitleAnalysisMode = "PROJECT_AWARE" | "VIDEO_FIRST";
+export interface SubtitleVisualPreflight {
+  videoPath: string;
+  videoDurationMs: number;
+  projectDurationMs: number;
+  differenceMs: number;
+  toleranceMs: number;
+  timelineCompatible: boolean;
+  recommendedMode: SubtitleAnalysisMode;
+  identity: string;
+  existingSrtPath?: string;
+  existingSrtCount: number;
+  projectSubtitleCount: number;
+  rawFrameEstimate: number;
+  provider: MaterialAnalysisProvider;
+  modelId?: string;
+  selectionMode: "AUTO" | "MANUAL";
+  warning?: string;
+}
+export interface StandaloneSubtitleWorkspace {
+  previewUrl?: string;
+  id: string;
+  videoPath: string;
+  videoFingerprint: string;
+  videoDurationMs: number;
+  draftPath: string;
+  cues: SubtitleCue[];
+  updatedAt: string;
+  /** Present only when the video is a verified output of this exact project revision. */
+  sourceProjectId?: string;
+  sourceTimelineRevision?: number;
+}
+
+export type SubtitleAiCheckErrorCode =
+  | "AUTH"
+  | "MODEL"
+  | "VISION"
+  | "TIMEOUT"
+  | "RATE_LIMIT"
+  | "BAD_RESPONSE"
+  | "JSON_PARSE"
+  | "SUBTITLE_TIMELINE"
+  | "FRAME_EXTRACTION"
+  | "VIDEO_NOT_FOUND"
+  | "PROVIDER"
+  | "UNKNOWN";
+export type SubtitleAiCheckDecision = "KEEP" | "EDIT";
+export type SubtitleAiCheckJobStatus = "IDLE" | "RUNNING" | "PAUSED" | "STOPPED" | "COMPLETED" | "FAILED";
+export interface SubtitleAiCheckOptions {
+  enabled: boolean;
+  interactiveConfirmation: boolean;
+  provider: MaterialAnalysisProvider;
+  displayLanguage: SubtitleVisualAnalysisOptions["displayLanguage"];
+  title: string;
+  description: string;
+}
+export interface SubtitleAiCheckRequest extends SubtitleAiCheckOptions {
+  workspaceId: string;
+}
+export interface SubtitleAiCheckProposal {
+  id: string;
+  cueId: string;
+  cueIndex: number;
+  decision: SubtitleAiCheckDecision;
+  suggestedText?: string;
+  suggestedStartMs?: number;
+  suggestedEndMs?: number;
+  reason: string;
+  confidence: number;
+  timingConfidence: number;
+  provider: "OPENAI" | "GEMINI";
+  modelId: string;
+  baseCueRevision: string;
+  baseContextRevision: string;
+  evidenceTimesMs: number[];
+  status: "PENDING" | "KEPT" | "APPLIED" | "EDITING" | "SKIPPED" | "CONFLICT";
+  createdAt: string;
+}
+export interface SubtitleAiCheckProgress {
+  status: SubtitleAiCheckJobStatus;
+  processed: number;
+  total: number;
+  nextCueIndex: number;
+  requests: number;
+  cacheHits: number;
+  elapsedMs: number;
+  provider?: "OPENAI" | "GEMINI";
+  modelId?: string;
+  currentCueId?: string;
+  errorCode?: SubtitleAiCheckErrorCode;
+  error?: string;
+}
+export interface SubtitleAiCheckJobSnapshot {
+  schemaVersion: 1;
+  workspaceId: string;
+  videoFingerprint: string;
+  options: SubtitleAiCheckOptions;
+  progress: SubtitleAiCheckProgress;
+  proposals: SubtitleAiCheckProposal[];
+  updatedAt: string;
+}
+export interface SubtitleAiCheckAction {
+  workspaceId: string;
+  proposalId: string;
+  action: "KEEP" | "APPLY" | "EDIT" | "SKIP";
+  editedText?: string;
+  editedStartMs?: number;
+  editedEndMs?: number;
+}
+export interface SubtitleVisualAnalysisResult {
+  mode: SubtitleAnalysisMode;
+  generatedCount: number;
+  workspace?: StandaloneSubtitleWorkspace;
+}
+
+/** Configuration for the resumable SubtitleStudio visual-analysis job. */
+export interface SubtitleVisualAnalysisOptions {
+  provider: MaterialAnalysisProvider;
+  intervalSeconds: number;
+  density: SubtitleVisualDensity;
+  displayLanguage: "zh-TW" | "zh-CN" | "en" | "ja" | "ko";
+  detectSceneChanges: boolean;
+  deduplicateFrames: boolean;
+  title: string;
+  description: string;
+  scopes: SubtitleTimelineScope[];
+  analysisMode?: SubtitleAnalysisMode;
+  srtPolicy?: "BACKUP" | "SAVE_AS" | "CANCEL";
+}
+export interface SubtitleVisualCueRegenerateRequest {
+  cueId: string;
+  instruction: string;
+  provider: MaterialAnalysisProvider;
+  displayLanguage: SubtitleVisualAnalysisOptions["displayLanguage"];
+}
+export interface SubtitleVisualCueRegenerateResult { text: string; confidence: number; warning?: string }
+
+/** Live counters surfaced while the background visual-analysis job runs. */
+export interface SubtitleVisualAnalysisProgress {
+  status: SubtitleVisualJobStatus;
+  phase?: string;
+  rawFrames: number;
+  sceneFrames: number;
+  deduplicatedFrames: number;
+  sentFrames: number;
+  requests: number;
+  elapsedMs: number;
+  tokens: number;
+  cacheHits: number;
+  temporaryBytes: number;
+  error?: string;
+  mode?: SubtitleAnalysisMode;
+  modelId?: string;
+  draftCount?: number;
+}
+
 export interface SubtitlePreviewResult {
   cacheKey: string;
   cacheStatus: CacheStatus;
@@ -993,6 +1152,29 @@ export interface SubtitlePreviewResult {
   outputPath: string;
   sizeBytes: number;
   bgmIncluded: boolean;
+}
+
+export interface SubtitleAnalysisVideoSelection {
+  previewUrl?: string;
+  reason: "PROJECT_CONCAT" | "LATEST_CONCAT" | "MANUAL_PATH" | "NONE";
+  jobId?: string;
+  outputPath?: string;
+  fileName?: string;
+  durationMs?: number;
+  width?: number;
+  height?: number;
+  videoCodec?: string;
+  frameRate?: string;
+  sizeBytes?: number;
+  createdAt?: string;
+  modifiedAt?: string;
+}
+
+export interface SubtitleAiDraftSaveResult {
+  draftPath: string;
+  cueCount: number;
+  officialExists: boolean;
+  defaultChoice: "BACKUP";
 }
 
 export interface ProjectManifest {
@@ -1101,6 +1283,7 @@ export interface BgmImportResult {
 export interface SubtitleExportResult {
   outputPath: string;
   cueCount: number;
+  backupPath?: string;
 }
 
 export interface SubtitleImportResult {
@@ -1162,6 +1345,10 @@ export interface ConcatRenderRequest {
   resourceWarningAcknowledged?: boolean;
   /** Main-process validated app-owned render work root. Renderer input is ignored. */
   renderTemporaryFolder?: string;
+  /** Main-process validated locations. Auto fallback defaults to enabled for new configurations. */
+  tempLocations?: RenderTempLocationConfig[];
+  /** Main-process validated selection policy for not-yet-started work only. */
+  tempLocationSelection?: "AUTO" | "PRIMARY" | "FALLBACK";
   /** Main-process-only peak additional-write estimate used by the runtime disk gate. */
   estimatedPeakDiskBytes?: number;
   /** Main-process-only final output estimate used by per-volume runtime diagnostics. */
@@ -1232,8 +1419,48 @@ export interface SystemResourceSnapshot {
 
 export type RenderDiskPressureLevel = "OK" | "WARNING" | "CRITICAL" | "EMERGENCY";
 
+export interface RenderTempLocationConfig {
+  id: string;
+  path: string;
+  /** Primary is preferred; fallback is tried only for jobs that have not started. */
+  role: "PRIMARY" | "FALLBACK";
+  enabled: boolean;
+  /** Defaults to true when omitted by legacy/new UI callers. */
+  allowFallback?: boolean;
+  /** User-configurable advisory reserve. It is not the runtime hard-stop threshold. */
+  reserveBytes?: number;
+}
+
+export interface RenderTempLocationStatus extends RenderTempLocationConfig {
+  volume: string;
+  freeBytes: number;
+  capacityBytes: number;
+  committedBytes: number;
+  schedulableBytes: number;
+  available: boolean;
+  unavailableReason?: "DISABLED" | "FALLBACK_DISABLED" | "BELOW_RESERVE" | "UNWRITABLE";
+}
+
+export interface RenderDiskVolumeRuntimeStatus {
+  locationId: string;
+  path: string;
+  volume: string;
+  role: "PRIMARY" | "FALLBACK" | "FINAL_OUTPUT";
+  freeBytes: number;
+  capacityBytes: number;
+  currentBytes: number;
+  estimatedRemainingWriteBytes: number;
+  reserveBytes: number;
+  requiredAdditionalBytes: number;
+  pressureLevel: RenderDiskPressureLevel;
+  activeJobCount: number;
+  availableForNextJob: boolean;
+  unavailableReason?: "OFFLINE_OR_UNREADABLE";
+}
+
 export interface RenderDiskPathUsage {
-  label: "SOURCE_LOCAL" | "PROXY_CACHE" | "EXISTING_TEMP" | "INTERMEDIATE" | "AUDIO_TEMP" | "FINAL_OUTPUT" | "CHECKPOINT";
+  label:
+    "SOURCE_LOCAL" | "PROXY_CACHE" | "EXISTING_TEMP" | "INTERMEDIATE" | "AUDIO_TEMP" | "FINAL_OUTPUT" | "CHECKPOINT";
   path: string;
   volume: string;
   bytes: number;
@@ -1257,6 +1484,8 @@ export interface RenderDiskRuntimeSnapshot {
   safetyReserveBytes: number;
   requiredAdditionalBytes: number;
   pressureLevel: RenderDiskPressureLevel;
+  /** Authoritative per-volume view for v0.81; legacy aggregate fields remain for compatibility. */
+  volumes?: RenderDiskVolumeRuntimeStatus[];
 }
 
 export interface RenderResumeOffer {
@@ -1269,6 +1498,9 @@ export interface RenderResumeOffer {
   recordedCompletedSegmentCount?: number;
   /** Recorded completed segment files that are missing or have the wrong size. */
   missingCompletedSegmentCount?: number;
+  /** An example missing path and candidate original TEMP roots for drive-letter remapping. */
+  missingCompletedPathExample?: string;
+  missingTempRoots?: string[];
   physicalState?: "READY" | "PARTIAL" | "SEGMENT_CACHE_MISSING";
   totalSegmentCount: number;
   concatStatus: "PENDING" | "FAILED" | "PAUSED_DISK_SPACE";
@@ -1294,6 +1526,226 @@ export interface RenderResumeOffer {
   outputVolume?: string;
 }
 
+export type ResumeCompatibilityStatus = "SAME" | "CHANGED" | "UNKNOWN" | "IGNORED";
+
+export interface ResumeCompatibilityDomain {
+  status: ResumeCompatibilityStatus;
+  oldValue?: string;
+  newValue?: string;
+  renderAffecting: boolean;
+  reason: string;
+}
+
+export interface ResumeCompatibilityReport {
+  checkpointId: string;
+  decision: "FULL_RESUME" | "VALIDATED_SEGMENT_REUSE" | "REBUILD_AUDIO" | "FULL_RERENDER" | "NEEDS_ANALYSIS";
+  video: ResumeCompatibilityDomain;
+  timeline: ResumeCompatibilityDomain;
+  baseAudio: ResumeCompatibilityDomain;
+  storage: ResumeCompatibilityDomain;
+  uploadSettings: ResumeCompatibilityDomain;
+  appVersion: ResumeCompatibilityDomain;
+  reusableSegmentCount: number;
+  invalidSegmentCount: number;
+  reusableDurationMs: number;
+  partialRecovery: "NOT_FOUND" | "RECOVERABLE" | "INVALID" | "UNKNOWN";
+  migrationRequired: boolean;
+  sourceCheckpointPreserved: boolean;
+}
+
+export interface RenderCheckpointRemapRequest {
+  checkpointId: string;
+  fromRoot: string;
+  toRoot: string;
+}
+
+export interface RenderCheckpointRemapResult extends RenderCheckpointRemapRequest {
+  remappedSegmentCount: number;
+}
+
+export type TemporaryArtifactStatus =
+  | "ACTIVE"
+  | "RESUME_REQUIRED"
+  | "REUSABLE"
+  | "RECOVERABLE_PARTIAL"
+  | "SUPERSEDED"
+  | "DUPLICATE"
+  | "REBUILDABLE_CACHE"
+  | "DISPOSABLE"
+  | "UNKNOWN";
+
+export type TemporaryArtifactType =
+  | "COMPLETED_SEGMENT"
+  | "INTERMEDIATE"
+  | "VIDEO_MASTER"
+  | "AUDIO_MASTER"
+  | "PARTIAL"
+  | "CHECKPOINT"
+  | "PREVIEW_CACHE"
+  | "PROXY_CACHE"
+  | "THUMBNAIL_CACHE"
+  | "ANALYSIS_CACHE"
+  | "UNKNOWN";
+
+export interface TemporaryArtifactInventoryItem {
+  artifactId: string;
+  appVersion?: string;
+  projectId?: string;
+  resumeId?: string;
+  artifactType: TemporaryArtifactType;
+  fileName?: string;
+  path: string;
+  drive: string;
+  sizeBytes: number;
+  createdAt?: string;
+  modifiedAt?: string;
+  status: TemporaryArtifactStatus;
+  referencedByCurrentCheckpoint: boolean;
+  safeToDelete: boolean;
+  safeToMove: boolean;
+  reason: string;
+  supersededByArtifactId?: string;
+  contentFingerprint?: string;
+}
+
+export interface TemporaryArtifactInventory {
+  capturedAt: string;
+  roots: string[];
+  items: TemporaryArtifactInventoryItem[];
+  totalBytes: number;
+  immediatelyReclaimableBytes: number;
+  movableBytes: number;
+}
+
+export interface ExecuteTemporaryArtifactActionsRequest {
+  inventoryCapturedAt: string;
+  artifactIds: string[];
+  action: "DELETE" | "MOVE";
+  destinationRoot?: string;
+}
+
+export interface TemporaryArtifactActionResult {
+  action: "DELETE" | "MOVE";
+  completedArtifactIds: string[];
+  skippedArtifactIds: string[];
+  releasedBytes: number;
+  destinationRoot?: string;
+  /** A fresh inventory; execution never trusts a stale classification. */
+  inventory: TemporaryArtifactInventory;
+}
+
+export interface ResumeStorageVolumeAnalysis {
+  locationId: string;
+  path: string;
+  volume: string;
+  role: "PRIMARY" | "FALLBACK" | "FINAL_OUTPUT";
+  freeBytes: number;
+  capacityBytes: number;
+  softReserveBytes: number;
+  hardSafetyLimitBytes: number;
+  tempUsageBytes: number;
+  activeBytes: number;
+  completedBytes: number;
+  movableBytes: number;
+  schedulableBytes: number;
+  writable: boolean;
+  osSafetyHealthy: boolean;
+}
+
+export interface ResumeStorageEstimateBreakdown {
+  remainingVideoBytes: number;
+  remainingAudioBytes: number;
+  intermediatePeakBytes: number;
+  finalOutputBytes: number;
+  partialBytes: number;
+  peakConcurrentTempBytes: number;
+  softReserveBytes: number;
+  peakAdditionalBytes: number;
+}
+
+export interface ResumeStorageMoveItem {
+  artifactId: string;
+  sourcePath: string;
+  destinationPath: string;
+  sizeBytes: number;
+  sourceLocationId?: string;
+  destinationLocationId: string;
+  reason: string;
+}
+
+export type ResumeRecoveryState =
+  | "RESUME_ANALYZING"
+  | "MOVE_REQUIRED"
+  | "WAITING_FOR_USER_MOVE"
+  | "AUTO_MOVING"
+  | "VERIFYING_MOVED_ARTIFACTS"
+  | "REMAPPING_CHECKPOINT"
+  | "RECALCULATING_STORAGE"
+  | "READY_TO_RESUME"
+  | "RESUMING"
+  | "RENDERING"
+  | "FAILED";
+
+export interface ResumeArtifactRecoveryResult {
+  checkpointId: string;
+  state: ResumeRecoveryState;
+  remappedArtifactIds: string[];
+  duplicateSourceArtifactIds: string[];
+  missingArtifactIds: string[];
+  invalidCandidates: Array<{ artifactId: string; path: string; reason: string }>;
+  /** Validated in-memory path matches; persisted only by an explicit recovery/Resume action. */
+  remappedPaths?: Record<string, string>;
+}
+
+export interface ResumeStoragePlan {
+  planId: string;
+  checkpointId: string;
+  action: "RESUME" | "REDIRECT_FUTURE_JOBS" | "PROPOSE_CLEANUP" | "PROPOSE_MOVE" | "SAFE_PAUSE";
+  targetLocationId?: string;
+  shortfallBytes: number;
+  moveItems: ResumeStorageMoveItem[];
+  deleteArtifactIds: string[];
+  expectedPrimaryFreeAfterBytes: number;
+  expectedDestinationFreeAfterBytes?: number;
+  requiresUserConfirmation: boolean;
+  reason: string;
+}
+
+export interface ResumeStorageAnalysis {
+  capturedAt: string;
+  checkpointId: string;
+  currentStage?: string;
+  currentOutputPath?: string;
+  volumes: ResumeStorageVolumeAnalysis[];
+  estimate: ResumeStorageEstimateBreakdown;
+  inventory: TemporaryArtifactInventory;
+  plan: ResumeStoragePlan;
+  canResumeWithoutCleanup: boolean;
+  completedSegmentCount: number;
+  completedSegmentBytes: number;
+  resumeFromSegmentIndex: number;
+  failureKind?: "APP_PREEMPTIVE_DISK_PAUSE" | "FFMPEG_ENOSPC_-28";
+  failedPath?: string;
+  /** Explicit lifecycle state; recovery never silently falls back to the start page. */
+  recoveryState?: ResumeRecoveryState;
+  recoveryFailure?: { state: ResumeRecoveryState; artifactId?: string; path?: string; reason: string };
+}
+
+export interface ExecuteResumeStoragePlanRequest {
+  checkpointId: string;
+  planId: string;
+  artifactIds: string[];
+}
+
+export interface ResumeStorageExecutionResult {
+  checkpointId: string;
+  copiedBytes: number;
+  deletedSourceBytes: number;
+  migratedArtifactIds: string[];
+  sourcePreservedArtifactIds: string[];
+  analysis: ResumeStorageAnalysis;
+}
+
 export interface ConcatRenderEstimateRequest {
   outputToken: string;
   expectedDurationMs: number;
@@ -1304,6 +1756,9 @@ export interface ConcatRenderEstimateRequest {
   resourceProfile?: "LOW_DISK" | "BALANCED" | "HIGH_SPEED";
   maximumRenderRamGiB?: number;
   maximumRenderTempGiB?: number | "AUTO";
+  /** Optional multi-volume TEMP candidates; Main validates paths and free space. */
+  tempLocations?: RenderTempLocationConfig[];
+  tempLocationSelection?: "AUTO" | "PRIMARY" | "FALLBACK";
   /** Exact visual inputs selected for this render; Main resolves metadata from the project store. */
   orderedAssetIds?: string[];
   clipSelections?: RenderClipSelection[];
@@ -1413,6 +1868,11 @@ export interface ConcatRenderEstimate {
   runtimePolicy?: RenderRuntimePolicy;
   hardwareCapabilities?: RenderHardwareCapabilities;
   diskPaths?: RenderDiskPathUsage[];
+  /** v0.81 per-volume admission result; free space is never summed across volumes. */
+  tempLocationStatuses?: RenderTempLocationStatus[];
+  selectedTempLocationId?: string;
+  estimatedNextTempJobBytes?: number;
+  outputVolumeCanRender?: boolean;
 }
 
 export interface RenderClipSelection extends PreviewRange {
@@ -1521,6 +1981,10 @@ export interface AudioPreviewResult {
 
 export interface PreviewOutputRecord {
   jobId: string;
+  /** Project identity captured when the render completed. Legacy/imported records may not have one. */
+  projectId?: string;
+  /** Explicit completion marker used by subtitle source auto-selection. */
+  successful?: boolean;
   outputPath: string;
   fileName: string;
   purpose: PreviewOutputPurpose;
@@ -1689,6 +2153,32 @@ export interface AiConnectionTestResult {
   message: string;
   checks?: string[];
   requestIds?: string[];
+}
+export interface AiAvailableModel {
+  id: string;
+  displayName: string;
+  created?: number;
+  candidate: boolean;
+  capability: "UNKNOWN" | "READY" | "UNSUPPORTED";
+  reason?: string;
+}
+export interface AiModelCatalog {
+  provider: "OPENAI" | "GEMINI";
+  models: AiAvailableModel[];
+  updatedAt: string;
+  selectedModelId?: string;
+  selectionMode: "AUTO" | "MANUAL";
+}
+export interface AiVisionTestResult {
+  ok: boolean;
+  provider: "OPENAI" | "GEMINI";
+  modelId?: string;
+  authentication: boolean;
+  modelAccess: boolean;
+  visionSupported: boolean;
+  structuredOutputSupported: boolean;
+  latencyMs: number;
+  message: string;
 }
 
 export interface AiAnalysisProgress {
@@ -1878,14 +2368,26 @@ export interface AppApi {
   ensureMetadata(assetId: string): Promise<SourceAsset>;
   ensurePreview(assetId: string, variant: PreviewVariant): Promise<PreviewResult>;
   ensureClipPreview(assetId: string, inMs: number, outMs: number): Promise<PreviewResult>;
-  ensureIntroThumbnail?(assetId: string, inMs: number, outMs: number): Promise<{ url: string; cacheStatus: "HIT" | "CREATED" }>;
+  ensureIntroThumbnail?(
+    assetId: string,
+    inMs: number,
+    outMs: number,
+  ): Promise<{ url: string; cacheStatus: "HIT" | "CREATED" }>;
   cancelPreview(assetId: string, variant: PreviewVariant): Promise<void>;
   cancelClipPreview(assetId: string, inMs: number, outMs: number): Promise<void>;
   chooseConcatOutput(suggestedName: string): Promise<OutputSelection | null>;
   prepareConcatOutput(suggestedName: string): Promise<OutputSelection>;
-  chooseRenderTemporaryFolder?(): Promise<{ path: string; volume: string; freeBytes: number; capacityBytes: number } | null>;
-  validateRenderTemporaryFolder?(targetPath: string): Promise<{ path: string; volume: string; freeBytes: number; capacityBytes: number }>;
+  chooseRenderTemporaryFolder?(): Promise<{
+    path: string;
+    volume: string;
+    freeBytes: number;
+    capacityBytes: number;
+  } | null>;
+  validateRenderTemporaryFolder?(
+    targetPath: string,
+  ): Promise<{ path: string; volume: string; freeBytes: number; capacityBytes: number }>;
   revealRenderTemporaryFolder?(): Promise<void>;
+  revealRegisteredRenderTempPath?(targetPath: string): Promise<void>;
   cleanupRenderTemporaryFolder?(): Promise<{ reclaimedBytes: number }>;
   estimateConcatRender?(request: ConcatRenderEstimateRequest): Promise<ConcatRenderEstimate>;
   getRenderHardwareCapabilities?(force?: boolean): Promise<RenderHardwareCapabilities>;
@@ -1906,8 +2408,17 @@ export interface AppApi {
   onRemoteControlStatus?(callback: (status: RemoteControlStatus) => void): void;
   clearRemoteControlStatusListeners?(): void;
   getConcatRenderResumeOffer?(): Promise<RenderResumeOffer | undefined>;
+  analyzeConcatRenderResume?(checkpointId: string): Promise<ResumeCompatibilityReport>;
+  analyzeConcatRenderStorage?(checkpointId: string): Promise<ResumeStorageAnalysis>;
+  executeConcatRenderStoragePlan?(request: ExecuteResumeStoragePlanRequest): Promise<ResumeStorageExecutionResult>;
+  scanAndRemapConcatRenderArtifacts?(checkpointId: string): Promise<ResumeArtifactRecoveryResult>;
+  analyzeTemporaryArtifacts?(): Promise<TemporaryArtifactInventory>;
+  executeTemporaryArtifactActions?(
+    request: ExecuteTemporaryArtifactActionsRequest,
+  ): Promise<TemporaryArtifactActionResult>;
   resumeConcatRender?(checkpointId: string): Promise<ConcatRenderResult>;
   discardConcatRenderResume?(checkpointId: string): Promise<void>;
+  remapConcatRenderResume?(request: RenderCheckpointRemapRequest): Promise<RenderCheckpointRemapResult>;
   discardConcatVideoMaster?(): Promise<void>;
   cancelConcatRender(): Promise<void>;
   revealConcatOutput(jobId: string): Promise<void>;
@@ -1930,8 +2441,35 @@ export interface AppApi {
   testGoogleTranslation(): Promise<TranslationConnectionTestResult>;
   setAiStoryContext(context: AiStoryContext): Promise<ProjectManifest>;
   generateAiSubtitles(options: AiSubtitleGenerationOptions): Promise<AiSubtitleGenerationResult>;
+  getSubtitleAnalysisVideo?(): Promise<SubtitleAnalysisVideoSelection>;
+  chooseSubtitleAnalysisVideo?(): Promise<SubtitleAnalysisVideoSelection | null>;
   analyzeMaterialForSubtitles?(request: MaterialSubtitleAnalysisRequest): Promise<MaterialSubtitleAnalysisResult>;
   cancelMaterialSubtitleAnalysis?(): Promise<void>;
+  /** Optional until SubtitleStudio's background job IPC is integrated. */
+  getSubtitleVisualPreflight?(options: SubtitleVisualAnalysisOptions): Promise<SubtitleVisualPreflight>;
+  startSubtitleVisualAnalysis?(options: SubtitleVisualAnalysisOptions): Promise<SubtitleVisualAnalysisResult | void>;
+  pauseSubtitleVisualAnalysis?(): Promise<void>;
+  resumeSubtitleVisualAnalysis?(): Promise<SubtitleVisualAnalysisResult | void>;
+  cancelSubtitleVisualAnalysis?(): Promise<void>;
+  regenerateSubtitleVisualCue?(request: SubtitleVisualCueRegenerateRequest): Promise<SubtitleVisualCueRegenerateResult>;
+  onSubtitleVisualAnalysisProgress?(callback: (progress: SubtitleVisualAnalysisProgress) => void): void;
+  clearSubtitleVisualAnalysisProgressListeners?(): void;
+  getStandaloneSubtitleWorkspace?(): Promise<StandaloneSubtitleWorkspace | null>;
+  saveStandaloneSubtitleWorkspace?(workspaceId: string, cues: SubtitleCue[]): Promise<StandaloneSubtitleWorkspace>;
+  exportStandaloneSubtitleWorkspace?(workspaceId: string, outputToken: string): Promise<SubtitleExportResult>;
+  getSubtitleEvidenceFrame?(workspaceId: string, timestampMs: number): Promise<{ url: string }>;
+  getSubtitleAiCheckJob?(): Promise<SubtitleAiCheckJobSnapshot | undefined>;
+  startSubtitleAiCheck?(request: SubtitleAiCheckRequest): Promise<SubtitleAiCheckJobSnapshot>;
+  pauseSubtitleAiCheck?(): Promise<void>;
+  resumeSubtitleAiCheck?(): Promise<SubtitleAiCheckJobSnapshot>;
+  stopSubtitleAiCheck?(): Promise<SubtitleAiCheckJobSnapshot | undefined>;
+  applySubtitleAiCheckAction?(action: SubtitleAiCheckAction): Promise<{ workspace: StandaloneSubtitleWorkspace; project?: ProjectManifest; proposal: SubtitleAiCheckProposal; conflict: boolean }>;
+  prepareProjectSubtitleAiCheck?(): Promise<StandaloneSubtitleWorkspace>;
+  importStandaloneSubtitleWorkspaceFromSrt?(): Promise<StandaloneSubtitleWorkspace | null>;
+  onSubtitleAiCheckProgress?(callback: (progress: SubtitleAiCheckProgress) => void): void;
+  clearSubtitleAiCheckProgressListeners?(): void;
+  refreshAiModels?(provider: "OPENAI" | "GEMINI", accountId?: string): Promise<AiModelCatalog>;
+  testAiVision?(provider: "OPENAI" | "GEMINI", accountId?: string, modelId?: string): Promise<AiVisionTestResult>;
   /** Optional until the AI publishing workspace is loaded; keeps older renderer test harnesses compatible. */
   getAiPublishAssets?(): Promise<AiPublishAssets | null>;
   setAiPublishAssets?(assets: AiPublishAssets): Promise<ProjectManifest>;
@@ -1972,6 +2510,11 @@ export interface AppApi {
   setSubtitleCues(cues: SubtitleCue[]): Promise<ProjectManifest>;
   chooseSubtitleInput(): Promise<SubtitleImportResult | null>;
   chooseSubtitleOutput(suggestedName: string): Promise<OutputSelection | null>;
+  saveSubtitleAiDraft?(outputToken: string, scopes?: SubtitleTimelineScope[]): Promise<SubtitleAiDraftSaveResult>;
+  promoteSubtitleAiDraft?(
+    outputToken: string,
+    choice: "BACKUP" | "OVERWRITE" | "CANCEL",
+  ): Promise<{ cancelled: boolean; outputPath?: string; backupPath?: string }>;
   exportSubtitles(outputToken: string, scopes?: SubtitleTimelineScope[]): Promise<SubtitleExportResult>;
   cancelSubtitleExport(): Promise<void>;
   getYoutubeSettings(): Promise<YoutubeSettingsSnapshot>;

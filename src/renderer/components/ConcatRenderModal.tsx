@@ -20,6 +20,7 @@ import type {
   RenderVideoCodec,
   RenderClipSelection,
   RenderResumeOffer,
+  ResumeCompatibilityReport,
   ProjectManifest,
   SourceAsset,
   SubtitleBurnInOptions,
@@ -27,6 +28,12 @@ import type {
   SubtitleRenderPosition,
   TransitionDurationSec,
   YoutubeHandoffMode,
+  RenderTempLocationConfig,
+  RenderTempLocationStatus,
+  ResumeStorageAnalysis,
+  ResumeStorageExecutionResult,
+  TemporaryArtifactActionResult,
+  TemporaryArtifactInventory,
 } from "../../shared/domain";
 import { formatBytes, formatDuration, formatRenderClock } from "../format";
 import {
@@ -63,6 +70,31 @@ interface ConcatRenderModalProps {
 }
 
 const TRANSITIONS: TransitionDurationSec[] = [0.3, 0.5, 0.7];
+const GIB = 1024 ** 3;
+
+function defaultTempReserveBytes(location: Pick<RenderTempLocationConfig, "path">): number {
+  return location.path.toUpperCase().startsWith("C:") ? 2 * GIB : GIB;
+}
+
+type RenderTempApi = typeof window.sourceApp & {
+  listRenderTempLocations(): Promise<RenderTempLocationStatus[]>;
+  chooseRenderTempLocation(): Promise<{ path: string; volume: string; freeBytes: number; capacityBytes: number } | null>;
+  setRenderTempLocations(locations: RenderTempLocationConfig[]): Promise<RenderTempLocationConfig[]>;
+};
+
+type V083StorageApi = typeof window.sourceApp & {
+  analyzeConcatRenderStorage?(checkpointId: string): Promise<ResumeStorageAnalysis>;
+  executeConcatRenderStoragePlan?(request: { checkpointId: string; planId: string; artifactIds: string[] }): Promise<ResumeStorageExecutionResult>;
+  scanAndRemapConcatRenderArtifacts?(checkpointId: string): Promise<import("../../shared/domain").ResumeArtifactRecoveryResult>;
+  analyzeTemporaryArtifacts?(): Promise<TemporaryArtifactInventory>;
+  executeTemporaryArtifactActions?(request: {
+    inventoryCapturedAt: string;
+    artifactIds: string[];
+    action: "DELETE" | "MOVE";
+    destinationRoot?: string;
+  }): Promise<TemporaryArtifactActionResult>;
+  revealRegisteredRenderTempPath?(targetPath: string): Promise<void>;
+};
 
 function largestDiskContributors(breakdown: RenderDiskEstimateBreakdown): Array<{ label: string; bytes: number }> {
   return [
@@ -76,6 +108,15 @@ function largestDiskContributors(breakdown: RenderDiskEstimateBreakdown): Array<
     .filter((item) => item.bytes > 0)
     .sort((left, right) => right.bytes - left.bytes)
     .slice(0, 3);
+}
+
+function combinedTempCapacity(statuses: readonly RenderTempLocationStatus[]): number {
+  const byVolume = new Map<string, number>();
+  for (const item of statuses) {
+    if (!item.available) continue;
+    byVolume.set(item.volume, Math.max(byVolume.get(item.volume) ?? 0, item.schedulableBytes));
+  }
+  return [...byVolume.values()].reduce((sum, bytes) => sum + bytes, 0);
 }
 const RESOLUTIONS: Array<{
   value: PreviewResolution;
@@ -177,7 +218,21 @@ export function ConcatRenderModal({
   const [estimateBusy, setEstimateBusy] = useState(false);
   const [estimateError, setEstimateError] = useState<string>();
   const [renderTempRefreshKey, setRenderTempRefreshKey] = useState(0);
+  const [tempLocations, setTempLocations] = useState<RenderTempLocationConfig[]>([]);
+  const [tempLocationStatuses, setTempLocationStatuses] = useState<RenderTempLocationStatus[]>([]);
+  const [tempLocationSelection, setTempLocationSelection] = useState<"AUTO" | "PRIMARY" | "FALLBACK">("AUTO");
   const [resumeOffer, setResumeOffer] = useState<RenderResumeOffer>();
+  const [resumeCompatibility, setResumeCompatibility] = useState<ResumeCompatibilityReport>();
+  const [resumeStorageAnalysis, setResumeStorageAnalysis] = useState<ResumeStorageAnalysis>();
+  const [temporaryInventory, setTemporaryInventory] = useState<TemporaryArtifactInventory>();
+  const [selectedArtifactIds, setSelectedArtifactIds] = useState<string[]>([]);
+  const [storageActionBusy, setStorageActionBusy] = useState(false);
+  const [storageWizardOpen, setStorageWizardOpen] = useState(false);
+  const [storageWizardArtifactIds, setStorageWizardArtifactIds] = useState<string[]>([]);
+  const [storageWizardAutoResume, setStorageWizardAutoResume] = useState(true);
+  const [resumeAnalysisBusy, setResumeAnalysisBusy] = useState(false);
+  const [remapFromRoot, setRemapFromRoot] = useState("");
+  const [remapBusy, setRemapBusy] = useState(false);
   const [progress, setProgress] = useState<ConcatRenderProgress>();
   const timingSnapshotReceivedAtRef = useRef(performance.now());
   const [timingTick, setTimingTick] = useState(() => performance.now());
@@ -319,6 +374,8 @@ export function ConcatRenderModal({
     resourceProfile,
     maximumRenderRamGiB,
     maximumRenderTempGiB,
+    tempLocations,
+    tempLocationSelection,
     renderItems,
   });
 
@@ -370,6 +427,8 @@ export function ConcatRenderModal({
         setHighSpeedMode(preferences.renderDefaults.highSpeedMode === true);
         setMaximumRenderRamGiB(preferences.renderDefaults.maximumRenderRamGiB ?? 8);
         setMaximumRenderTempGiB(preferences.renderDefaults.maximumRenderTempGiB ?? 100);
+        setTempLocations(preferences.renderDefaults.tempLocations ?? []);
+        setTempLocationSelection(preferences.renderDefaults.tempLocationSelection ?? "AUTO");
         setIncludeWatermark(preferences.renderDefaults.includeWatermark !== false);
         setPostSuccessPower(
           preferences.renderDefaults.postSuccessPower ?? {
@@ -634,6 +693,7 @@ export function ConcatRenderModal({
         resourceProfile,
         maximumRenderRamGiB,
         maximumRenderTempGiB,
+        ...(tempLocations.length ? { tempLocations, tempLocationSelection } : {}),
         orderedAssetIds: renderItems.map((item) => item.assetId),
         clipSelections: renderItems.map((item) => ({
           assetId: item.assetId,
@@ -669,6 +729,8 @@ export function ConcatRenderModal({
     lowMemorySegmented,
     maximumRenderRamGiB,
     maximumRenderTempGiB,
+    tempLocations,
+    tempLocationSelection,
     output?.token,
     prependIntro,
     renderItems,
@@ -679,16 +741,86 @@ export function ConcatRenderModal({
     renderTempRefreshKey,
   ]);
 
-  const chooseRenderTemp = async () => {
-    if (!window.sourceApp.chooseRenderTemporaryFolder) return;
+  useEffect(() => {
+    const api = window.sourceApp as RenderTempApi;
+    let active = true;
+    if (typeof api.listRenderTempLocations === "function") {
+      void api.listRenderTempLocations().then((statuses) => {
+        if (active) setTempLocationStatuses(statuses);
+      }).catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    }
+    return () => { active = false; };
+  }, [renderTempRefreshKey]);
+
+  const saveTempLocations = async (next: RenderTempLocationConfig[]) => {
+    const api = window.sourceApp as RenderTempApi;
     try {
-      const selected = await window.sourceApp.chooseRenderTemporaryFolder();
-      if (!selected) return;
+      const saved = await api.setRenderTempLocations(next);
+      setTempLocations(saved);
       setRenderTempRefreshKey((value) => value + 1);
       setError(undefined);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     }
+  };
+
+  const changeTempReserve = (id: string, value: string) => {
+    const reserveGiB = Number(value);
+    if (!Number.isFinite(reserveGiB) || reserveGiB < 0) return;
+    const next = tempLocations.map((item) => item.id === id
+      ? { ...item, reserveBytes: Math.round(reserveGiB * GIB) }
+      : item);
+    setTempLocations(next);
+    void saveTempLocations(next);
+  };
+
+  const addTempLocation = async () => {
+    const api = window.sourceApp as RenderTempApi;
+    try {
+      const selected = await api.chooseRenderTempLocation();
+      if (!selected) return;
+      const next: RenderTempLocationConfig[] = [
+        ...tempLocations,
+        { id: `temp-${Date.now()}`, path: selected.path, role: tempLocations.some((item) => item.role === "PRIMARY") ? "FALLBACK" : "PRIMARY", enabled: true, allowFallback: true },
+      ];
+      await saveTempLocations(next);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
+  const chooseTempLocation = async (id: string) => {
+    const api = window.sourceApp as RenderTempApi;
+    try {
+      const selected = await api.chooseRenderTempLocation();
+      if (!selected) return;
+      await saveTempLocations(tempLocations.map((item) => item.id === id ? { ...item, path: selected.path } : item));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
+  const moveTempLocation = (index: number, delta: -1 | 1) => {
+    const next = [...tempLocations];
+    const target = index + delta;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target]!, next[index]!];
+    void saveTempLocations(next.map((item, position) => ({
+      ...item,
+      role: position === 0 ? "PRIMARY" : "FALLBACK",
+    })));
+  };
+
+  const changeTempSelection = (selection: "AUTO" | "PRIMARY" | "FALLBACK") => {
+    setTempLocationSelection(selection);
+    void window.sourceApp.updateUserPreferences({ renderDefaults: { tempLocationSelection: selection } })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
+  };
+
+  const setAutoFallback = (enabled: boolean) => {
+    void saveTempLocations(tempLocations.map((item) => item.role === "FALLBACK" ? { ...item, allowFallback: enabled } : item));
   };
 
   const chooseOutput = async () => {
@@ -727,6 +859,7 @@ export function ConcatRenderModal({
     resourceProfile,
     maximumRenderRamGiB,
     maximumRenderTempGiB,
+    ...(tempLocations.length ? { tempLocations, tempLocationSelection } : {}),
     resourceWarningAcknowledged,
     ...(isMain && prependIntro ? { mainStartCard } : {}),
   });
@@ -798,6 +931,7 @@ export function ConcatRenderModal({
           resourceProfile,
           maximumRenderRamGiB,
           maximumRenderTempGiB,
+          ...(tempLocations.length ? { tempLocations, tempLocationSelection } : {}),
           orderedAssetIds: renderItems.map((item) => item.assetId),
           clipSelections: renderItems.map((item) => ({
             assetId: item.assetId,
@@ -885,18 +1019,31 @@ export function ConcatRenderModal({
     }
   };
 
-  const resumeRender = async () => {
+  const resumeRender = async (
+    confirmBeforeResume = true,
+    checkpointIdOverride?: string,
+    compatibilityOverride?: ResumeCompatibilityReport,
+  ) => {
     if (!resumeOffer || !window.sourceApp.resumeConcatRender) return;
+    const targetCheckpointId = checkpointIdOverride ?? resumeOffer.checkpointId;
+    const compatibility = compatibilityOverride ?? resumeCompatibility;
+    if (window.sourceApp.analyzeConcatRenderResume &&
+      (compatibility?.checkpointId !== targetCheckpointId ||
+        !["FULL_RESUME", "VALIDATED_SEGMENT_REUSE", "REBUILD_AUDIO"].includes(compatibility.decision))) {
+      setError("請先按「分析舊轉檔」，確認可重用片段後再續轉。");
+      return;
+    }
     const missingRecorded = resumeOffer.missingCompletedSegmentCount ?? 0;
     const resumeSummary = missingRecorded > 0
       ? `紀錄中有 ${resumeOffer.recordedCompletedSegmentCount ?? resumeOffer.completedSegmentCount} 個完成片段，但其中 ${missingRecorded} 個實體檔案已遺失；續轉時會重新建立缺失片段。`
       : `可沿用 ${resumeOffer.completedSegmentCount}/${resumeOffer.totalSegmentCount} 個目前存在的片段；正式使用前仍會逐檔驗證。`;
     const recoveryNotice = resumeOffer.legacyRecoveryProtected
-      ? "v0.79 原 checkpoint 與片段會作為唯讀復原來源，先驗證再建立 v0.80 的獨立工作狀態。"
+      ? "舊 checkpoint 與片段會作為唯讀復原來源，先驗證再建立 v0.82 的獨立工作狀態。"
       : resumeOffer.recoverySourcePreserved
         ? "v0.79 原始復原資料會保留不變。"
         : "";
     if (
+      confirmBeforeResume &&
       !window.confirm(
         `${resumeSummary}\n${recoveryNotice ? `${recoveryNotice}\n` : ""}輸出：${resumeOffer.outputPath}\n\n是否繼續？`,
       )
@@ -908,7 +1055,7 @@ export function ConcatRenderModal({
     setError(undefined);
     setProgress({ phase: "PREPARING", percent: 0, outTimeMs: 0, expectedDurationMs: 0 });
     try {
-      const completed = await window.sourceApp.resumeConcatRender(resumeOffer.checkpointId);
+      const completed = await window.sourceApp.resumeConcatRender(targetCheckpointId);
       if (!mountedRef.current) return;
       setResult(completed);
       setResumeOffer(undefined);
@@ -919,6 +1066,195 @@ export function ConcatRenderModal({
       setResumeOffer(await window.sourceApp.getConcatRenderResumeOffer?.());
     } finally {
       if (mountedRef.current) setRendering(false);
+    }
+  };
+
+  const analyzeResume = async () => {
+    if (!resumeOffer || !window.sourceApp.analyzeConcatRenderResume) return;
+    setResumeAnalysisBusy(true);
+    setError(undefined);
+    setResumeStorageAnalysis(undefined);
+    setTemporaryInventory(undefined);
+    setSelectedArtifactIds([]);
+    try {
+      const report = await window.sourceApp.analyzeConcatRenderResume(resumeOffer.checkpointId);
+      if (mountedRef.current) setResumeCompatibility(report);
+      const storageApi = window.sourceApp as V083StorageApi;
+      const storage = await storageApi.analyzeConcatRenderStorage?.(resumeOffer.checkpointId);
+      const inventory = storage?.inventory ?? await storageApi.analyzeTemporaryArtifacts?.();
+      if (mountedRef.current) {
+        if (storage) {
+          setResumeStorageAnalysis(storage);
+          setTemporaryInventory(storage.inventory);
+        } else if (inventory) setTemporaryInventory(inventory);
+      }
+    } catch (reason) {
+      if (mountedRef.current) {
+        setResumeCompatibility(undefined);
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
+    } finally {
+      if (mountedRef.current) setResumeAnalysisBusy(false);
+    }
+  };
+
+  const executeSelectedCleanup = async (action: "DELETE" | "MOVE") => {
+    const api = window.sourceApp as V083StorageApi;
+    if (!temporaryInventory || selectedArtifactIds.length === 0 || !api.executeTemporaryArtifactActions) return;
+    const selected = temporaryInventory.items.filter((item) => selectedArtifactIds.includes(item.artifactId));
+    if (selected.some((item) => action === "DELETE" ? !item.safeToDelete : !item.safeToMove)) return;
+    const destinationRoot = action === "MOVE" ? (await (window.sourceApp as RenderTempApi).chooseRenderTempLocation())?.path : undefined;
+    if (action === "MOVE" && !destinationRoot) return;
+    const size = selected.reduce((total, item) => total + item.sizeBytes, 0);
+    const paths = selected.map((item) => `${item.appVersion ?? "未知版本"} · ${item.path} · ${formatBytes(item.sizeBytes)} · ${item.reason}`).join("\n");
+    const prompt = action === "DELETE"
+      ? `確認刪除以下 ${selected.length} 個已標記可安全刪除的暫存項目，共 ${formatBytes(size)}？\n\n${paths}`
+      : `確認將以下 ${selected.length} 個暫存項目複製並驗證後搬移至 ${destinationRoot}？共 ${formatBytes(size)}。\n\n${paths}`;
+    if (!window.confirm(prompt)) return;
+    setStorageActionBusy(true);
+    setError(undefined);
+    try {
+      const result = await api.executeTemporaryArtifactActions({
+        inventoryCapturedAt: temporaryInventory.capturedAt,
+        artifactIds: selectedArtifactIds,
+        action,
+        destinationRoot,
+      });
+      applyArtifactActionResult(result);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setStorageActionBusy(false);
+    }
+  };
+
+  const applyArtifactActionResult = (result: TemporaryArtifactActionResult) => {
+    setTemporaryInventory(result.inventory);
+    setSelectedArtifactIds([]);
+    const analyzeStorage = (window.sourceApp as V083StorageApi).analyzeConcatRenderStorage;
+    if (resumeOffer && analyzeStorage) {
+      void analyzeStorage(resumeOffer.checkpointId)
+        .then(setResumeStorageAnalysis)
+        .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
+    }
+    setBackgroundNotice(result.action === "DELETE"
+      ? `已安全清理 ${formatBytes(result.releasedBytes)}；TEMP 清單已重新驗證。`
+      : `已完成 ${result.completedArtifactIds.length} 個暫存項目的驗證搬移；TEMP 清單已重新驗證。`);
+  };
+
+  const executeSuggestedStoragePlan = async () => {
+    const storageApi = window.sourceApp as V083StorageApi;
+    const analysis = resumeStorageAnalysis;
+    if (!analysis || !resumeOffer || !storageApi.executeConcatRenderStoragePlan) return;
+    const artifactIds = analysis.plan.action === "PROPOSE_MOVE"
+      ? analysis.plan.moveItems.map((item) => item.artifactId)
+      : analysis.plan.deleteArtifactIds;
+    if (artifactIds.length === 0) return;
+    setStorageWizardArtifactIds(artifactIds);
+    setStorageWizardAutoResume(true);
+    setStorageWizardOpen(true);
+  };
+
+  const scanManualMoveAndContinue = async (allowAutoResume = true) => {
+    const storageApi = window.sourceApp as V083StorageApi;
+    if (!resumeOffer || !storageApi.scanAndRemapConcatRenderArtifacts || !storageApi.analyzeConcatRenderStorage) return;
+    setStorageActionBusy(true);
+    setError(undefined);
+    try {
+      const remap = await storageApi.scanAndRemapConcatRenderArtifacts(resumeOffer.checkpointId);
+      if (remap.state === "FAILED") {
+        const detail = remap.invalidCandidates[0];
+        throw new Error(detail
+          ? `VERIFYING_MOVED_ARTIFACTS：${detail.artifactId} · ${detail.path} · ${detail.reason}`
+          : `REMAPPING_CHECKPOINT：仍找不到 ${remap.missingArtifactIds.join("、")}`);
+      }
+      const analysis = await storageApi.analyzeConcatRenderStorage(remap.checkpointId);
+      const refreshedOffer = await window.sourceApp.getConcatRenderResumeOffer?.();
+      const refreshedCompatibility = await window.sourceApp.analyzeConcatRenderResume?.(remap.checkpointId);
+      setResumeStorageAnalysis(analysis);
+      setTemporaryInventory(analysis.inventory);
+      if (refreshedOffer) setResumeOffer(refreshedOffer);
+      if (refreshedCompatibility) setResumeCompatibility(refreshedCompatibility);
+      setBackgroundNotice(`已掃描所有登錄 TEMP、驗證並重新 Mapping ${remap.remappedArtifactIds.length} 個 Artifact。`);
+      setStorageWizardOpen(false);
+      if (allowAutoResume && storageWizardAutoResume && analysis.canResumeWithoutCleanup)
+        await resumeRender(false, remap.checkpointId, refreshedCompatibility);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setStorageActionBusy(false);
+    }
+  };
+
+  const submitStorageWizard = async () => {
+    const storageApi = window.sourceApp as V083StorageApi;
+    const analysis = resumeStorageAnalysis;
+    if (!analysis || !resumeOffer || storageWizardArtifactIds.length === 0 || !storageApi.executeConcatRenderStoragePlan) return;
+    setStorageActionBusy(true);
+    setError(undefined);
+    try {
+      const result = await storageApi.executeConcatRenderStoragePlan({
+        checkpointId: analysis.checkpointId,
+        planId: analysis.plan.planId,
+        artifactIds: storageWizardArtifactIds,
+      });
+      setResumeStorageAnalysis(result.analysis);
+      setTemporaryInventory(result.analysis.inventory);
+      setSelectedArtifactIds([]);
+      setBackgroundNotice(`空間整理已完成：搬移 ${formatBytes(result.copiedBytes)}，來源清除 ${formatBytes(result.deletedSourceBytes)}；已重新分析續轉空間。`);
+      setStorageWizardOpen(false);
+      const refreshedOffer = await window.sourceApp.getConcatRenderResumeOffer?.();
+      const refreshedCompatibility = await window.sourceApp.analyzeConcatRenderResume?.(result.checkpointId);
+      if (refreshedOffer) setResumeOffer(refreshedOffer);
+      if (refreshedCompatibility) setResumeCompatibility(refreshedCompatibility);
+      if (storageWizardAutoResume && result.analysis.canResumeWithoutCleanup) {
+        await resumeRender(false, result.checkpointId, refreshedCompatibility);
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setStorageActionBusy(false);
+    }
+  };
+
+  const compatibilityStatusLabel = (domain: ResumeCompatibilityReport["video"], name: string) => {
+    const changed = domain.status === "CHANGED" || domain.status === "IGNORED" && domain.oldValue !== domain.newValue;
+    const value = domain.status === "SAME"
+      ? "相同"
+      : domain.status === "UNKNOWN"
+        ? "待確認"
+        : domain.renderAffecting
+          ? "已變更"
+          : changed
+            ? "已變更，不影響轉檔"
+            : "不影響轉檔";
+    return `${name}：${value}`;
+  };
+
+  const remapMissingResumeSegments = async () => {
+    if (!resumeOffer || !window.sourceApp.remapConcatRenderResume) return;
+    const fromRoot = remapFromRoot || resumeOffer.missingTempRoots?.[0];
+    if (!fromRoot) {
+      setError("找不到原始 TEMP 根目錄；請先重新連接原磁碟，再檢查續轉資料。");
+      return;
+    }
+    setRemapBusy(true);
+    setError(undefined);
+    try {
+      const selected = await (window.sourceApp as RenderTempApi).chooseRenderTempLocation();
+      if (!selected) return;
+      const remapped = await window.sourceApp.remapConcatRenderResume({
+        checkpointId: resumeOffer.checkpointId,
+        fromRoot,
+        toRoot: selected.path,
+      });
+      setResumeOffer(await window.sourceApp.getConcatRenderResumeOffer?.());
+      setRemapFromRoot("");
+      setBackgroundNotice(`已驗證並重新對應 ${remapped.remappedSegmentCount} 個完成片段；原始資料未搬移。`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setRemapBusy(false);
     }
   };
 
@@ -985,6 +1321,86 @@ export function ConcatRenderModal({
       setPlatformHandoffBusy(undefined);
     }
   };
+
+  const storageWizardMoves = resumeStorageAnalysis?.plan.moveItems.filter((item) => storageWizardArtifactIds.includes(item.artifactId)) ?? [];
+  const storageWizardTotalBytes = storageWizardMoves.reduce((sum, item) => sum + item.sizeBytes, 0);
+  const storageWizardPrimary = resumeStorageAnalysis?.volumes.find((volume) => volume.role === "PRIMARY");
+  const storageWizardFallback = resumeStorageAnalysis?.volumes.find((volume) => volume.role === "FALLBACK");
+  const clipboardWriteAvailable = typeof (navigator as unknown as { clipboard?: { writeText?: unknown } }).clipboard?.writeText === "function";
+  const projectedFreeAfter = (locationId: string) => {
+    const location = resumeStorageAnalysis?.volumes.find((volume) => volume.locationId === locationId);
+    if (!location) return undefined;
+    const movedOut = storageWizardMoves.filter((item) => item.sourceLocationId === locationId).reduce((sum, item) => sum + item.sizeBytes, 0);
+    const movedIn = storageWizardMoves.filter((item) => item.destinationLocationId === locationId).reduce((sum, item) => sum + item.sizeBytes, 0);
+    return location.freeBytes + movedOut - movedIn;
+  };
+  const isRegisteredTempPath = (targetPath: string) => {
+    const normalized = targetPath.replaceAll("\\", "/").toLocaleLowerCase();
+    return [...tempLocations, ...tempLocationStatuses].some((location) => {
+      const root = location.path.replaceAll("\\", "/").replace(/\/$/, "").toLocaleLowerCase();
+      return normalized === root || normalized.startsWith(`${root}/`);
+    });
+  };
+  const copyStoragePath = async (targetPath: string) => {
+    try {
+      await navigator.clipboard.writeText(targetPath);
+      setBackgroundNotice(`已複製路徑：${targetPath}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "無法存取剪貼簿。請手動選取並複製路徑。");
+    }
+  };
+  const revealStoragePath = async (targetPath: string) => {
+    const reveal = (window.sourceApp as V083StorageApi).revealRegisteredRenderTempPath;
+    if (!reveal || !isRegisteredTempPath(targetPath)) return;
+    try {
+      await reveal(targetPath);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+  const chooseRecoveryDestination = async (): Promise<boolean> => {
+    const api = window.sourceApp as RenderTempApi;
+    if (!resumeOffer || !api.chooseRenderTempLocation || !api.setRenderTempLocations || !api.analyzeConcatRenderStorage) return false;
+    setStorageActionBusy(true);
+    setError(undefined);
+    try {
+      const selected = await api.chooseRenderTempLocation();
+      if (!selected) return false;
+      const primary = tempLocations.find((location) => location.role === "PRIMARY");
+      if (primary?.path.toLocaleLowerCase() === selected.path.toLocaleLowerCase()) {
+        setError("目的地不能是主要 TEMP；請選擇其他磁碟的資料夾。");
+        return false;
+      }
+      const fallback = tempLocations.find((location) => location.role === "FALLBACK");
+      const next = fallback
+        ? tempLocations.map((location) => location.id === fallback.id ? { ...location, path: selected.path, enabled: true, allowFallback: true } : location)
+        : [...tempLocations, { id: `recovery-${Date.now()}`, path: selected.path, role: "FALLBACK" as const, enabled: true, allowFallback: true }];
+      const saved = await api.setRenderTempLocations(next);
+      setTempLocations(saved);
+      setTempLocationStatuses(await api.listRenderTempLocations());
+      const analysis = await api.analyzeConcatRenderStorage(resumeOffer.checkpointId);
+      setResumeStorageAnalysis(analysis);
+      setTemporaryInventory(analysis.inventory);
+      setStorageWizardArtifactIds(analysis.plan.moveItems.map((item) => item.artifactId));
+      setBackgroundNotice(`已登錄次要 TEMP：${selected.path}；空間方案已重新分析。`);
+      return true;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      return false;
+    } finally {
+      setStorageActionBusy(false);
+    }
+  };
+
+  const chooseMovedArtifactFolder = async () => {
+    if (await chooseRecoveryDestination()) await scanManualMoveAndContinue(false);
+  };
+
+  const preflightTemps = renderEstimate?.tempLocationStatuses ?? tempLocationStatuses;
+  const preflightPrimary = preflightTemps.find((item) => item.role === "PRIMARY");
+  const preflightFallback = preflightTemps.find((item) => item.role === "FALLBACK" && item.volume !== preflightPrimary?.volume);
+  const roughPrimaryTempBytes = Math.min(renderEstimate?.estimatedTemporaryBytes ?? 0, preflightPrimary?.schedulableBytes ?? 0);
+  const roughFallbackTempBytes = Math.max(0, (renderEstimate?.estimatedTemporaryBytes ?? 0) - roughPrimaryTempBytes);
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -1053,19 +1469,271 @@ export function ConcatRenderModal({
                 </small>
               )}
               {(resumeOffer.missingCompletedSegmentCount ?? 0) > 0 && (
-                <small className="warning-text">
-                  JSON 曾記錄 {resumeOffer.recordedCompletedSegmentCount} 個完成片段，但有 {resumeOffer.missingCompletedSegmentCount}
-                  個中繼檔已遺失；缺失部分會重新轉檔，不能直接沿用先前全部成果。
-                </small>
+                <>
+                  <small className="warning-text">
+                    JSON 曾記錄 {resumeOffer.recordedCompletedSegmentCount} 個完成片段，但目前有 {resumeOffer.missingCompletedSegmentCount}
+                    個中繼檔找不到。若只是磁碟代號或 TEMP 路徑改變，請先重新對應；不要直接重轉。
+                  </small>
+                  {resumeOffer.missingCompletedPathExample && <small title={resumeOffer.missingCompletedPathExample}>原路徑範例：{resumeOffer.missingCompletedPathExample}</small>}
+                  {!!resumeOffer.missingTempRoots?.length && !resumeOffer.legacyRecoveryProtected && (
+                    <label>原 TEMP 根目錄
+                      <select aria-label="原 TEMP 根目錄" value={remapFromRoot || resumeOffer.missingTempRoots[0]} onChange={(event) => setRemapFromRoot(event.target.value)}>
+                        {resumeOffer.missingTempRoots.map((root) => <option key={root} value={root}>{root}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  <div className="render-resume-actions">
+                    {(window.sourceApp as V083StorageApi).scanAndRemapConcatRenderArtifacts && (
+                      <button className="secondary-button" type="button" disabled={storageActionBusy} onClick={() => void scanManualMoveAndContinue(false)}>
+                        重新搜尋已移動片段
+                      </button>
+                    )}
+                    {(window.sourceApp as RenderTempApi).chooseRenderTempLocation && (window.sourceApp as RenderTempApi).setRenderTempLocations && (
+                      <button className="secondary-button" type="button" disabled={storageActionBusy} onClick={() => void chooseMovedArtifactFolder()}>
+                        指定已搬移資料夾…
+                      </button>
+                    )}
+                  </div>
+                </>
               )}
               {resumeOffer.cumulativeElapsedMs !== undefined && (
                 <small>已保存累積轉檔耗時：{formatRenderClock(resumeOffer.cumulativeElapsedMs)}</small>
               )}
               {resumeOffer.lastError && <small>{resumeOffer.lastError}</small>}
+              {resumeCompatibility && resumeCompatibility.checkpointId === resumeOffer.checkpointId && (
+                <section className="resume-compat-report" aria-label="Resume 相容性報告">
+                  <strong>Resume 相容性報告</strong>
+                  <div className="resume-compat-domains">
+                    <span>{compatibilityStatusLabel(resumeCompatibility.video, "影片")}</span>
+                    <span>{compatibilityStatusLabel(resumeCompatibility.timeline, "時間線")}</span>
+                    <span>{compatibilityStatusLabel(resumeCompatibility.baseAudio, "基礎音軌")}</span>
+                    <span>{compatibilityStatusLabel(resumeCompatibility.storage, "暫存位置")}</span>
+                    <span>{compatibilityStatusLabel(resumeCompatibility.uploadSettings, "YouTube 設定")}</span>
+                    <span>{compatibilityStatusLabel(resumeCompatibility.appVersion, "App 版本")}</span>
+                  </div>
+                  <small>
+                    可重用 {resumeCompatibility.reusableSegmentCount} 個片段（{formatRenderClock(resumeCompatibility.reusableDurationMs)}）；
+                    需重建 {resumeCompatibility.invalidSegmentCount} 個片段。
+                  </small>
+                  <small>
+                    舊 partial.mkv：{resumeCompatibility.partialRecovery === "RECOVERABLE" ? "可恢復" : resumeCompatibility.partialRecovery === "NOT_FOUND" ? "未找到" : resumeCompatibility.partialRecovery === "INVALID" ? "無法驗證" : "待確認"}
+                    {resumeCompatibility.migrationRequired ? "；續轉前會執行 checkpoint migration" : ""}
+                    {resumeCompatibility.sourceCheckpointPreserved ? "；原 checkpoint 保留" : ""}
+                  </small>
+                  {([
+                    ["影片", resumeCompatibility.video],
+                    ["時間線", resumeCompatibility.timeline],
+                    ["基礎音軌", resumeCompatibility.baseAudio],
+                  ] as const).filter((item) => item[1].status === "UNKNOWN").map(([label, domain]) => (
+                    <small className="warning-text" key={label}>{label}：{domain.reason}</small>
+                  ))}
+                  {resumeCompatibility.decision === "NEEDS_ANALYSIS" && (
+                    <small className="warning-text">目前無法證明這些片段與現行時間線相容，因此暫停續轉；請先確認來源與時間線，原 checkpoint 仍保留。</small>
+                  )}
+                  {resumeCompatibility.decision === "FULL_RERENDER" && (
+                    <small className="warning-text">驗證結果要求完整重新轉檔；此續轉操作已停用，請確認新內容後從一般轉檔流程開始。</small>
+                  )}
+                  {resumeCompatibility.video.oldValue && <small>影片舊值：{resumeCompatibility.video.oldValue}</small>}
+                  {resumeCompatibility.video.newValue && <small>影片新值：{resumeCompatibility.video.newValue}</small>}
+                  {resumeCompatibility.timeline.oldValue && <small>時間線舊值：{resumeCompatibility.timeline.oldValue}</small>}
+                  {resumeCompatibility.timeline.newValue && <small>時間線新值：{resumeCompatibility.timeline.newValue}</small>}
+                  {resumeCompatibility.baseAudio.oldValue && <small>基礎音軌舊值：{resumeCompatibility.baseAudio.oldValue}</small>}
+                  {resumeCompatibility.baseAudio.newValue && <small>基礎音軌新值：{resumeCompatibility.baseAudio.newValue}</small>}
+                  {resumeCompatibility.storage.oldValue && <small>暫存位置：{resumeCompatibility.storage.oldValue} → {resumeCompatibility.storage.newValue ?? "未設定"}</small>}
+                  {resumeCompatibility.uploadSettings.oldValue && <small>YouTube 設定舊值：{resumeCompatibility.uploadSettings.oldValue}</small>}
+                  {resumeCompatibility.uploadSettings.newValue && <small>YouTube 設定新值：{resumeCompatibility.uploadSettings.newValue}</small>}
+                  {resumeCompatibility.appVersion.oldValue && <small>App 舊版本：{resumeCompatibility.appVersion.oldValue}</small>}
+                  {resumeCompatibility.appVersion.newValue && <small>App 新版本：{resumeCompatibility.appVersion.newValue}</small>}
+                </section>
+              )}
+              {resumeStorageAnalysis?.checkpointId === resumeOffer.checkpointId && (
+                <section className="resume-storage-analysis" aria-label="Resume 儲存空間分析">
+                  <strong>續轉前 TEMP 空間分析</strong>
+                  <small>
+                    剩餘峰值需求約 {formatBytes(resumeStorageAnalysis.estimate.peakAdditionalBytes)}；
+                    剩餘畫面 {formatBytes(resumeStorageAnalysis.estimate.remainingVideoBytes)}、音訊 {formatBytes(resumeStorageAnalysis.estimate.remainingAudioBytes)}、
+                    中繼峰值 {formatBytes(resumeStorageAnalysis.estimate.intermediatePeakBytes)}、成品 {formatBytes(resumeStorageAnalysis.estimate.finalOutputBytes)}。
+                  </small>
+                  {resumeStorageAnalysis.failureKind && (
+                    <small className="warning-text">
+                      {resumeStorageAnalysis.failureKind === "APP_PREEMPTIVE_DISK_PAUSE"
+                        ? "上次由 APP 空間安全閘暫停；FFmpeg 未回報 ENOSPC。"
+                        : "上次收到 FFmpeg ENOSPC（磁碟寫入空間不足）；已保留 checkpoint 供續轉分析。"}
+                      {resumeStorageAnalysis.failedPath ? ` 失敗路徑：${resumeStorageAnalysis.failedPath}` : ""}
+                    </small>
+                  )}
+                  <div className="resume-storage-volumes">
+                    {resumeStorageAnalysis.volumes.map((volume) => (
+                      <article key={volume.locationId}>
+                        <strong>{volume.volume} · {volume.role === "FINAL_OUTPUT" ? "成品" : volume.role === "PRIMARY" ? "主要 TEMP" : "備援 TEMP"}</strong>
+                        <span>可用 {formatBytes(volume.freeBytes)} · Soft Reserve {formatBytes(volume.softReserveBytes)} · Hard Safety Limit {formatBytes(volume.hardSafetyLimitBytes)}</span>
+                        <span>TEMP {formatBytes(volume.tempUsageBytes)}（完成片段 {formatBytes(volume.completedBytes)}，可搬移 {formatBytes(volume.movableBytes)}）</span>
+                        {volume.role === "FINAL_OUTPUT" && !volume.osSafetyHealthy && <span className="warning-text">輸出位置未通過 OS 寫入安全檢查。</span>}
+                      </article>
+                    ))}
+                  </div>
+                  <small>{resumeStorageAnalysis.plan.reason}</small>
+                  {resumeStorageAnalysis.plan.moveItems.length > 0 && (
+                    <>
+                      <div className="resume-storage-plan-list">
+                        {resumeStorageAnalysis.plan.moveItems.map((item) => (
+                          <span key={item.artifactId}>{item.sourcePath} → {item.destinationPath} · {formatBytes(item.sizeBytes)}</span>
+                        ))}
+                        <strong>搬移後主要 TEMP 預估可用 {formatBytes(resumeStorageAnalysis.plan.expectedPrimaryFreeAfterBytes)}</strong>
+                      </div>
+                      <button className="secondary-button" type="button" disabled={storageActionBusy} onClick={() => void executeSuggestedStoragePlan()}>
+                        {storageActionBusy ? "正在複製、驗證與更新 checkpoint…" : "檢視搬移與續轉步驟…"}
+                      </button>
+                    </>
+                  )}
+                  {resumeStorageAnalysis.plan.action === "SAFE_PAUSE" && <small className="warning-text">目前估算無法安全續轉；先處理下方已驗證的 TEMP 清理項目，或改用其他磁碟。</small>}
+                </section>
+              )}
+              {storageWizardOpen && resumeStorageAnalysis?.checkpointId === resumeOffer.checkpointId && (
+                <section className="storage-recovery-wizard" role="dialog" aria-modal="true" aria-labelledby="storage-recovery-title">
+                  <div className="storage-recovery-wizard-card">
+                    <strong id="storage-recovery-title">TEMP 空間復原精靈</strong>
+                    <small>{resumeStorageAnalysis.plan.reason}</small>
+                    <p className="storage-recovery-instructions">
+                      人工搬移步驟：在檔案總管逐一將表列來源檔搬到對應目的地（也可先複製），保持檔名與資料夾位置；完成後按「我已完成搬移」讓程式掃描登錄 TEMP、驗證內容並更新 checkpoint。若採用複製，請勿在驗證前刪除來源；若採用移動，請先確認搬移完整，並保留可復原副本。
+                    </p>
+                    {storageWizardTotalBytes >= 10 * GIB && (
+                      <p className="storage-recovery-manual-recommendation">所選搬移量為 {formatBytes(storageWizardTotalBytes)}（至少 10 GiB）。建議人工複製表列檔案，以便自行安排長時間複製；完成後使用「我已完成搬移」執行驗證與 checkpoint 更新。</p>
+                    )}
+                    {storageWizardPrimary && (
+                      <div className="storage-recovery-projection" aria-label="搬移後預估可用空間">
+                        <small>以下是 APP 完成驗證搬移並安全處理來源後的估算；人工複製但保留來源時，來源磁碟空間不會增加。</small>
+                        {[storageWizardPrimary, ...(storageWizardFallback ? [storageWizardFallback] : [])].map((volume) => {
+                          const projected = projectedFreeAfter(volume.locationId) ?? volume.freeBytes;
+                          return <span key={volume.locationId} className={projected < volume.softReserveBytes ? "warning-text" : undefined}>
+                            {volume.role === "PRIMARY" ? "主要" : "次要"} TEMP {volume.volume}：目前 {formatBytes(volume.freeBytes)} → 搬移後約 {formatBytes(projected)}；Reserve {formatBytes(volume.softReserveBytes)}{projected < volume.softReserveBytes ? "（低於 Reserve）" : ""}
+                          </span>;
+                        })}
+                      </div>
+                    )}
+                    <div className="storage-recovery-table" role="table" aria-label="復原項目明細">
+                      <div className="storage-recovery-row storage-recovery-header" role="row">
+                        <span>項目／檔案</span><span>大小</span><span>來源</span><span>目的地</span><span>狀態</span>
+                      </div>
+                      {resumeStorageAnalysis.plan.moveItems.map((planned) => {
+                        const artifactId = planned.artifactId;
+                        const inventoryItem = resumeStorageAnalysis.inventory.items.find((item) => item.artifactId === artifactId);
+                        const checked = storageWizardArtifactIds.includes(artifactId);
+                        return (
+                          <div className="storage-recovery-row" role="row" key={artifactId}>
+                            <label><input type="checkbox" aria-label={`手動選取 ${inventoryItem?.fileName ?? planned?.sourcePath ?? artifactId}`} checked={checked} disabled={storageActionBusy} onChange={(event) => setStorageWizardArtifactIds((current) => event.target.checked ? [...current, artifactId] : current.filter((id) => id !== artifactId))} />
+                              <span><strong>{inventoryItem?.fileName ?? planned?.sourcePath ?? artifactId}</strong><code>{planned?.sourcePath ?? inventoryItem?.path ?? "路徑未提供"}</code></span>
+                            </label>
+                            <span>{formatBytes(planned?.sizeBytes ?? inventoryItem?.sizeBytes ?? 0)}</span>
+                            <span className="storage-recovery-path-cell">
+                              <code>{planned?.sourcePath ?? inventoryItem?.path ?? "—"}</code>
+                              {planned?.sourcePath && <div className="storage-recovery-path-actions">
+                                {(window.sourceApp as V083StorageApi).revealRegisteredRenderTempPath && isRegisteredTempPath(planned.sourcePath) && <button type="button" className="tertiary-button" onClick={() => void revealStoragePath(planned.sourcePath)}>開啟來源資料夾</button>}
+                                {clipboardWriteAvailable && <button type="button" className="tertiary-button" onClick={() => void copyStoragePath(planned.sourcePath)}>複製來源路徑</button>}
+                              </div>}
+                            </span>
+                            <span className="storage-recovery-path-cell">
+                              <code>{planned?.destinationPath ?? "—"}</code>
+                              {planned?.destinationPath && <div className="storage-recovery-path-actions">
+                                {(window.sourceApp as V083StorageApi).revealRegisteredRenderTempPath && isRegisteredTempPath(planned.destinationPath) && <button type="button" className="tertiary-button" onClick={() => void revealStoragePath(planned.destinationPath)}>開啟目的資料夾</button>}
+                                {clipboardWriteAvailable && <button type="button" className="tertiary-button" onClick={() => void copyStoragePath(planned.destinationPath)}>複製目的地路徑</button>}
+                              </div>}
+                            </span>
+                            <span>{storageActionBusy ? "執行安全搬移／更新流程中" : inventoryItem?.status ?? "等待確認"}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="storage-recovery-lifecycle" aria-label="復原流程進度" aria-live="polite">
+                      <strong>流程進度</strong>
+                      <ol>
+                        <li>複製到目的地暫存檔</li>
+                        <li>驗證大小、SHA-256 與媒體格式</li>
+                        <li>發佈目的檔並更新、讀回驗證 checkpoint</li>
+                        <li>checkpoint 安全更新後才清除來源副本</li>
+                        <li>重新掃描 TEMP 並分析續轉空間</li>
+                      </ol>
+                      <span>{storageActionBusy ? "目前狀態：主程序正在依序執行整個流程；現有 API 不提供逐階段進度。" : "目前狀態：尚未開始"}</span>
+                    </div>
+                    <label className="storage-recovery-auto-resume">
+                      <input type="checkbox" checked={storageWizardAutoResume} disabled={storageActionBusy} onChange={(event) => setStorageWizardAutoResume(event.target.checked)} />
+                      空間整理成功且重新分析確認可續轉後，自動繼續轉檔
+                    </label>
+                    <div className="render-resume-actions">
+                      {(window.sourceApp as RenderTempApi).chooseRenderTempLocation && (window.sourceApp as RenderTempApi).setRenderTempLocations && (
+                        <button className="secondary-button" type="button" disabled={storageActionBusy} onClick={() => void chooseRecoveryDestination()}>選擇並登錄次要 TEMP…</button>
+                      )}
+                      {(window.sourceApp as V083StorageApi).scanAndRemapConcatRenderArtifacts && (
+                        <button className="primary-button" type="button" disabled={storageActionBusy} onClick={() => void scanManualMoveAndContinue()}>
+                          我已完成搬移，重新掃描並繼續
+                        </button>
+                      )}
+                      <button className="secondary-button" type="button" disabled={storageActionBusy || storageWizardArtifactIds.length === 0} title="目前 App 自動搬移沒有逐位元組進度或只取消複製的功能；大型檔案建議優先手動搬移。" onClick={() => void submitStorageWizard()}>
+                        {storageActionBusy ? "正在執行復原流程…" : `由 APP 搬移 ${storageWizardArtifactIds.length} 個項目`}
+                      </button>
+                      <button className="secondary-button" type="button" disabled={storageActionBusy} onClick={() => setStorageWizardOpen(false)}>返回分析</button>
+                    </div>
+                  </div>
+                </section>
+              )}
+              {temporaryInventory && (
+                <section className="temporary-artifact-inventory" aria-label="舊版 TEMP 清理清單">
+                  <strong>SceneryWalker TEMP 清理清單</strong>
+                  <small>掃描 {temporaryInventory.items.length} 個項目；可立即釋放 {formatBytes(temporaryInventory.immediatelyReclaimableBytes)}，可搬移 {formatBytes(temporaryInventory.movableBytes)}。用途不明、目前使用中或 Resume 仍引用的項目會保留。</small>
+                  <div className="temporary-artifact-list">
+                    {temporaryInventory.items.map((item) => {
+                      const removable = item.safeToDelete && !item.referencedByCurrentCheckpoint;
+                      const movable = item.safeToMove && !item.referencedByCurrentCheckpoint;
+                      return (
+                        <label className="temporary-artifact-row" key={item.artifactId}>
+                          <input
+                            type="checkbox"
+                            aria-label={`選取 ${item.appVersion ?? "未知版本"} ${item.path}`}
+                            disabled={storageActionBusy || (!removable && !movable)}
+                            checked={selectedArtifactIds.includes(item.artifactId)}
+                            onChange={(event) => setSelectedArtifactIds((current) => event.target.checked
+                              ? [...current, item.artifactId]
+                              : current.filter((id) => id !== item.artifactId))}
+                          />
+                          <span>
+                            <strong>{item.appVersion ?? "版本未知"} · {item.artifactType} · {formatBytes(item.sizeBytes)} · {item.status}</strong>
+                            <code>{item.path}</code>
+                            <small>{item.reason}{item.referencedByCurrentCheckpoint ? "；目前 Resume 需要，禁止刪除" : ""}{item.supersededByArtifactId ? `；已由 ${item.supersededByArtifactId} 取代` : ""}</small>
+                          </span>
+                          <span>{removable ? "可安全刪除" : movable ? "可安全搬移" : "保留"}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <small>目前選取 {selectedArtifactIds.length} 個項目 · {formatBytes(temporaryInventory.items.filter((item) => selectedArtifactIds.includes(item.artifactId)).reduce((sum, item) => sum + item.sizeBytes, 0))}</small>
+                  <div className="render-resume-actions">
+                    <button className="secondary-button" type="button" disabled={storageActionBusy || !selectedArtifactIds.length || !temporaryInventory.items.filter((item) => selectedArtifactIds.includes(item.artifactId)).every((item) => item.safeToDelete && !item.referencedByCurrentCheckpoint)} onClick={() => void executeSelectedCleanup("DELETE")}>確認刪除已選項目</button>
+                    <button className="secondary-button" type="button" disabled={storageActionBusy || !selectedArtifactIds.length || !temporaryInventory.items.filter((item) => selectedArtifactIds.includes(item.artifactId)).every((item) => item.safeToMove && !item.referencedByCurrentCheckpoint)} onClick={() => void executeSelectedCleanup("MOVE")}>移動已選項目…</button>
+                  </div>
+                </section>
+              )}
             </div>
             <div className="render-resume-actions">
-              <button className="primary-button" type="button" onClick={() => void resumeRender()}>
-                {(resumeOffer.missingCompletedSegmentCount ?? 0) > 0 ? "重建缺失片段並繼續" : "從上次進度繼續"}
+              {window.sourceApp.analyzeConcatRenderResume && (
+                <button className="secondary-button" type="button" disabled={resumeAnalysisBusy || storageActionBusy} onClick={() => void analyzeResume()}>
+                  {resumeAnalysisBusy ? "正在分析續轉與 TEMP…" : "分析續轉與 TEMP 空間"}
+                </button>
+              )}
+              {(resumeOffer.missingCompletedSegmentCount ?? 0) > 0 && !!resumeOffer.missingTempRoots?.length && window.sourceApp.remapConcatRenderResume && (
+                <button className="secondary-button" type="button" disabled={remapBusy || resumeOffer.legacyRecoveryProtected} title={resumeOffer.legacyRecoveryProtected ? "先建立唯讀來源的獨立續轉工作狀態，再重新對應" : "選擇新 TEMP 根目錄；只在完成片段大小、雜湊與媒體格式全部驗證後更新續轉紀錄"} onClick={() => void remapMissingResumeSegments()}>
+                  {remapBusy ? "驗證片段中…" : "重新指定遺失 TEMP 位置"}
+                </button>
+              )}
+              <button
+                className="primary-button"
+                type="button"
+                disabled={Boolean(window.sourceApp.analyzeConcatRenderResume && (resumeCompatibility?.checkpointId !== resumeOffer.checkpointId || !["FULL_RESUME", "VALIDATED_SEGMENT_REUSE", "REBUILD_AUDIO"].includes(resumeCompatibility.decision))) || Boolean((window.sourceApp as V083StorageApi).analyzeConcatRenderStorage && (resumeStorageAnalysis?.checkpointId !== resumeOffer.checkpointId || !resumeStorageAnalysis.canResumeWithoutCleanup))}
+                title={resumeCompatibility?.checkpointId !== resumeOffer.checkpointId ? "請先分析續轉與 TEMP 空間" : resumeCompatibility.decision === "NEEDS_ANALYSIS" ? "相容性未知，已停用續轉" : resumeCompatibility.decision === "FULL_RERENDER" ? "完整重新轉檔不會沿用此續轉工作" : resumeStorageAnalysis?.checkpointId !== resumeOffer.checkpointId ? "續轉前必須先分析 E:/C: TEMP 與舊版暫存" : resumeStorageAnalysis && !resumeStorageAnalysis.canResumeWithoutCleanup ? "請先檢視並確認空間整理建議" : undefined}
+                onClick={() => void resumeRender()}
+              >
+                {resumeCompatibility?.checkpointId === resumeOffer.checkpointId && resumeCompatibility.decision === "FULL_RERENDER"
+                  ? "驗證要求重新轉檔"
+                  : (resumeOffer.missingCompletedSegmentCount ?? 0) > 0 ? "重建缺失片段並繼續" : "從上次進度繼續"}
               </button>
               <button
                 className="secondary-button"
@@ -2143,25 +2811,82 @@ export function ConcatRenderModal({
                   {estimateBusy && <span className="spinner" />}
                 </header>
                 <div className="render-temp-controls">
-                  <span title={renderEstimate?.systemResources?.tempPath}>
-                    Render TEMP：{renderEstimate?.systemResources?.tempPath ?? "讀取中…"}
-                  </span>
-                  <button className="secondary-button" type="button" disabled={rendering} onClick={() => void chooseRenderTemp()}>
-                    選擇 TEMP 磁碟
+                  <label>新工作 TEMP 選址
+                    <select disabled={rendering} value={tempLocationSelection} onChange={(event) => changeTempSelection(event.target.value as "AUTO" | "PRIMARY" | "FALLBACK")}>
+                      <option value="AUTO">自動備援（主要磁碟不足時改用備援）</option>
+                      <option value="PRIMARY">固定主要磁碟</option>
+                      <option value="FALLBACK">固定備援磁碟</option>
+                    </select>
+                  </label>
+                  <label className="render-temp-fallback-toggle">
+                    <input type="checkbox" disabled={rendering} checked={tempLocations.some((item) => item.role === "FALLBACK" && item.allowFallback !== false)} onChange={(event) => setAutoFallback(event.target.checked)} />
+                    Auto Fallback
+                  </label>
+                  <button className="secondary-button" type="button" disabled={rendering || tempLocations.length >= 8} onClick={() => void addTempLocation()}>
+                    新增 TEMP 磁碟
                   </button>
-                  {window.sourceApp.revealRenderTemporaryFolder && (
-                    <button
-                      className="tertiary-button"
-                      type="button"
-                      disabled={rendering}
-                      onClick={() => void window.sourceApp.revealRenderTemporaryFolder?.()}
-                    >
-                      開啟 TEMP
-                    </button>
-                  )}
+                  {window.sourceApp.revealRenderTemporaryFolder && <button className="tertiary-button" type="button" disabled={rendering} onClick={() => void window.sourceApp.revealRenderTemporaryFolder?.()}>開啟主要 TEMP</button>}
+                </div>
+                <div className="render-temp-location-list" aria-label="Render TEMP 磁碟清單">
+                  {tempLocations.map((location, index) => {
+                    const status = (renderEstimate?.tempLocationStatuses ?? tempLocationStatuses).find((candidate) => candidate.id === location.id);
+                    const reason = status?.unavailableReason === "BELOW_RESERVE" ? "低於 Soft Reserve（警告）" : status?.unavailableReason === "UNWRITABLE" ? "資料夾無法寫入" : status?.unavailableReason === "DISABLED" ? "已停用" : status?.unavailableReason === "FALLBACK_DISABLED" ? "自動備援已停用" : undefined;
+                    return <article className={`render-temp-location${status && !status.available ? " is-unavailable" : ""}`} key={location.id}>
+                      <div className="render-temp-location-heading">
+                        <strong>{location.role === "PRIMARY" ? "主要 TEMP" : "備援 TEMP"} · {status?.volume ?? "檢查中…"}</strong>
+                        <span>{status?.available ? "可用" : reason ?? "狀態讀取中"}</span>
+                      </div>
+                      <code title={location.path}>{location.path}</code>
+                      <div className="render-temp-location-stats">
+                        <span>磁碟可用 {status ? formatBytes(status.freeBytes) : "—"}</span>
+                        <label className="render-temp-reserve">Soft Reserve
+                          <input
+                            aria-label={`${status?.volume ?? (location.path.toUpperCase().startsWith("C:") ? "C:" : location.role === "PRIMARY" ? "主要 TEMP" : "備援 TEMP")} Soft Reserve GB`}
+                            type="number"
+                            min="0"
+                            max="1024"
+                            step="0.5"
+                            disabled={rendering}
+                            value={((location.reserveBytes ?? defaultTempReserveBytes(location)) / GIB).toString()}
+                            onChange={(event) => {
+                              const reserveGiB = Number(event.target.value);
+                              if (!Number.isFinite(reserveGiB) || reserveGiB < 0) return;
+                              setTempLocations((current) => current.map((item) => item.id === location.id
+                                ? { ...item, reserveBytes: Math.round(reserveGiB * GIB) }
+                                : item));
+                            }}
+                            onBlur={(event) => changeTempReserve(location.id, event.currentTarget.value)}
+                          /> GB
+                        </label>
+                        <span>可排程 {status ? formatBytes(status.schedulableBytes) : "—"}</span>
+                      </div>
+                      <label className="render-temp-enabled"><input type="checkbox" disabled={rendering} checked={location.enabled} onChange={(event) => void saveTempLocations(tempLocations.map((item) => item.id === location.id ? { ...item, enabled: event.target.checked } : item))} />啟用此磁碟</label>
+                      <div className="render-temp-location-actions">
+                        <button type="button" disabled={rendering} onClick={() => void chooseTempLocation(location.id)}>更換資料夾</button>
+                        <button type="button" disabled={rendering || index === 0} onClick={() => moveTempLocation(index, -1)}>上移</button>
+                        <button type="button" disabled={rendering || index === tempLocations.length - 1} onClick={() => moveTempLocation(index, 1)}>下移</button>
+                        <button type="button" disabled={rendering || tempLocations.length <= 1} onClick={() => void saveTempLocations(tempLocations.filter((item) => item.id !== location.id))}>移除</button>
+                        {location.role !== "PRIMARY" && <button type="button" disabled={rendering} onClick={() => void saveTempLocations([
+                          location,
+                          ...tempLocations.filter((item) => item.id !== location.id),
+                        ].map((item, position) => ({ ...item, role: position === 0 ? "PRIMARY" : "FALLBACK" })))}>設為主要</button>}
+                      </div>
+                    </article>;
+                  })}
                 </div>
                 {renderEstimate ? (
                   <>
+                    <div className="render-resource-summary" aria-label="雙磁碟 TEMP 預估">
+                      <span>下一工作約需 TEMP：{formatBytes(renderEstimate.estimatedNextTempJobBytes ?? 0)}（單一磁碟須可容納，不合併容量）</span>
+                      <span>預計下一工作：{renderEstimate.tempLocationStatuses?.find((item) => item.id === renderEstimate.selectedTempLocationId)?.volume ?? "目前無可用 TEMP 磁碟"}</span>
+                      <span>主要／備援可排程總量：{formatBytes(combinedTempCapacity(renderEstimate.tempLocationStatuses ?? tempLocationStatuses))}（相同磁碟不重複計算；僅表示分段總容量）</span>
+                      <span>本次 TEMP 同時佔用峰值粗估：約 {formatBytes(renderEstimate.estimatedTemporaryBytes ?? 0)}；每個工作仍須單獨放得進一顆磁碟。</span>
+                      {tempLocationSelection === "AUTO" && preflightPrimary && preflightFallback && (
+                        <span>依主要→備援順位粗估：{preflightPrimary.volume} 約 {formatBytes(roughPrimaryTempBytes)}，{preflightFallback.volume} 約 {formatBytes(roughFallbackTempBytes)}（僅供空間規劃；實際依片段大小與完成時間切換）。</span>
+                      )}
+                      {(renderEstimate.estimatedTemporaryBytes ?? 0) > combinedTempCapacity(renderEstimate.tempLocationStatuses ?? tempLocationStatuses) && <span className="warning-text">預估 TEMP 峰值高於目前雙磁碟可排程總量；若後續工作無法容納，將在安全邊界暫停。續轉可重用資料不會重新寫入。</span>}
+                      {renderEstimate.outputVolumeCanRender === false && <span className="warning-text">最終輸出磁碟不足；TEMP 備援不能代替成品空間。</span>}
+                    </div>
                     <div className="render-resource-summary">
                       <span>預估成品：約 {formatBytes(renderEstimate.estimatedOutputBytes)}</span>
                       <span>
@@ -2170,8 +2895,8 @@ export function ConcatRenderModal({
                       {renderEstimate.requiredFreeBytes !== undefined &&
                         renderEstimate.safetyMarginBytes !== undefined && (
                           <span>
-                            建議所需空間：{formatBytes(renderEstimate.requiredFreeBytes)}（含安全餘量{" "}
-                            {formatBytes(renderEstimate.safetyMarginBytes)}）
+                            最低估算可用空間：{formatBytes(renderEstimate.requiredFreeBytes)}；額外建議餘量：{" "}
+                            {formatBytes(renderEstimate.safetyMarginBytes)}（僅供規劃，與 Soft Reserve／Hard Safety Limit 分開）
                           </span>
                         )}
                       <span>目前可用 RAM：{formatBytes(renderEstimate.currentAvailableRamBytes)}</span>
@@ -2567,6 +3292,21 @@ export function ConcatRenderModal({
                       <span>目前輸出：{formatBytes(progress.diskStatus.finalOutputBytes)}</span>
                       <span>預估尚需寫入：{formatBytes(progress.diskStatus.estimatedRemainingWriteBytes)}</span>
                       <span>磁碟狀態：{progress.diskStatus.pressureLevel}</span>
+                      {progress.diskStatus.volumes?.filter((item) => item.role !== "FINAL_OUTPUT").map((item) => (
+                        <span key={item.locationId} title={item.path}>
+                          {item.role === "PRIMARY" ? "主要 TEMP" : "備援 TEMP"} {item.volume}：
+                          可用 {formatBytes(item.freeBytes)}／工作檔 {formatBytes(item.currentBytes)}／
+                          保留 {formatBytes(item.reserveBytes)}
+                          {item.activeJobCount > 0 ? `／目前 ${item.activeJobCount} 個工作` : ""}
+                          {item.availableForNextJob ? "／可接下一工作" : "／暫不可接新工作"}
+                        </span>
+                      ))}
+                      {progress.diskStatus.volumes?.some((item) => item.role !== "FINAL_OUTPUT" && item.activeJobCount > 0) && (
+                        <strong>目前工作磁碟：{progress.diskStatus.volumes.filter((item) => item.role !== "FINAL_OUTPUT" && item.activeJobCount > 0).map((item) => item.volume).join("、")}</strong>
+                      )}
+                      {progress.diskStatus.volumes?.some((item) => item.role !== "FINAL_OUTPUT" && item.availableForNextJob) && (
+                        <strong>下一工作可用：{progress.diskStatus.volumes.filter((item) => item.role !== "FINAL_OUTPUT" && item.availableForNextJob).map((item) => item.volume).join(" → ")}</strong>
+                      )}
                     </div>
                   )}
                   {monitoring && <small>已從背景轉檔接回監控中；再按 × 回主畫面也不會中斷。</small>}

@@ -178,9 +178,10 @@ describe("render preflight estimate", () => {
     expect(short16.canRender).toBe(true);
     expect(crowded16.modeEstimates.lowMemory.usesSegmentedPipeline).toBe(true);
     expect(sameAt20.estimatedOutputBytes).toBe(crowded16.estimatedOutputBytes);
-    expect(disk20.canRender).toBe(true);
+    expect(disk20.canRender, "20 GiB available space should not be blocked by the advisory margin alone").toBe(true);
     expect(disk20.safetyMarginBytes).toBe(20 * 1024 ** 3);
-    expect(disk20.requiredFreeBytes).toBeGreaterThan(disk20.currentFreeBytes);
+    expect(disk20.requiredFreeBytes).toBeLessThanOrEqual(disk20.currentFreeBytes);
+    expect(disk20.warning ?? "").not.toContain("至少 20 GB 安全餘量");
     expect(disk70LowRam.canRender).toBe(true);
     expect(disk70LowRam.modeEstimates.normal.warningLevel).not.toBe("NONE");
   });

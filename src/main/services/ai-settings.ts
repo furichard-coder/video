@@ -11,10 +11,10 @@ import { finalizePartialOutput } from "./atomic-output";
 import { findCodexExecutableSync } from "./codex-cli-provider";
 
 export const DEFAULT_AI_ACCOUNT_ID = "openai-default";
-export const DEFAULT_VISION_MODEL = "gpt-5.6-terra";
+export const DEFAULT_VISION_MODEL = "auto";
 export const DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-transcribe-diarize";
 export const GEMINI_REVIEW_CREDENTIAL_ID = "gemini-publish-review";
-export const DEFAULT_GEMINI_REVIEW_MODEL = "gemini-2.5-flash";
+export const DEFAULT_GEMINI_REVIEW_MODEL = "auto";
 
 interface StoredAccount {
   id: string;
