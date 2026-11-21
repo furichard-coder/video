@@ -27,7 +27,11 @@ describe("resume storage recovery planner", () => {
       peakAdditionalBytes: 80 * GIB,
       nextJobBytes: 40 * GIB,
     });
-    expect(plan).toMatchObject({ action: "REDIRECT_FUTURE_JOBS", targetLocationId: "c", requiresUserConfirmation: false });
+    expect(plan).toMatchObject({
+      action: "REDIRECT_FUTURE_JOBS",
+      targetLocationId: "c",
+      requiresUserConfirmation: false,
+    });
   });
 
   it("proposes only enough verified artifacts and requires consent", () => {
@@ -53,13 +57,30 @@ describe("resume storage recovery planner", () => {
   });
 
   it("does not turn an unavailable primary with zero arithmetic shortfall into a cleanup proposal", () => {
-    const primary = { ...status("e", "PRIMARY", 10 * GIB, GIB), available: false, unavailableReason: "UNWRITABLE" as const };
+    const primary = {
+      ...status("e", "PRIMARY", 10 * GIB, GIB),
+      available: false,
+      unavailableReason: "UNWRITABLE" as const,
+    };
     const plan = buildResumeStoragePlan({
       checkpointId: "checkpoint-1234",
       primary,
       peakAdditionalBytes: 0,
       nextJobBytes: GIB,
-      cleanupCandidates: [{ artifactId: "cache", artifactType: "PREVIEW_CACHE", path: "E:\\cache", drive: "E:\\", sizeBytes: GIB, status: "REBUILDABLE_CACHE", referencedByCurrentCheckpoint: false, safeToDelete: true, safeToMove: true, reason: "rebuildable" }],
+      cleanupCandidates: [
+        {
+          artifactId: "cache",
+          artifactType: "PREVIEW_CACHE",
+          path: "E:\\cache",
+          drive: "E:\\",
+          sizeBytes: GIB,
+          status: "REBUILDABLE_CACHE",
+          referencedByCurrentCheckpoint: false,
+          safeToDelete: true,
+          safeToMove: true,
+          reason: "rebuildable",
+        },
+      ],
     });
     expect(plan.action).toBe("SAFE_PAUSE");
     expect(plan.deleteArtifactIds).toEqual([]);
@@ -72,8 +93,30 @@ describe("resume storage recovery planner", () => {
       peakAdditionalBytes: 30 * GIB,
       nextJobBytes: 30 * GIB,
       cleanupCandidates: [
-        { artifactId: "required", artifactType: "COMPLETED_SEGMENT", path: "E:\\x", drive: "E:\\", sizeBytes: 50 * GIB, status: "RESUME_REQUIRED", referencedByCurrentCheckpoint: true, safeToDelete: false, safeToMove: false, reason: "required" },
-        { artifactId: "unknown", artifactType: "UNKNOWN", path: "E:\\y", drive: "E:\\", sizeBytes: 50 * GIB, status: "UNKNOWN", referencedByCurrentCheckpoint: false, safeToDelete: false, safeToMove: false, reason: "unknown" },
+        {
+          artifactId: "required",
+          artifactType: "COMPLETED_SEGMENT",
+          path: "E:\\x",
+          drive: "E:\\",
+          sizeBytes: 50 * GIB,
+          status: "RESUME_REQUIRED",
+          referencedByCurrentCheckpoint: true,
+          safeToDelete: false,
+          safeToMove: false,
+          reason: "required",
+        },
+        {
+          artifactId: "unknown",
+          artifactType: "UNKNOWN",
+          path: "E:\\y",
+          drive: "E:\\",
+          sizeBytes: 50 * GIB,
+          status: "UNKNOWN",
+          referencedByCurrentCheckpoint: false,
+          safeToDelete: false,
+          safeToMove: false,
+          reason: "unknown",
+        },
       ],
     });
     expect(plan.action).toBe("SAFE_PAUSE");

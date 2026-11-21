@@ -27,19 +27,19 @@
 
 ## 18–21：驗收
 
-| 測試 | 結果 |
-|---|---|
-| 三段各 10 秒，從 5 秒播放至結束 | PASS；實際 ProjectStore 將 transition normalize 為 300 ms，因此 timeline 結束 29,400 ms |
-| Project clock 不倒退 | PASS；scope 隔離後最後一輪 244 筆真實播放器樣本 |
-| 19–24 秒字幕跨段 | PASS |
-| Space Pause/Resume | PASS |
-| Textarea Space 不控制播放 | PASS |
-| 影片→照片→影片接續 | PASS；實際三種 Preview source，從 5 秒至 24,400 ms 最後暫停；照片採現有 normalized 5 秒長度 |
-| 100 字幕固定 45% 焦點 | PASS；第 50 筆 row center=44.96%，Preview 位置不變 |
-| 完整回歸 | PASS；scope 隔離後第二輪 96 files／585 tests，241.47 秒；首輪 242.66 秒；最後 standalone handoff 10/10、AUTH/MODEL 9/9 另通過 |
-| AI parser／草稿安全 focused tests | Sol 最終 5 files／27 tests PASS；含較新人工修改優先、正式 SRT 不被草稿改寫及永久備份 |
-| 真實付費 AI 產生建議 | BLOCKED：API billing/quota，不是 mock 成功 |
-| Windows v0.88 package / packaged smoke | 最終重封裝及 packaged smoke PASS；scope 選取／標籤回歸另 1/1 PASS |
+| 測試                                   | 結果                                                                                                                          |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 三段各 10 秒，從 5 秒播放至結束        | PASS；實際 ProjectStore 將 transition normalize 為 300 ms，因此 timeline 結束 29,400 ms                                       |
+| Project clock 不倒退                   | PASS；scope 隔離後最後一輪 244 筆真實播放器樣本                                                                               |
+| 19–24 秒字幕跨段                       | PASS                                                                                                                          |
+| Space Pause/Resume                     | PASS                                                                                                                          |
+| Textarea Space 不控制播放              | PASS                                                                                                                          |
+| 影片→照片→影片接續                     | PASS；實際三種 Preview source，從 5 秒至 24,400 ms 最後暫停；照片採現有 normalized 5 秒長度                                   |
+| 100 字幕固定 45% 焦點                  | PASS；第 50 筆 row center=44.96%，Preview 位置不變                                                                            |
+| 完整回歸                               | PASS；scope 隔離後第二輪 96 files／585 tests，241.47 秒；首輪 242.66 秒；最後 standalone handoff 10/10、AUTH/MODEL 9/9 另通過 |
+| AI parser／草稿安全 focused tests      | Sol 最終 5 files／27 tests PASS；含較新人工修改優先、正式 SRT 不被草稿改寫及永久備份                                          |
+| 真實付費 AI 產生建議                   | BLOCKED：API billing/quota，不是 mock 成功                                                                                    |
+| Windows v0.88 package / packaged smoke | 最終重封裝及 packaged smoke PASS；scope 選取／標籤回歸另 1/1 PASS                                                             |
 
 測試腳本：`scripts/verify-subtitle-review-v088.mjs`（隔離合成影片與專案副本）；`scripts/verify-subtitle-ai-review-live-v088.cjs`（單筆實測，禁止無限重試）。真實結果在 `artifacts/v088-review-qa` 與 `artifacts/v088-ai-review-live`。
 

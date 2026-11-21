@@ -7,11 +7,7 @@ import {
   selectSubtitleVideoSource,
 } from "../src/main/services/subtitle-video-selection";
 
-function output(
-  jobId: string,
-  createdAt: string,
-  overrides: Partial<PreviewOutputRecord> = {},
-): PreviewOutputRecord {
+function output(jobId: string, createdAt: string, overrides: Partial<PreviewOutputRecord> = {}): PreviewOutputRecord {
   return {
     jobId,
     projectId: "project-a",
@@ -71,12 +67,15 @@ describe("subtitle video source selection", () => {
       cancelled: true,
     });
 
-    expect(selectSubtitleVideoSource([cancelledLegacy, legacy], { projectId: "project-a", projectName: "Current" })).toMatchObject({
+    expect(
+      selectSubtitleVideoSource([cancelledLegacy, legacy], { projectId: "project-a", projectName: "Current" }),
+    ).toMatchObject({
       reason: "LATEST_CONCAT",
       record: { jobId: "legacy" },
     });
-    expect(selectSubtitleVideoSource([cancelledLegacy], { lastManualPath: "C:/manual.mp4", isManualPathValid: () => true }))
-      .toMatchObject({ reason: "MANUAL_PATH", path: "C:/manual.mp4" });
+    expect(
+      selectSubtitleVideoSource([cancelledLegacy], { lastManualPath: "C:/manual.mp4", isManualPathValid: () => true }),
+    ).toMatchObject({ reason: "MANUAL_PATH", path: "C:/manual.mp4" });
   });
 
   it("uses the manual path only when its validator accepts it", () => {
@@ -86,9 +85,9 @@ describe("subtitle video source selection", () => {
         isManualPathValid: (path) => path.endsWith(".mp4"),
       }),
     ).toEqual({ reason: "MANUAL_PATH", path: "C:/manual.mp4" });
-    expect(
-      selectSubtitleVideoSource([], { lastManualPath: "C:/missing.mp4", isManualPathValid: () => false }),
-    ).toEqual({ reason: "NONE" });
+    expect(selectSubtitleVideoSource([], { lastManualPath: "C:/missing.mp4", isManualPathValid: () => false })).toEqual(
+      { reason: "NONE" },
+    );
   });
 });
 

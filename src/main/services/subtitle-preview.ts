@@ -191,15 +191,20 @@ export class SubtitlePreviewService {
     assertSafeHexId(cacheKey, "Subtitle preview cache key");
     for (const directory of this.cacheDirectories(cacheKey)) {
       const markerPath = assertWithinRoot(directory, path.join(directory, "marker.json"));
-      const marker = await readFile(markerPath, "utf8").then((value) => JSON.parse(value) as PreviewMarker)
+      const marker = await readFile(markerPath, "utf8")
+        .then((value) => JSON.parse(value) as PreviewMarker)
         .catch(() => undefined);
       if (
         marker?.cacheKey !== cacheKey ||
         marker.previewerVersion !== SUBTITLE_INTRO_PREVIEWER_VERSION ||
-        !Number.isFinite(marker.durationMs) || marker.durationMs <= 0
-      ) continue;
-      const outputFileName = marker.outputFileName === "intro-bgm-subtitle-preview-480p.mp4"
-        ? marker.outputFileName : "intro-subtitle-preview-480p.mp4";
+        !Number.isFinite(marker.durationMs) ||
+        marker.durationMs <= 0
+      )
+        continue;
+      const outputFileName =
+        marker.outputFileName === "intro-bgm-subtitle-preview-480p.mp4"
+          ? marker.outputFileName
+          : "intro-subtitle-preview-480p.mp4";
       const outputPath = assertWithinRoot(directory, path.join(directory, outputFileName));
       if (await isFile(outputPath)) return outputPath;
     }
@@ -209,6 +214,8 @@ export class SubtitlePreviewService {
   private cacheDirectories(cacheKey: string): string[] {
     const safeKey = assertSafeHexId(cacheKey, "Subtitle preview cache key");
     const roots = [this.cacheRoot, ...(this.placement?.readRoots() ?? [])];
-    return [...new Set(roots.map((root) => path.resolve(root)))].map((root) => assertWithinRoot(root, path.join(root, safeKey)));
+    return [...new Set(roots.map((root) => path.resolve(root)))].map((root) =>
+      assertWithinRoot(root, path.join(root, safeKey)),
+    );
   }
 }

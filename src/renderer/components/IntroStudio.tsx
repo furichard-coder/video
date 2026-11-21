@@ -178,13 +178,16 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
             delete next[item.id];
             return next;
           });
-          void ensureIntroThumbnail(item.assetId, item.inMs, item.outMs).then((result) => {
-            setIntroThumbnails((current) => ({ ...current, [item.id]: { signature, url: result.url } }));
-          }).catch(() => {
-            setThumbnailErrors((current) => ({ ...current, [item.id]: true }));
-          }).finally(() => {
-            thumbnailRequestsRef.current.delete(signature);
-          });
+          void ensureIntroThumbnail(item.assetId, item.inMs, item.outMs)
+            .then((result) => {
+              setIntroThumbnails((current) => ({ ...current, [item.id]: { signature, url: result.url } }));
+            })
+            .catch(() => {
+              setThumbnailErrors((current) => ({ ...current, [item.id]: true }));
+            })
+            .finally(() => {
+              thumbnailRequestsRef.current.delete(signature);
+            });
         });
       },
       { rootMargin: "160px 0px" },
@@ -690,12 +693,22 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
       previousInsertionBgmRef.current === selectedInsertionBgm.id && selectedInsertionAudio.continuousWithPrevious;
     bgm.volume = Math.max(0, Math.min(1, (selected?.insertionAudio?.bgmVolumePercent ?? 28) / 100));
     if (!continuous) {
-      try { bgm.currentTime = (selectedInsertionAudio.bgmSourcePositionMs ?? selectedInsertionBgm.sourceInMs) / 1000; }
-      catch { /* metadata is still loading */ }
+      try {
+        bgm.currentTime = (selectedInsertionAudio.bgmSourcePositionMs ?? selectedInsertionBgm.sourceInMs) / 1000;
+      } catch {
+        /* metadata is still loading */
+      }
     }
     previousInsertionBgmRef.current = selectedInsertionBgm.id;
     void bgm.play().catch(() => undefined);
-  }, [selected?.id, selectedInsertionAudio?.bgmEnabled, selectedInsertionAudio?.continuousWithPrevious, selectedInsertionBgm?.id, previewPlaying, preview?.url]);
+  }, [
+    selected?.id,
+    selectedInsertionAudio?.bgmEnabled,
+    selectedInsertionAudio?.continuousWithPrevious,
+    selectedInsertionBgm?.id,
+    previewPlaying,
+    preview?.url,
+  ]);
 
   const moveSuggestion = async (index: number, offset: -1 | 1) => {
     const target = index + offset;
@@ -1112,7 +1125,8 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                   const asset = assetById.get(item.assetId);
                   const thumbnailSignature = introThumbnailSignature(item);
                   const thumbnailState = introThumbnails[item.id];
-                  const thumbnailUrl = thumbnailState?.signature === thumbnailSignature ? thumbnailState.url : undefined;
+                  const thumbnailUrl =
+                    thumbnailState?.signature === thumbnailSignature ? thumbnailState.url : undefined;
                   const audioState = insertionAudioByInstance.get(item.id);
                   const detailsExpanded = expandedSegmentId === item.id;
                   const moreOpen = moreMenuSegmentId === item.id;
@@ -1160,7 +1174,11 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                               onError={() => setThumbnailErrors((current) => ({ ...current, [item.id]: true }))}
                             />
                           ) : thumbnailErrors[item.id] ? (
-                            <span className="intro-thumbnail-error" role="status" aria-label={`片頭第 ${index + 1} 段縮圖載入失敗`}>
+                            <span
+                              className="intro-thumbnail-error"
+                              role="status"
+                              aria-label={`片頭第 ${index + 1} 段縮圖載入失敗`}
+                            >
                               !
                             </span>
                           ) : (
@@ -1195,7 +1213,8 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                                 {item.origin === "MANUAL" ? "手動片段" : `精彩分數 ${item.score}`}
                                 {item.storyRelevanceScore !== undefined
                                   ? ` · 故事相關 ${item.storyRelevanceScore}`
-                                  : ""} · {item.reasons.join("／")}
+                                  : ""}{" "}
+                                · {item.reasons.join("／")}
                               </small>
                             </div>
                           </button>
@@ -1203,7 +1222,11 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                             {formatDuration(item.outMs - item.inMs)}
                           </span>
                         </div>
-                        <div className="intro-segment-toolbar" role="toolbar" aria-label={`片頭第 ${index + 1} 段快速操作`}>
+                        <div
+                          className="intro-segment-toolbar"
+                          role="toolbar"
+                          aria-label={`片頭第 ${index + 1} 段快速操作`}
+                        >
                           <button
                             className={`intro-icon-action ${item.id === selectedId ? "is-selected" : ""}`}
                             type="button"
@@ -1231,7 +1254,11 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                           <button
                             className={`intro-icon-action ${audioState?.hasSourceAudio && audioState.gates.original ? "is-enabled" : "is-disabled"}`}
                             type="button"
-                            data-tooltip={audioState?.hasSourceAudio ? "原始音訊｜開啟設定並確認此片段原音" : "原始音訊｜此素材沒有可用原音"}
+                            data-tooltip={
+                              audioState?.hasSourceAudio
+                                ? "原始音訊｜開啟設定並確認此片段原音"
+                                : "原始音訊｜此素材沒有可用原音"
+                            }
                             aria-label={`${item.fileName} 原始音訊${audioState?.hasSourceAudio && audioState.gates.original ? "已開啟" : "未開啟"}`}
                             disabled={!audioState?.hasSourceAudio}
                             onClick={() => setExpandedSegmentId(item.id)}
@@ -1250,7 +1277,11 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                           <button
                             className={`intro-icon-action ${audioState?.sfxEnabled ? "is-enabled" : "is-disabled"}`}
                             type="button"
-                            data-tooltip={asset?.kind === "IMAGE" ? `效果音｜${audioState?.sfxEnabled ? "相機快門已開啟" : "開啟設定以使用快門聲"}` : "效果音｜影片片段目前沒有照片快門 SFX"}
+                            data-tooltip={
+                              asset?.kind === "IMAGE"
+                                ? `效果音｜${audioState?.sfxEnabled ? "相機快門已開啟" : "開啟設定以使用快門聲"}`
+                                : "效果音｜影片片段目前沒有照片快門 SFX"
+                            }
                             aria-label={`${item.fileName} 效果音${audioState?.sfxEnabled ? "已開啟" : "未開啟"}`}
                             disabled={asset?.kind !== "IMAGE"}
                             onClick={() => setExpandedSegmentId(item.id)}
@@ -1280,14 +1311,37 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                             </button>
                             {moreOpen && (
                               <div id={`intro-more-${item.id}`} className="intro-more-menu" role="menu">
-                                <button role="menuitem" type="button" disabled={index === 0} onClick={() => { setMoreMenuSegmentId(undefined); void moveSuggestion(index, -1); }}>
+                                <button
+                                  role="menuitem"
+                                  type="button"
+                                  disabled={index === 0}
+                                  onClick={() => {
+                                    setMoreMenuSegmentId(undefined);
+                                    void moveSuggestion(index, -1);
+                                  }}
+                                >
                                   ↑ 往前一個順位
                                 </button>
-                                <button role="menuitem" type="button" disabled={index === suggestions.length - 1} onClick={() => { setMoreMenuSegmentId(undefined); void moveSuggestion(index, 1); }}>
+                                <button
+                                  role="menuitem"
+                                  type="button"
+                                  disabled={index === suggestions.length - 1}
+                                  onClick={() => {
+                                    setMoreMenuSegmentId(undefined);
+                                    void moveSuggestion(index, 1);
+                                  }}
+                                >
                                   ↓ 往後一個順位
                                 </button>
                                 {onOpenMaterialAnalysis && asset && (
-                                  <button role="menuitem" type="button" onClick={() => { setMoreMenuSegmentId(undefined); onOpenMaterialAnalysis(asset); }}>
+                                  <button
+                                    role="menuitem"
+                                    type="button"
+                                    onClick={() => {
+                                      setMoreMenuSegmentId(undefined);
+                                      onOpenMaterialAnalysis(asset);
+                                    }}
+                                  >
                                     ✦ 影像分析與字幕
                                   </button>
                                 )}
@@ -1307,7 +1361,9 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                                 minimumRangeMs={INTRO_EDIT_MIN_SEGMENT_MS}
                                 durationMs={durationMs}
                                 range={{ inMs: item.inMs, outMs: item.outMs }}
-                                onChange={(range, changed) => updateSuggestion(item.id, range.inMs, range.outMs, changed)}
+                                onChange={(range, changed) =>
+                                  updateSuggestion(item.id, range.inMs, range.outMs, changed)
+                                }
                                 onCommit={(range) => void persistSuggestionRange(item.id, range.inMs, range.outMs)}
                               />
                             )}
@@ -1317,7 +1373,11 @@ export function IntroStudio({ project, videos, onClose, onProjectUpdated, onOpen
                                 aria-label={`${item.fileName}片段秒數`}
                                 type="number"
                                 min={INTRO_EDIT_MIN_SEGMENT_MS / 1000}
-                                max={asset?.kind === "VIDEO" ? (asset.mediaInfo?.durationMs ?? item.outMs) / 1000 : undefined}
+                                max={
+                                  asset?.kind === "VIDEO"
+                                    ? (asset.mediaInfo?.durationMs ?? item.outMs) / 1000
+                                    : undefined
+                                }
                                 step="0.1"
                                 value={((item.outMs - item.inMs) / 1000).toFixed(1)}
                                 onChange={(event) => changeSegmentSeconds(item, Number(event.target.value))}

@@ -135,7 +135,10 @@ export function buildSubtitleSamplingPlan(input: SubtitleSamplingPlanInput): Sub
   const batchSize = clampInteger(input.batchSize ?? 20, MIN_BATCH_SIZE, MAX_BATCH_SIZE, 20);
   const hammingThreshold = clampInteger(input.hammingThreshold ?? 8, 0, 256, 8);
   const segments = [...input.segments]
-    .filter((segment) => Number.isFinite(segment.startMs) && Number.isFinite(segment.endMs) && segment.endMs > segment.startMs)
+    .filter(
+      (segment) =>
+        Number.isFinite(segment.startMs) && Number.isFinite(segment.endMs) && segment.endMs > segment.startMs,
+    )
     .sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs || a.type.localeCompare(b.type));
 
   const raw: RawSample[] = [];
@@ -159,7 +162,9 @@ export function buildSubtitleSamplingPlan(input: SubtitleSamplingPlanInput): Sub
     scene += 1;
   }
 
-  raw.sort((a, b) => a.timeMs - b.timeMs || a.source.localeCompare(b.source) || a.segmentType.localeCompare(b.segmentType));
+  raw.sort(
+    (a, b) => a.timeMs - b.timeMs || a.source.localeCompare(b.source) || a.segmentType.localeCompare(b.segmentType),
+  );
   const hashes = input.perceptualHashesByTimeMs ?? {};
   const cachedHashes = input.cachedHashesByTimeMs ?? {};
   const unique: SubtitleSamplingSample[] = [];

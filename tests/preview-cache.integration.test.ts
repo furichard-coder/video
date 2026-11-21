@@ -71,11 +71,25 @@ beforeAll(async () => {
     videoPath,
   ]);
   await runProcess("ffmpeg", [
-    "-hide_banner", "-loglevel", "error",
-    "-f", "lavfi", "-i", "color=c=black:s=320x180:r=30:d=0.35",
-    "-f", "lavfi", "-i", "color=c=red:s=320x180:r=30:d=0.65",
-    "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0,format=yuv420p[v]",
-    "-map", "[v]", "-c:v", "libx264", "-y", blackLeadVideoPath,
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "color=c=black:s=320x180:r=30:d=0.35",
+    "-f",
+    "lavfi",
+    "-i",
+    "color=c=red:s=320x180:r=30:d=0.65",
+    "-filter_complex",
+    "[0:v][1:v]concat=n=2:v=1:a=0,format=yuv420p[v]",
+    "-map",
+    "[v]",
+    "-c:v",
+    "libx264",
+    "-y",
+    blackLeadVideoPath,
   ]);
   await runProcess("ffmpeg", [
     "-hide_banner",
@@ -242,8 +256,18 @@ describe("preview cache integration", () => {
     expect(key).toBeTruthy();
     const thumbnail = await previews.resolveIntroThumbnailExisting(asset.id, key!);
     const measured = await runProcess("ffmpeg", [
-      "-hide_banner", "-loglevel", "info", "-i", thumbnail,
-      "-vf", "signalstats,metadata=print:key=lavfi.signalstats.YAVG", "-frames:v", "1", "-f", "null", "-",
+      "-hide_banner",
+      "-loglevel",
+      "info",
+      "-i",
+      thumbnail,
+      "-vf",
+      "signalstats,metadata=print:key=lavfi.signalstats.YAVG",
+      "-frames:v",
+      "1",
+      "-f",
+      "null",
+      "-",
     ]);
     const yAverage = Number(/lavfi\.signalstats\.YAVG=([0-9.]+)/.exec(measured.stderr)?.[1]);
     expect(yAverage).toBeGreaterThan(30);

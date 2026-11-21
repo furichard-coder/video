@@ -52,7 +52,14 @@ const MAIN_START_TRANSITIONS = new Set<MainStartCardTransition>(["DISSOLVE", "FA
 
 function defaultRenderTempLocations(): RenderTempLocationConfig[] {
   return [
-    { id: "primary", path: "E:\\temp\\SceneryWalker", role: "PRIMARY", enabled: true, allowFallback: true, reserveBytes: 1 * 1024 ** 3 },
+    {
+      id: "primary",
+      path: "E:\\temp\\SceneryWalker",
+      role: "PRIMARY",
+      enabled: true,
+      allowFallback: true,
+      reserveBytes: 1 * 1024 ** 3,
+    },
     {
       id: "fallback",
       path: path.join(os.tmpdir(), "SceneryWalker"),
@@ -64,10 +71,7 @@ function defaultRenderTempLocations(): RenderTempLocationConfig[] {
   ];
 }
 
-function sanitizeTempLocations(
-  value: unknown,
-  legacyPrimaryPath?: string,
-): RenderTempLocationConfig[] {
+function sanitizeTempLocations(value: unknown, legacyPrimaryPath?: string): RenderTempLocationConfig[] {
   const source = Array.isArray(value) && value.length ? value : defaultRenderTempLocations();
   const locations: RenderTempLocationConfig[] = [];
   for (const entry of source) {
@@ -79,7 +83,8 @@ function sanitizeTempLocations(
       typeof item.path !== "string" ||
       !path.isAbsolute(item.path) ||
       (item.role !== "PRIMARY" && item.role !== "FALLBACK")
-    ) continue;
+    )
+      continue;
     const resolvedPath = path.resolve(item.path);
     const volume = path.parse(resolvedPath).root.toUpperCase();
     const fallbackReserve = volume === "C:\\" ? 2 * 1024 ** 3 : 1 * 1024 ** 3;
@@ -88,16 +93,17 @@ function sanitizeTempLocations(
     // project uses E:\temp rather than the later factory subdirectory; an
     // arbitrary user-selected 20/30 GiB reserve must remain untouched.
     const normalizedPath = resolvedPath.toLowerCase();
-    const legacyPrimary = item.role === "PRIMARY" &&
+    const legacyPrimary =
+      item.role === "PRIMARY" &&
       (normalizedPath === path.resolve("E:\\temp").toLowerCase() ||
         normalizedPath === path.resolve("E:\\temp\\SceneryWalker").toLowerCase()) &&
       storedReserve === 20 * 1024 ** 3;
-    const legacyFallback = item.role === "FALLBACK" &&
+    const legacyFallback =
+      item.role === "FALLBACK" &&
       normalizedPath === path.resolve(path.join(os.tmpdir(), "SceneryWalker")).toLowerCase() &&
       storedReserve === 30 * 1024 ** 3;
-    const reserveBytes = storedReserve === undefined || legacyPrimary || legacyFallback
-      ? fallbackReserve
-      : storedReserve;
+    const reserveBytes =
+      storedReserve === undefined || legacyPrimary || legacyFallback ? fallbackReserve : storedReserve;
     locations.push({
       id: item.id,
       path: resolvedPath,
@@ -128,11 +134,14 @@ function sanitizeTempLocations(
 }
 
 function validateTempLocations(locations: unknown): RenderTempLocationConfig[] {
-  if (!Array.isArray(locations) || locations.length < 1 || locations.length > 8) throw new Error("Render TEMP 位置數量無效。");
+  if (!Array.isArray(locations) || locations.length < 1 || locations.length > 8)
+    throw new Error("Render TEMP 位置數量無效。");
   const normalized = sanitizeTempLocations(locations);
   if (normalized.length !== locations.length) throw new Error("Render TEMP 位置格式或路徑無效。");
-  if (normalized.filter((item) => item.role === "PRIMARY").length !== 1) throw new Error("必須指定一個主要 TEMP 磁碟。");
-  if (new Set(normalized.map((item) => item.id)).size !== normalized.length) throw new Error("Render TEMP 位置 ID 重複。");
+  if (normalized.filter((item) => item.role === "PRIMARY").length !== 1)
+    throw new Error("必須指定一個主要 TEMP 磁碟。");
+  if (new Set(normalized.map((item) => item.id)).size !== normalized.length)
+    throw new Error("Render TEMP 位置 ID 重複。");
   if (new Set(normalized.map((item) => item.path.toLocaleLowerCase())).size !== normalized.length)
     throw new Error("Render TEMP 位置不可重複。");
   return normalized;
@@ -411,7 +420,9 @@ function sanitize(value: unknown): UserPreferences {
       highSpeedMode:
         typeof render?.highSpeedMode === "boolean" ? render.highSpeedMode : fallback.renderDefaults.highSpeedMode,
       resourceProfile:
-        render?.resourceProfile === "LOW_DISK" || render?.resourceProfile === "BALANCED" || render?.resourceProfile === "HIGH_SPEED"
+        render?.resourceProfile === "LOW_DISK" ||
+        render?.resourceProfile === "BALANCED" ||
+        render?.resourceProfile === "HIGH_SPEED"
           ? render.resourceProfile
           : render?.highSpeedMode === true
             ? "HIGH_SPEED"
@@ -419,13 +430,17 @@ function sanitize(value: unknown): UserPreferences {
               ? "BALANCED"
               : fallback.renderDefaults.resourceProfile,
       maximumRenderRamGiB:
-        Number.isFinite(render?.maximumRenderRamGiB) && Number(render?.maximumRenderRamGiB) >= 4 && Number(render?.maximumRenderRamGiB) <= 64
+        Number.isFinite(render?.maximumRenderRamGiB) &&
+        Number(render?.maximumRenderRamGiB) >= 4 &&
+        Number(render?.maximumRenderRamGiB) <= 64
           ? Number(render?.maximumRenderRamGiB)
           : fallback.renderDefaults.maximumRenderRamGiB,
       maximumRenderTempGiB:
         render?.maximumRenderTempGiB === "AUTO"
           ? "AUTO"
-          : Number.isFinite(render?.maximumRenderTempGiB) && Number(render?.maximumRenderTempGiB) >= 20 && Number(render?.maximumRenderTempGiB) <= 4096
+          : Number.isFinite(render?.maximumRenderTempGiB) &&
+              Number(render?.maximumRenderTempGiB) >= 20 &&
+              Number(render?.maximumRenderTempGiB) <= 4096
             ? Number(render?.maximumRenderTempGiB)
             : fallback.renderDefaults.maximumRenderTempGiB,
       youtubeFullAutoUpload:
@@ -570,7 +585,11 @@ export class UserPreferencesStore {
           next.renderDefaults.lowMemorySegmented = Boolean(render.lowMemorySegmented);
         if (render.highSpeedMode !== undefined) next.renderDefaults.highSpeedMode = Boolean(render.highSpeedMode);
         if (render.resourceProfile !== undefined) {
-          if (render.resourceProfile !== "LOW_DISK" && render.resourceProfile !== "BALANCED" && render.resourceProfile !== "HIGH_SPEED")
+          if (
+            render.resourceProfile !== "LOW_DISK" &&
+            render.resourceProfile !== "BALANCED" &&
+            render.resourceProfile !== "HIGH_SPEED"
+          )
             throw new Error("轉檔資源模式無效。");
           next.renderDefaults.resourceProfile = render.resourceProfile;
         }
@@ -602,7 +621,11 @@ export class UserPreferencesStore {
           next.renderDefaults.tempLocations = locations;
         }
         if (render.tempLocationSelection !== undefined) {
-          if (render.tempLocationSelection !== "AUTO" && render.tempLocationSelection !== "PRIMARY" && render.tempLocationSelection !== "FALLBACK")
+          if (
+            render.tempLocationSelection !== "AUTO" &&
+            render.tempLocationSelection !== "PRIMARY" &&
+            render.tempLocationSelection !== "FALLBACK"
+          )
             throw new Error("Render TEMP 選址模式無效。");
           next.renderDefaults.tempLocationSelection = render.tempLocationSelection;
         }

@@ -233,13 +233,18 @@ const api: AppApi & {
   clearPublishProgressListeners: () => ipcRenderer.removeAllListeners("publish:progress"),
   generateAiSubtitles: (options: AiSubtitleGenerationOptions) => ipcRenderer.invoke("subtitle:ai-generate", options),
   getSubtitleAnalysisVideo: () => ipcRenderer.invoke("subtitle:analysis-video:get"),
-  getSubtitleVisualPreflight: (options: SubtitleVisualAnalysisOptions) => ipcRenderer.invoke("subtitle:visual-preflight", options),
-  refreshAiModels: (provider: "OPENAI" | "GEMINI", accountId?: string) => ipcRenderer.invoke("ai:models:refresh", provider, accountId),
-  testAiVision: (provider: "OPENAI" | "GEMINI", accountId?: string, modelId?: string) => ipcRenderer.invoke("ai:vision:test", provider, accountId, modelId),
+  getSubtitleVisualPreflight: (options: SubtitleVisualAnalysisOptions) =>
+    ipcRenderer.invoke("subtitle:visual-preflight", options),
+  refreshAiModels: (provider: "OPENAI" | "GEMINI", accountId?: string) =>
+    ipcRenderer.invoke("ai:models:refresh", provider, accountId),
+  testAiVision: (provider: "OPENAI" | "GEMINI", accountId?: string, modelId?: string) =>
+    ipcRenderer.invoke("ai:vision:test", provider, accountId, modelId),
   getStandaloneSubtitleWorkspace: () => ipcRenderer.invoke("subtitle:workspace:get"),
   importStandaloneSubtitleWorkspaceFromSrt: () => ipcRenderer.invoke("subtitle:workspace:import-srt"),
-  saveStandaloneSubtitleWorkspace: (id: string, cues: SubtitleCue[]) => ipcRenderer.invoke("subtitle:workspace:save", id, cues),
-  exportStandaloneSubtitleWorkspace: (id: string, token: string) => ipcRenderer.invoke("subtitle:workspace:export", id, token),
+  saveStandaloneSubtitleWorkspace: (id: string, cues: SubtitleCue[]) =>
+    ipcRenderer.invoke("subtitle:workspace:save", id, cues),
+  exportStandaloneSubtitleWorkspace: (id: string, token: string) =>
+    ipcRenderer.invoke("subtitle:workspace:export", id, token),
   getSubtitleEvidenceFrame: (id: string, time: number) => ipcRenderer.invoke("subtitle:workspace:frame", id, time),
   getSubtitleAiCheckJob: () => ipcRenderer.invoke("subtitle:ai-check:get"),
   prepareProjectSubtitleAiCheck: () => ipcRenderer.invoke("subtitle:project-ai-check:prepare"),
@@ -261,7 +266,8 @@ const api: AppApi & {
   pauseSubtitleVisualAnalysis: () => ipcRenderer.invoke("subtitle:visual-job:pause"),
   resumeSubtitleVisualAnalysis: () => ipcRenderer.invoke("subtitle:visual-job:resume"),
   cancelSubtitleVisualAnalysis: () => ipcRenderer.invoke("subtitle:visual-job:cancel"),
-  regenerateSubtitleVisualCue: (request: SubtitleVisualCueRegenerateRequest) => ipcRenderer.invoke("subtitle:visual-cue:regenerate", request),
+  regenerateSubtitleVisualCue: (request: SubtitleVisualCueRegenerateRequest) =>
+    ipcRenderer.invoke("subtitle:visual-cue:regenerate", request),
   onSubtitleVisualAnalysisProgress: (callback: (progress: SubtitleVisualAnalysisProgress) => void) => {
     ipcRenderer.on("subtitle:visual-job:progress", (_event, progress: SubtitleVisualAnalysisProgress) =>
       callback(progress),

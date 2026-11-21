@@ -2,7 +2,7 @@ import type { SubtitleVisionDraft } from "./subtitle-vision-orchestrator";
 
 export function mergeSubtitleVisionDrafts(
   drafts: readonly SubtitleVisionDraft[],
-  options: { durationMs: number; maxCharsPerLine?: number; mergeGapMs?: number } ,
+  options: { durationMs: number; maxCharsPerLine?: number; mergeGapMs?: number },
 ): SubtitleVisionDraft[] {
   const maxChars = Math.max(6, Math.min(60, Math.round(options.maxCharsPerLine ?? 60)));
   const gap = Math.max(0, Math.min(5_000, Math.round(options.mergeGapMs ?? 1_200)));

@@ -17,17 +17,43 @@ it.skipIf(process.platform !== "win32" || !existsSync(eTemp))(
       const segments = [path.join(eRoot, "one.mkv"), path.join(cRoot, "two.mkv")];
       for (const [index, segment] of segments.entries()) {
         await runProcess("ffmpeg", [
-          "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-f",
+          "lavfi",
+          "-i",
           `color=c=${index ? "blue" : "red"}:s=160x90:r=30:d=0.5`,
-          "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", "-y", segment,
+          "-c:v",
+          "libx264",
+          "-pix_fmt",
+          "yuv420p",
+          "-an",
+          "-y",
+          segment,
         ]);
       }
       const listPath = path.join(cRoot, "concat.txt");
       const outputPath = path.join(cRoot, "joined.mkv");
-      await writeFile(listPath, segments.map((segment) => `file '${segment.replaceAll("\\", "/")}'`).join("\n"), "utf8");
+      await writeFile(
+        listPath,
+        segments.map((segment) => `file '${segment.replaceAll("\\", "/")}'`).join("\n"),
+        "utf8",
+      );
       await runProcess("ffmpeg", [
-        "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listPath,
-        "-c", "copy", "-y", outputPath,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        listPath,
+        "-c",
+        "copy",
+        "-y",
+        outputPath,
       ]);
       const info = await new MediaProbe().probe(outputPath);
       expect(info.videoCodec).toBe("h264");
@@ -35,9 +61,14 @@ it.skipIf(process.platform !== "win32" || !existsSync(eTemp))(
       expect(await readFile(segments[0])).not.toHaveLength(0);
       expect(await readFile(segments[1])).not.toHaveLength(0);
     } finally {
-      for (const [created, parent] of [[eRoot, eTemp], [cRoot, os.tmpdir()]]) {
-        if (path.dirname(path.resolve(created)).toLowerCase() !== path.resolve(parent).toLowerCase() ||
-            !path.basename(created).startsWith("scenerywalker-v081-test-")) {
+      for (const [created, parent] of [
+        [eRoot, eTemp],
+        [cRoot, os.tmpdir()],
+      ]) {
+        if (
+          path.dirname(path.resolve(created)).toLowerCase() !== path.resolve(parent).toLowerCase() ||
+          !path.basename(created).startsWith("scenerywalker-v081-test-")
+        ) {
           throw new Error("Temporary test root escaped its dedicated parent; refusing cleanup.");
         }
         await rm(created, { recursive: true, force: true });

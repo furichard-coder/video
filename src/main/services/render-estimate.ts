@@ -182,17 +182,18 @@ function simulateSegmentStages(
   let intermediateWorkMs = 0;
   while (current.length > maximumInputs) {
     const next: typeof current = [];
-    const groups: typeof current[] = [];
-    for (let index = 0; index < current.length; index += maximumInputs) groups.push(current.slice(index, index + maximumInputs));
+    const groups: (typeof current)[] = [];
+    for (let index = 0; index < current.length; index += maximumInputs)
+      groups.push(current.slice(index, index + maximumInputs));
     for (let waveStart = 0; waveStart < groups.length; waveStart += Math.max(1, parallelJobs)) {
       const wave = groups.slice(waveStart, waveStart + Math.max(1, parallelJobs));
       const outputs = wave.map((group) => {
-      const durationMs = mergedDurationMs(
-        group.map((item) => item.durationMs),
-        transitionMs,
-      );
-      const bytes = estimatedIntermediateBytes(durationMs, resolution, resourceProfile);
-      return { group, durationMs, bytes };
+        const durationMs = mergedDurationMs(
+          group.map((item) => item.durationMs),
+          transitionMs,
+        );
+        const bytes = estimatedIntermediateBytes(durationMs, resolution, resourceProfile);
+        return { group, durationMs, bytes };
       });
       const waveBytes = outputs.reduce((sum, item) => sum + item.bytes, 0);
       concurrentPartialPeakBytes = Math.max(concurrentPartialPeakBytes, waveBytes);
@@ -268,7 +269,14 @@ function buildModeEstimate(
         parallelJobs,
         resourceProfile,
       )
-    : { intermediateJobCount: 0, intermediateWorkMs: 0, peakIntermediateBytes: 0, finalIntermediateBytes: 0, concurrentPartialPeakBytes: 0, finalInputCount: inputs.length };
+    : {
+        intermediateJobCount: 0,
+        intermediateWorkMs: 0,
+        peakIntermediateBytes: 0,
+        finalIntermediateBytes: 0,
+        concurrentPartialPeakBytes: 0,
+        finalInputCount: inputs.length,
+      };
   // The real grouper normally caps batches at six; a generated Main-start card
   // may keep both adjacent clips in the same boundary batch, making seven the
   // conservative peak for that one case.
@@ -471,7 +479,11 @@ export function buildRenderEstimate(
     Math.max(1, totalInputDuration);
   const warning = selected.warnings.join(" ") || undefined;
   const safetyMarginBytes = Math.ceil(
-    Math.max(MINIMUM_RENDER_SAFETY_MARGIN_BYTES, selected.estimatedTemporaryBytes * 0.2, Math.max(0, diskCapacityBytes) * RENDER_SAFETY_MARGIN_DISK_RATIO),
+    Math.max(
+      MINIMUM_RENDER_SAFETY_MARGIN_BYTES,
+      selected.estimatedTemporaryBytes * 0.2,
+      Math.max(0, diskCapacityBytes) * RENDER_SAFETY_MARGIN_DISK_RATIO,
+    ),
   );
   const selectedDisk = selected.diskBreakdown;
   const requiredFreeBytes = selectedDisk?.requiredPeakFreeBytes ?? selected.estimatedTemporaryBytes + safetyMarginBytes;

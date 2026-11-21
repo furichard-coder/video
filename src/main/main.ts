@@ -130,10 +130,13 @@ function createWindow(): BrowserWindow {
   else void window.loadFile(path.join(__dirname, "../../dist/index.html"));
 
   if (automated) {
-    const timer = setTimeout(() => {
-      console.error("AUTOMATION_TIMEOUT");
-      app.exit(1);
-    }, subtitleReviewQa ? 110_000 : subtitleUiQa ? 45_000 : 20_000);
+    const timer = setTimeout(
+      () => {
+        console.error("AUTOMATION_TIMEOUT");
+        app.exit(1);
+      },
+      subtitleReviewQa ? 110_000 : subtitleUiQa ? 45_000 : 20_000,
+    );
     window.webContents.once("did-finish-load", () => {
       setTimeout(
         async () => {
@@ -177,11 +180,18 @@ function createWindow(): BrowserWindow {
                   atBottom: body.scrollHeight - body.clientHeight - body.scrollTop <= 4,
                 };
               })()`);
-              if (initial.rowCount !== 63 || initial.scrollHeight <= initial.clientHeight || !initial.keyboardEndHandled || !afterKeyboardEnd.atBottom) {
+              if (
+                initial.rowCount !== 63 ||
+                initial.scrollHeight <= initial.clientHeight ||
+                !initial.keyboardEndHandled ||
+                !afterKeyboardEnd.atBottom
+              ) {
                 throw new Error(`SUBTITLE_UI_QA_SCROLL_FAILED ${JSON.stringify({ initial, afterKeyboardEnd })}`);
               }
               await new Promise((resolve) => setTimeout(resolve, 250));
-              await window.webContents.executeJavaScript(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+              await window.webContents.executeJavaScript(
+                `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
+              );
               if (screenshotPath) {
                 await mkdir(path.dirname(screenshotPath), { recursive: true });
                 const reviewImage = await window.capturePage();
@@ -212,7 +222,9 @@ function createWindow(): BrowserWindow {
               if (!result.aiSettingsOpened) throw new Error(`SUBTITLE_UI_QA_SETTINGS_FAILED ${JSON.stringify(result)}`);
               if (screenshotPath) {
                 await new Promise((resolve) => setTimeout(resolve, 250));
-                await window.webContents.executeJavaScript(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+                await window.webContents.executeJavaScript(
+                  `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
+                );
                 const settingsImage = await window.capturePage();
                 await writeFile(screenshotPath.replace(/\.png$/i, "-settings.png"), settingsImage.toPNG());
               }
@@ -317,10 +329,11 @@ void app.whenReady().then(async () => {
     undefined,
     {
       readRoots: () => cachePlacement.readRoots("previews"),
-      chooseWriteRoot: (variant) => cachePlacement.chooseWriteRoot(
-        "previews",
-        variant === "VIDEO_PROXY" ? 1024 ** 3 : variant === "VIDEO_CLIP_PROXY" ? 256 * 1024 ** 2 : 16 * 1024 ** 2,
-      ),
+      chooseWriteRoot: (variant) =>
+        cachePlacement.chooseWriteRoot(
+          "previews",
+          variant === "VIDEO_PROXY" ? 1024 ** 3 : variant === "VIDEO_CLIP_PROXY" ? 256 * 1024 ** 2 : 16 * 1024 ** 2,
+        ),
     },
   );
   await previews.initialize();

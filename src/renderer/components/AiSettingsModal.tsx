@@ -147,7 +147,11 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
     provider === "OPENAI" ? setVisionTesting(true) : setGeminiVisionTesting(true);
     setError(undefined);
     try {
-      const result = await testModel(provider, provider === "OPENAI" ? selected?.id : undefined, provider === "OPENAI" ? form.visionModel : geminiModel);
+      const result = await testModel(
+        provider,
+        provider === "OPENAI" ? selected?.id : undefined,
+        provider === "OPENAI" ? form.visionModel : geminiModel,
+      );
       setVisionTestResult(result);
       if (result.ok && provider === "OPENAI" && modelCatalog)
         setModelCatalog({
@@ -523,14 +527,22 @@ export function AiSettingsModal({ project, onProjectUpdated, onClose }: Props) {
                     </div>
                     <small className="ai-live-test-note">
                       清單只是 API 可見的候選模型。只有送出最小圖片與結構化 JSON 請求成功後，才會標記為已測試；Auto
-                      會優先採用已測試的相容模型。這裡的畫面分析使用 OpenAI API；ChatGPT 網站或 Codex 登入不等於 API 金鑰與 API 額度。
+                      會優先採用已測試的相容模型。這裡的畫面分析使用 OpenAI API；ChatGPT 網站或 Codex 登入不等於 API
+                      金鑰與 API 額度。
                       {modelCatalog && <span> 最後更新：{new Date(modelCatalog.updatedAt).toLocaleString()}。</span>}
                       更換模型後請保存帳號，正式分析才會使用新選擇。
                     </small>
-                    {visionTestResult && <div role="status" className="ai-live-test-note">
-                      {visionTestResult.provider}｜模型 {visionTestResult.modelId ?? "未選出"}｜延遲 {visionTestResult.latencyMs} ms<br />
-                      認證 {visionTestResult.authentication ? "✓" : "本次未驗證"}｜模型存取 {visionTestResult.modelAccess ? "✓" : "本次未驗證"}｜圖片 {visionTestResult.visionSupported ? "✓" : "本次未驗證"}｜JSON {visionTestResult.structuredOutputSupported ? "✓" : "本次未驗證"}
-                    </div>}
+                    {visionTestResult && (
+                      <div role="status" className="ai-live-test-note">
+                        {visionTestResult.provider}｜模型 {visionTestResult.modelId ?? "未選出"}｜延遲{" "}
+                        {visionTestResult.latencyMs} ms
+                        <br />
+                        認證 {visionTestResult.authentication ? "✓" : "本次未驗證"}｜模型存取{" "}
+                        {visionTestResult.modelAccess ? "✓" : "本次未驗證"}｜圖片{" "}
+                        {visionTestResult.visionSupported ? "✓" : "本次未驗證"}｜JSON{" "}
+                        {visionTestResult.structuredOutputSupported ? "✓" : "本次未驗證"}
+                      </div>
+                    )}
                     <label>
                       語音轉錄模型
                       <select

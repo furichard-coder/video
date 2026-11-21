@@ -8,17 +8,17 @@
 
 ## Reproduced 656.1 GiB estimate
 
-| Contributor | v0.76 estimate |
-| --- | ---: |
-| Retained 4K intermediates | 444.978 GiB |
-| Concurrent partial estimate | 124.594 GiB |
-| Reusable picture/base-audio video master | 41.294 GiB |
-| Audio temporary | 2.104 GiB |
-| Final output | 39.690 GiB |
-| Mux overhead | 3.425 GiB |
-| Peak working estimate | 656.085 GiB |
-| Separate 20% safety reserve | 131.217 GiB |
-| Required free | 787.302 GiB |
+| Contributor                              | v0.76 estimate |
+| ---------------------------------------- | -------------: |
+| Retained 4K intermediates                |    444.978 GiB |
+| Concurrent partial estimate              |    124.594 GiB |
+| Reusable picture/base-audio video master |     41.294 GiB |
+| Audio temporary                          |      2.104 GiB |
+| Final output                             |     39.690 GiB |
+| Mux overhead                             |      3.425 GiB |
+| Peak working estimate                    |    656.085 GiB |
+| Separate 20% safety reserve              |    131.217 GiB |
+| Required free                            |    787.302 GiB |
 
 The value is reproducible from the real request. It is not a stale UI value. The primary causes are:
 
@@ -64,12 +64,12 @@ Use bounded 30–60 second samples before any 3–5 minute comparison. Prefer nu
 - Source: a local, read-only 4K benchmark fixture; SHA-256 before/after matched (unchanged). The private source path and fingerprint are omitted from this public note.
 - All runs used one job, the same source, isolated app-owned TEMP, a 20 GiB output hard cap, 3840x2160 NV12 scale/normalization, and `h264_qsv`. The recorded command template was: `ffmpeg -hide_banner -loglevel error -y -stream_loop -1 -i <source> -t 180 -vf fps=30000/1001,scale=3840:2160:flags=bicubic,format=nv12,setsar=1,settb=AVTB,setpts=PTS-STARTPTS -an -c:v h264_qsv -preset medium -global_quality 20 -b:v <rate> -maxrate <max> -bufsize <buf> -profile:v high -pix_fmt yuv420p -r 30000/1001 -map_metadata -1 -metadata:s:v:0 rotate=0 -progress <progress> -nostats <output>`.
 
-| Profile | Wall | fps / speed | Output | RAM peak | CPU mean | GPU decode counter | Result |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| v0.76 legacy 380 Mbps | 151.189 s | 36.07 / 1.20x | 8,076,448,958 B | 1,366,061,056 B | 18.50% | 65.78% | PASS |
-| v0.77 LOW_DISK 45 Mbps | 104.073 s | 52.42 / 1.75x | 1,033,237,450 B | 765,464,576 B | 26.88% | 44.42% | PASS |
-| v0.77 BALANCED 54.9 Mbps | 105.416 s | 51.59 / 1.72x | 1,203,410,311 B | 812,519,424 B | 26.30% | 42.87% | PASS |
-| v0.77 HIGH_SPEED 64.8 Mbps | 108.389 s | 50.01 / 1.67x | 1,258,498,150 B | 799,076,352 B | 25.11% | 42.03% | PASS |
+| Profile                    |      Wall |   fps / speed |          Output |        RAM peak | CPU mean | GPU decode counter | Result |
+| -------------------------- | --------: | ------------: | --------------: | --------------: | -------: | -----------------: | ------ |
+| v0.76 legacy 380 Mbps      | 151.189 s | 36.07 / 1.20x | 8,076,448,958 B | 1,366,061,056 B |   18.50% |             65.78% | PASS   |
+| v0.77 LOW_DISK 45 Mbps     | 104.073 s | 52.42 / 1.75x | 1,033,237,450 B |   765,464,576 B |   26.88% |             44.42% | PASS   |
+| v0.77 BALANCED 54.9 Mbps   | 105.416 s | 51.59 / 1.72x | 1,203,410,311 B |   812,519,424 B |   26.30% |             42.87% | PASS   |
+| v0.77 HIGH_SPEED 64.8 Mbps | 108.389 s | 50.01 / 1.67x | 1,258,498,150 B |   799,076,352 B |   25.11% |             42.03% | PASS   |
 
 - Relative to the legacy run, LOW_DISK reduced wall time 31.16% (throughput +45.27%), BALANCED reduced wall time 30.28% (throughput +43.42%), and HIGH_SPEED reduced wall time 28.31% (throughput +39.49%). Output size fell 87.21%, 85.10%, and 84.42%, respectively. All outputs probed as H.264/yuv420p/3840x2160/30000/1001 with 180.013 s duration.
 - GPU encode, GPU compute, and VRAM are recorded as unavailable: this Windows counter path did not expose reliable per-engine encode/compute or dedicated-memory values. SSD figures were total physical-disk samples rather than source/output-isolated counters and are not used as a causal claim. No output hit the 20 GiB cap.

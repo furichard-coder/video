@@ -121,16 +121,23 @@ describe("render disk reliability", () => {
     expect(estimate.peakAdditionalBytes).toBeLessThan(138_944_270_919 + externalSegments);
     expect(estimate.baseMasterBytes).toBeGreaterThan(138_944_270_919 - externalSegments);
     expect(estimate.finalVideoBytes).toBe(estimate.baseMasterBytes);
-    expect(remainingAdditionalWriteBytes(estimate.peakAdditionalBytes, {
-      newWorkRootBytes: 0,
-      completedBaseMasterBytes: estimate.baseMasterBytes,
-      finalOutputBytes: 0,
-    })).toBe(estimate.finalMuxBranchBytes);
+    expect(
+      remainingAdditionalWriteBytes(estimate.peakAdditionalBytes, {
+        newWorkRootBytes: 0,
+        completedBaseMasterBytes: estimate.baseMasterBytes,
+        finalOutputBytes: 0,
+      }),
+    ).toBe(estimate.finalMuxBranchBytes);
     // The corrected estimate may legitimately hard-stop this exact recovery:
     // Base and the stream-copied final coexist, so 144.45 GiB is not enough.
     // This is not caused by charging the protected 67.55 GiB a second time.
-    expect(diskPressureLevel(155_105_148_928, estimate.peakAdditionalBytes, safetyReserveBytes(estimate.peakAdditionalBytes)))
-      .toBe("EMERGENCY");
+    expect(
+      diskPressureLevel(
+        155_105_148_928,
+        estimate.peakAdditionalBytes,
+        safetyReserveBytes(estimate.peakAdditionalBytes),
+      ),
+    ).toBe("EMERGENCY");
   });
 
   it("charges a cross-volume recovery output from the stream-copied base estimate, not the old delivery estimate", () => {

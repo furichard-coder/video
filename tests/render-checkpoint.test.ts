@@ -67,7 +67,17 @@ describe("persistent render checkpoint", () => {
       oldTemp,
     );
     const missingPath = path.join(checkpoint.workRoot, "segment-001.mkv");
-    checkpoint.segments = [{ id: "one", level: 1, index: 1, status: "COMPLETED", outputPath: missingPath, durationMs: 1_000, sizeBytes: 123 }];
+    checkpoint.segments = [
+      {
+        id: "one",
+        level: 1,
+        index: 1,
+        status: "COMPLETED",
+        outputPath: missingPath,
+        durationMs: 1_000,
+        sizeBytes: 123,
+      },
+    ];
     checkpoint.totalSegmentCount = 1;
     await store.save(checkpoint);
 
@@ -96,7 +106,17 @@ describe("persistent render checkpoint", () => {
     const originalWorkRoot = checkpoint.workRoot;
     const completedPath = path.join(originalWorkRoot, "segment-001.mkv");
     await writeFile(completedPath, "already completed");
-    checkpoint.segments = [{ id: "one", level: 1, index: 1, status: "COMPLETED", outputPath: completedPath, durationMs: 1_000, sizeBytes: 17 }];
+    checkpoint.segments = [
+      {
+        id: "one",
+        level: 1,
+        index: 1,
+        status: "COMPLETED",
+        outputPath: completedPath,
+        durationMs: 1_000,
+        sizeBytes: 17,
+      },
+    ];
     checkpoint.tempLocations!.push({ id: "fallback", path: newTemp, role: "FALLBACK", enabled: true });
     await store.switchWorkRootForFutureJobs(checkpoint, newTemp);
 
@@ -112,15 +132,35 @@ describe("persistent render checkpoint", () => {
     roots.push(root);
     const source = path.join(root, "base.mkv");
     await runProcess("ffmpeg", [
-      "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=navy:s=320x180:r=30",
-      "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=1", "-t", "1",
-      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "flac", "-y", source,
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=navy:s=320x180:r=30",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=220:sample_rate=48000:duration=1",
+      "-t",
+      "1",
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "flac",
+      "-y",
+      source,
     ]);
     const projectId = "81234567-abcd-4def-8123-0123456789ab";
     const store = new RenderCheckpointStore(path.join(root, "state"));
     const saved = await store.saveVideoBaseMaster(projectId, "PICTURE-A", source, 1_000, "H264", "360P");
     expect(await store.loadVideoBaseMaster(projectId, "PICTURE-A")).toMatchObject({
-      outputPath: saved.outputPath, pictureBaseSignature: "PICTURE-A", durationMs: 1_000,
+      outputPath: saved.outputPath,
+      pictureBaseSignature: "PICTURE-A",
+      durationMs: 1_000,
     });
     await store.discardVideoBaseMaster(projectId);
     expect(await store.loadVideoBaseMaster(projectId, "PICTURE-A")).toBeUndefined();
@@ -216,8 +256,24 @@ describe("persistent render checkpoint", () => {
     await writeFile(presentPath, "segment");
     checkpoint.totalSegmentCount = 2;
     checkpoint.segments = [
-      { id: "present", level: 0, index: 0, status: "COMPLETED", outputPath: presentPath, durationMs: 1_000, sizeBytes: 7 },
-      { id: "missing", level: 0, index: 1, status: "COMPLETED", outputPath: missingPath, durationMs: 1_000, sizeBytes: 7 },
+      {
+        id: "present",
+        level: 0,
+        index: 0,
+        status: "COMPLETED",
+        outputPath: presentPath,
+        durationMs: 1_000,
+        sizeBytes: 7,
+      },
+      {
+        id: "missing",
+        level: 0,
+        index: 1,
+        status: "COMPLETED",
+        outputPath: missingPath,
+        durationMs: 1_000,
+        sizeBytes: 7,
+      },
     ];
     await store.save(checkpoint);
 
@@ -292,8 +348,28 @@ describe("persistent render checkpoint", () => {
     await writeFile(primary, "primary");
     await writeFile(secondary, "secondary");
     checkpoint.segments = [
-      { id: "p", level: 1, index: 1, status: "COMPLETED", outputPath: primary, tempLocationId: "primary", volume: "E:\\", durationMs: 1_000, sizeBytes: 7 },
-      { id: "s", level: 1, index: 2, status: "COMPLETED", outputPath: secondary, tempLocationId: "secondary", volume: "C:\\", durationMs: 1_000, sizeBytes: 9 },
+      {
+        id: "p",
+        level: 1,
+        index: 1,
+        status: "COMPLETED",
+        outputPath: primary,
+        tempLocationId: "primary",
+        volume: "E:\\",
+        durationMs: 1_000,
+        sizeBytes: 7,
+      },
+      {
+        id: "s",
+        level: 1,
+        index: 2,
+        status: "COMPLETED",
+        outputPath: secondary,
+        tempLocationId: "secondary",
+        volume: "C:\\",
+        durationMs: 1_000,
+        sizeBytes: 9,
+      },
     ];
     await store.save(checkpoint);
 
@@ -349,10 +425,29 @@ describe("persistent render checkpoint", () => {
     );
     const oldSegment = path.join(checkpoint.workRoot, "level-1-part-001.mkv");
     await runProcess("ffmpeg", [
-      "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=navy:s=160x90:r=30:d=1",
-      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", "-y", oldSegment,
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=navy:s=160x90:r=30:d=1",
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-an",
+      "-y",
+      oldSegment,
     ]);
-    const segment = { id: "segment", level: 1, index: 1, status: "PENDING" as const, outputPath: oldSegment, durationMs: 1_000 };
+    const segment = {
+      id: "segment",
+      level: 1,
+      index: 1,
+      status: "PENDING" as const,
+      outputPath: oldSegment,
+      durationMs: 1_000,
+    };
     checkpoint.segments = [segment];
     await store.completeSegment(checkpoint, segment);
     const relative = path.relative(oldRoot, oldSegment);
@@ -379,18 +474,40 @@ describe("persistent render checkpoint", () => {
       "signature",
       "NORMAL",
       path.join(root, "out.mp4"),
-      { ...request(), tempLocations: [
-        { id: "primary", path: oldRoot, role: "PRIMARY", enabled: true },
-        { id: "fallback", path: newRoot, role: "FALLBACK", enabled: true },
-      ] },
+      {
+        ...request(),
+        tempLocations: [
+          { id: "primary", path: oldRoot, role: "PRIMARY", enabled: true },
+          { id: "fallback", path: newRoot, role: "FALLBACK", enabled: true },
+        ],
+      },
       oldRoot,
     );
     const source = path.join(checkpoint.workRoot, "part-007.mkv");
     await runProcess("ffmpeg", [
-      "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=navy:s=160x90:r=30:d=1",
-      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", "-y", source,
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=navy:s=160x90:r=30:d=1",
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-an",
+      "-y",
+      source,
     ]);
-    const segment = { id: "part-007", level: 1, index: 7, status: "PENDING" as const, outputPath: source, durationMs: 1_000 };
+    const segment = {
+      id: "part-007",
+      level: 1,
+      index: 7,
+      status: "PENDING" as const,
+      outputPath: source,
+      durationMs: 1_000,
+    };
     checkpoint.segments = [segment];
     await store.completeSegment(checkpoint, segment);
     const copied = path.join(newRoot, "user-renamed-completed-segment.mkv");
@@ -400,7 +517,9 @@ describe("persistent render checkpoint", () => {
     await mkdir(path.dirname(rejectedExactName), { recursive: true });
     await writeFile(rejectedExactName, Buffer.alloc((await stat(source)).size));
 
-    const result = await store.discoverAndRemapCompletedArtifacts(checkpoint.projectId, checkpoint.checkpointId, [newRoot]);
+    const result = await store.discoverAndRemapCompletedArtifacts(checkpoint.projectId, checkpoint.checkpointId, [
+      newRoot,
+    ]);
     expect(result).toMatchObject({
       state: "RECALCULATING_STORAGE",
       remappedArtifactIds: ["part-007"],
@@ -424,27 +543,52 @@ describe("persistent render checkpoint", () => {
       "signature",
       "NORMAL",
       path.join(root, "out.mp4"),
-      { ...request(), tempLocations: [
-        { id: "primary", path: sourceRoot, role: "PRIMARY", enabled: true },
-      ] },
+      { ...request(), tempLocations: [{ id: "primary", path: sourceRoot, role: "PRIMARY", enabled: true }] },
       sourceRoot,
     );
     const source = path.join(root, "legacy-external", "owned.mkv");
     await mkdir(path.dirname(source), { recursive: true });
     await runProcess("ffmpeg", [
-      "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=navy:s=160x90:r=30:d=1",
-      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", "-y", source,
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=navy:s=160x90:r=30:d=1",
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-an",
+      "-y",
+      source,
     ]);
-    const segment = { id: "owned", level: 1, index: 1, status: "PENDING" as const, outputPath: source, durationMs: 1_000 };
+    const segment = {
+      id: "owned",
+      level: 1,
+      index: 1,
+      status: "PENDING" as const,
+      outputPath: source,
+      durationMs: 1_000,
+    };
     checkpoint.segments = [segment];
     await store.completeSegment(checkpoint, segment);
     const collisionPath = path.join(destinationRoot, path.basename(checkpoint.workRoot), "owned-owned.mkv");
     await mkdir(path.dirname(collisionPath), { recursive: true });
     await writeFile(collisionPath, "must not overwrite");
     await store.authorizeRecoveryTempLocation(checkpoint.projectId, checkpoint.checkpointId, {
-      id: "fallback", path: destinationRoot, role: "FALLBACK", enabled: true,
+      id: "fallback",
+      path: destinationRoot,
+      role: "FALLBACK",
+      enabled: true,
     });
-    const result = await store.migrateCompletedArtifacts(checkpoint.projectId, checkpoint.checkpointId, [segment.id], destinationRoot);
+    const result = await store.migrateCompletedArtifacts(
+      checkpoint.projectId,
+      checkpoint.checkpointId,
+      [segment.id],
+      destinationRoot,
+    );
     const restored = await store.load(checkpoint.projectId);
 
     expect(result).toMatchObject({ migratedArtifactIds: ["owned"], sourcePreservedArtifactIds: [] });
@@ -467,19 +611,34 @@ describe("persistent render checkpoint", () => {
       "signature",
       "NORMAL",
       path.join(root, "out.mp4"),
-      { ...request(), tempLocations: [
-        { id: "primary", path: sourceRoot, role: "PRIMARY", enabled: true },
-        { id: "fallback", path: destinationRoot, role: "FALLBACK", enabled: true },
-      ] },
+      {
+        ...request(),
+        tempLocations: [
+          { id: "primary", path: sourceRoot, role: "PRIMARY", enabled: true },
+          { id: "fallback", path: destinationRoot, role: "FALLBACK", enabled: true },
+        ],
+      },
       sourceRoot,
     );
     const source = path.join(checkpoint.workRoot, "invalid.mkv");
     await writeFile(source, "not media");
-    checkpoint.segments = [{ id: "invalid", level: 1, index: 1, status: "COMPLETED", outputPath: source, durationMs: 1_000, sizeBytes: 9, sha256: "BAD" }];
+    checkpoint.segments = [
+      {
+        id: "invalid",
+        level: 1,
+        index: 1,
+        status: "COMPLETED",
+        outputPath: source,
+        durationMs: 1_000,
+        sizeBytes: 9,
+        sha256: "BAD",
+      },
+    ];
     await store.save(checkpoint);
 
-    await expect(store.migrateCompletedArtifacts(checkpoint.projectId, checkpoint.checkpointId, ["invalid"], destinationRoot))
-      .rejects.toThrow("驗證失敗");
+    await expect(
+      store.migrateCompletedArtifacts(checkpoint.projectId, checkpoint.checkpointId, ["invalid"], destinationRoot),
+    ).rejects.toThrow("驗證失敗");
     await expect(readFile(source, "utf8")).resolves.toBe("not media");
     expect((await store.load(checkpoint.projectId))!.segments[0]!.outputPath).toBe(source);
   });
@@ -498,24 +657,47 @@ describe("persistent render checkpoint", () => {
       "signature",
       "NORMAL",
       path.join(root, "out.mp4"),
-      { ...request(), tempLocations: [
-        { id: "primary", path: sourceRoot, role: "PRIMARY", enabled: true },
-        { id: "fallback", path: destinationRoot, role: "FALLBACK", enabled: true },
-      ] },
+      {
+        ...request(),
+        tempLocations: [
+          { id: "primary", path: sourceRoot, role: "PRIMARY", enabled: true },
+          { id: "fallback", path: destinationRoot, role: "FALLBACK", enabled: true },
+        ],
+      },
       sourceRoot,
     );
     const source = path.join(root, "legacy-external", "registry-failure.mkv");
     await mkdir(path.dirname(source), { recursive: true });
     await runProcess("ffmpeg", [
-      "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=navy:s=160x90:r=30:d=1",
-      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", "-y", source,
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=navy:s=160x90:r=30:d=1",
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-an",
+      "-y",
+      source,
     ]);
-    const segment = { id: "registry-failure", level: 1, index: 1, status: "PENDING" as const, outputPath: source, durationMs: 1_000 };
+    const segment = {
+      id: "registry-failure",
+      level: 1,
+      index: 1,
+      status: "PENDING" as const,
+      outputPath: source,
+      durationMs: 1_000,
+    };
     checkpoint.segments = [segment];
     await store.completeSegment(checkpoint, segment);
 
-    await expect(store.migrateCompletedArtifacts(checkpoint.projectId, checkpoint.checkpointId, [segment.id], destinationRoot))
-      .rejects.toThrow("simulated atomic registry publish failure");
+    await expect(
+      store.migrateCompletedArtifacts(checkpoint.projectId, checkpoint.checkpointId, [segment.id], destinationRoot),
+    ).rejects.toThrow("simulated atomic registry publish failure");
     await expect(stat(source)).resolves.toMatchObject({ size: segment.sizeBytes });
   }, 30_000);
 
@@ -536,20 +718,42 @@ describe("persistent render checkpoint", () => {
     );
     const legacySegment = path.join(legacy.workRoot, "level-1-part-001.mkv");
     await runProcess("ffmpeg", [
-      "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=navy:s=160x90:r=30:d=1",
-      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", "-y", legacySegment,
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=navy:s=160x90:r=30:d=1",
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-an",
+      "-y",
+      legacySegment,
     ]);
     const legacySegmentSize = (await stat(legacySegment)).size;
     legacy.checkpointProducer = undefined;
     legacy.concatStatus = "PAUSED_DISK_SPACE";
     legacy.segments = [
-      { id: "legacy", level: 1, index: 0, status: "COMPLETED", outputPath: legacySegment, durationMs: 1_000, sizeBytes: legacySegmentSize },
+      {
+        id: "legacy",
+        level: 1,
+        index: 0,
+        status: "COMPLETED",
+        outputPath: legacySegment,
+        durationMs: 1_000,
+        sizeBytes: legacySegmentSize,
+      },
     ];
     await store.save(legacy);
     await rm(path.join(stateRoot, `${legacy.projectId}.v080.render-state.json`), { force: true });
     await rm(path.join(stateRoot, `${legacy.projectId}.v082.render-state.json`), { force: true });
     const originalRecordPath = path.join(stateRoot, `${legacy.projectId}.render-state.json`);
-    const originalSha = createHash("sha256").update(await readFile(originalRecordPath)).digest("hex");
+    const originalSha = createHash("sha256")
+      .update(await readFile(originalRecordPath))
+      .digest("hex");
 
     await expect(store.discard(legacy.projectId, legacy.checkpointId)).rejects.toThrow("v0.79–v0.81");
     await expect(stat(legacySegment)).resolves.toMatchObject({ size: legacySegmentSize });
@@ -570,8 +774,14 @@ describe("persistent render checkpoint", () => {
     expect(imported?.segments[0]?.outputPath).toBe(legacySegment);
     expect(imported?.segments[0]?.status).toBe("COMPLETED");
     await expect(stat(legacySegment)).resolves.toMatchObject({ size: legacySegmentSize });
-    await expect(stat(imported!.recoveryMigration!.sourceStateBackupPath)).resolves.toMatchObject({ size: expect.any(Number) });
-    expect(createHash("sha256").update(await readFile(originalRecordPath)).digest("hex")).toBe(originalSha);
+    await expect(stat(imported!.recoveryMigration!.sourceStateBackupPath)).resolves.toMatchObject({
+      size: expect.any(Number),
+    });
+    expect(
+      createHash("sha256")
+        .update(await readFile(originalRecordPath))
+        .digest("hex"),
+    ).toBe(originalSha);
 
     // Successful cleanup of the v0.80 work root must never remove the v0.79
     // recovery source or its external segment references.
@@ -581,7 +791,9 @@ describe("persistent render checkpoint", () => {
     await store.discard(writableCopy!.projectId, writableCopy!.checkpointId);
     await expect(stat(imported!.workRoot)).resolves.toMatchObject({ isDirectory: expect.any(Function) });
     await expect(stat(legacySegment)).resolves.toMatchObject({ size: legacySegmentSize });
-    await expect(stat(imported!.recoveryMigration!.sourceStateBackupPath)).resolves.toMatchObject({ size: expect.any(Number) });
+    await expect(stat(imported!.recoveryMigration!.sourceStateBackupPath)).resolves.toMatchObject({
+      size: expect.any(Number),
+    });
 
     // A user discard removes only the v0.80 attempt, so the protected legacy
     // source remains intentionally available. Successful completion writes a

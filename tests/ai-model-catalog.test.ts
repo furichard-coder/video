@@ -80,7 +80,8 @@ describe("dynamic AI model catalog", () => {
   });
 
   it("does not claim a cached ready model passed a new connection test when quota is exhausted", async () => {
-    const fetcher = vi.fn<typeof fetch>()
+    const fetcher = vi
+      .fn<typeof fetch>()
       .mockResolvedValueOnce(json({ data: [{ id: "gpt-4o" }] }))
       .mockResolvedValueOnce(json({ output: [{ content: [{ type: "output_text", text: '{"ok":true}' }] }] }))
       .mockResolvedValueOnce(json({ error: { code: "credit_balance_exhausted" } }, 429));

@@ -175,7 +175,11 @@ export class RenderCommandState {
   async startPrepared(): Promise<void> {
     if (!this.handlers) throw new Error("遠端命令尚未就緒。");
     if (!this.prepared) throw new Error("Windows 端尚未准备可供远端启动的转档工作。");
-    if (this.snapshotValue.state === "RUNNING" || this.snapshotValue.state === "PAUSING" || this.snapshotValue.state === "PAUSED")
+    if (
+      this.snapshotValue.state === "RUNNING" ||
+      this.snapshotValue.state === "PAUSING" ||
+      this.snapshotValue.state === "PAUSED"
+    )
       throw new Error("目前已有转档工作执行中。");
     const request = structuredClone(this.prepared.request);
     this.prepared = undefined;

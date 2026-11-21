@@ -1,16 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { activeSubtitleCueAt, buildSubtitlePlaybackSegments, playbackSegmentAt, projectClockToSourceMs, sourceTimeToProjectClockMs } from "../src/renderer/subtitle-playback";
+import {
+  activeSubtitleCueAt,
+  buildSubtitlePlaybackSegments,
+  playbackSegmentAt,
+  projectClockToSourceMs,
+  sourceTimeToProjectClockMs,
+} from "../src/renderer/subtitle-playback";
 import type { ProjectManifest, SourceAsset, SubtitleCue } from "../src/shared/domain";
 
-const asset = (id: string): SourceAsset => ({ id, kind: "VIDEO", sourcePath: `C:\\${id}.mp4`, fileName: `${id}.mp4`, sizeBytes: 1, sourcePolicy: "READ_ONLY", addedAt: "2026-10-03T00:00:00Z", mediaInfo: { durationMs: 10_000 } } as SourceAsset);
+const asset = (id: string): SourceAsset =>
+  ({
+    id,
+    kind: "VIDEO",
+    sourcePath: `C:\\${id}.mp4`,
+    fileName: `${id}.mp4`,
+    sizeBytes: 1,
+    sourcePolicy: "READ_ONLY",
+    addedAt: "2026-10-03T00:00:00Z",
+    mediaInfo: { durationMs: 10_000 },
+  }) as SourceAsset;
 const project = {
-  sources: [asset("a"), asset("b"), asset("c")], timelineOrder: ["a", "b", "c"], mediaInsertions: [], mainExclusionRanges: [], timelineTransitionSeconds: 0,
+  sources: [asset("a"), asset("b"), asset("c")],
+  timelineOrder: ["a", "b", "c"],
+  mediaInsertions: [],
+  mainExclusionRanges: [],
+  timelineTransitionSeconds: 0,
 } as unknown as ProjectManifest;
 
 describe("subtitle project playback clock", () => {
   it("plays continuously from 5 to 30 seconds through three segments", () => {
     const segments = buildSubtitlePlaybackSegments(project, "MAIN");
-    expect(segments.map((segment) => [segment.projectStartMs, segment.ownershipEndMs])).toEqual([[0, 10_000], [10_000, 20_000], [20_000, 30_000]]);
+    expect(segments.map((segment) => [segment.projectStartMs, segment.ownershipEndMs])).toEqual([
+      [0, 10_000],
+      [10_000, 20_000],
+      [20_000, 30_000],
+    ]);
     let clock = 5_000;
     for (const expected of [9_999, 10_000, 19_999, 20_000, 29_999, 30_000]) {
       clock = expected;

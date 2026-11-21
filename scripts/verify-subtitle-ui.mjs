@@ -28,14 +28,21 @@ try {
   await mkdir(path.dirname(manifestPath), { recursive: true });
   await copyFile(sourceProject, manifestPath);
   const fixture = JSON.parse(await readFile(manifestPath, "utf8"));
-  if (!Array.isArray(fixture.subtitleCues) || fixture.subtitleCues.length !== 63 || fixture.subtitleCues.some((cue) => cue.reviewStatus !== "DRAFT")) {
+  if (
+    !Array.isArray(fixture.subtitleCues) ||
+    fixture.subtitleCues.length !== 63 ||
+    fixture.subtitleCues.some((cue) => cue.reviewStatus !== "DRAFT")
+  ) {
     throw new Error("The copied project no longer contains the expected 63 draft subtitle cues.");
   }
   // Keep the copied subtitle drafts but detach them from source/timeline clips so review opens without generating previews.
   fixture.sources = [];
   fixture.timelineOrder = [];
   fixture.introSegments = [];
-  fixture.subtitleCues = fixture.subtitleCues.map(({ sourceAssetId: _sourceAssetId, ...cue }) => ({ ...cue, timelineScope: "MAIN" }));
+  fixture.subtitleCues = fixture.subtitleCues.map(({ sourceAssetId: _sourceAssetId, ...cue }) => ({
+    ...cue,
+    timelineScope: "MAIN",
+  }));
   await writeFile(manifestPath, JSON.stringify(fixture), "utf8");
   await writeFile(sessionPath, JSON.stringify({ filePath: manifestPath }, null, 2), "utf8");
 
@@ -59,11 +66,21 @@ try {
     });
 
     let output = "";
-    child.stdout.on("data", (chunk) => { output += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { output += chunk.toString(); });
+    child.stdout.on("data", (chunk) => {
+      output += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      output += chunk.toString();
+    });
     const exitCode = await new Promise((resolve) => {
-      const timeoutId = setTimeout(() => { child.kill(); resolve(124); }, 55_000);
-      child.once("exit", (code) => { clearTimeout(timeoutId); resolve(code ?? 1); });
+      const timeoutId = setTimeout(() => {
+        child.kill();
+        resolve(124);
+      }, 55_000);
+      child.once("exit", (code) => {
+        clearTimeout(timeoutId);
+        resolve(code ?? 1);
+      });
     });
     const resultLine = output.split(/\r?\n/).find((line) => line.startsWith("SUBTITLE_UI_QA_RESULT "));
     if (exitCode !== 0 || !resultLine) {

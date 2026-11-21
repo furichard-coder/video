@@ -4,7 +4,12 @@ import { buildSubtitleSamplingPlan, computeSubtitleFrameDHash } from "../src/mai
 const main = (endMs = 180_000) => [{ type: "MAIN" as const, startMs: 0, endMs }];
 
 describe("subtitle frame sampling plan", () => {
-  it.each([[1, 8970], [2, 4485], [10, 897], [60, 150]])("covers a 2h29m30 timeline at %is without a global cap", (intervalSeconds, expected) => {
+  it.each([
+    [1, 8970],
+    [2, 4485],
+    [10, 897],
+    [60, 150],
+  ])("covers a 2h29m30 timeline at %is without a global cap", (intervalSeconds, expected) => {
     const plan = buildSubtitleSamplingPlan({ segments: main(8_970_000), intervalSeconds });
     expect(plan.samples).toHaveLength(expected);
     expect(plan.samples.at(-1)!.timeMs).toBeLessThan(8_970_000);
@@ -31,22 +36,28 @@ describe("subtitle frame sampling plan", () => {
 
   it("clamps the interval to 1 through 60 seconds", () => {
     expect(buildSubtitleSamplingPlan({ segments: main(3_000), intervalSeconds: 0 }).intervalSeconds).toBe(1);
-    expect(buildSubtitleSamplingPlan({ segments: main(180_000), intervalSeconds: 99 }).samples.map((sample) => sample.timeMs)).toEqual([0, 60_000, 120_000]);
+    expect(
+      buildSubtitleSamplingPlan({ segments: main(180_000), intervalSeconds: 99 }).samples.map(
+        (sample) => sample.timeMs,
+      ),
+    ).toEqual([0, 60_000, 120_000]);
   });
 
   it("skips unusable black intro candidates and selects the first usable frame after +1s", () => {
     const plan = buildSubtitleSamplingPlan({
-      segments: [{
-        type: "INTRO",
-        startMs: 0,
-        endMs: 8_000,
-        usableCandidates: [
-          { timeMs: 1_000, usable: false },
-          { timeMs: 1_400, usable: false },
-          { timeMs: 2_100, usable: true },
-          { timeMs: 3_000, usable: true },
-        ],
-      }],
+      segments: [
+        {
+          type: "INTRO",
+          startMs: 0,
+          endMs: 8_000,
+          usableCandidates: [
+            { timeMs: 1_000, usable: false },
+            { timeMs: 1_400, usable: false },
+            { timeMs: 2_100, usable: true },
+            { timeMs: 3_000, usable: true },
+          ],
+        },
+      ],
       intervalSeconds: 10,
     });
     expect(plan.samples.map((sample) => sample.timeMs)).toEqual([2_100]);
@@ -57,7 +68,15 @@ describe("subtitle frame sampling plan", () => {
     const plan = buildSubtitleSamplingPlan({
       segments: [
         { type: "INTRO", startMs: 1_000, endMs: 2_000, usableCandidates: [{ timeMs: 1_200, usable: true }] },
-        { type: "PHOTO", startMs: 4_000, endMs: 7_000, usableCandidates: [{ timeMs: 4_500, usable: true }, { timeMs: 6_000, usable: false }] },
+        {
+          type: "PHOTO",
+          startMs: 4_000,
+          endMs: 7_000,
+          usableCandidates: [
+            { timeMs: 4_500, usable: true },
+            { timeMs: 6_000, usable: false },
+          ],
+        },
       ],
       intervalSeconds: 5,
     });

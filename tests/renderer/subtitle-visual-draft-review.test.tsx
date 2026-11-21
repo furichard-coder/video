@@ -85,12 +85,26 @@ describe("SubtitleStudio AI visual draft review tools", () => {
         clearSubtitlePreviewProgressListeners: vi.fn(),
         getUserPreferences: vi.fn(async () => ({
           subtitleGenerationScope: { intro: false, main: true },
-          subtitlePreviewStyle: { verticalPositionPercent: 82, fontSizePx: 28, textColor: "#FFFFFF", shadowEnabled: true, outlineWidthPx: 2 },
+          subtitlePreviewStyle: {
+            verticalPositionPercent: 82,
+            fontSizePx: 28,
+            textColor: "#FFFFFF",
+            shadowEnabled: true,
+            outlineWidthPx: 2,
+          },
         })),
         getSubtitleAnalysisVideo: vi.fn(async () => ({ reason: "NONE" as const })),
       },
     });
-    render(<SubtitleStudio project={project} timelineDurationMs={20_000} onProjectUpdated={vi.fn()} onOpenAiSettings={onOpenAiSettings} onClose={vi.fn()} />);
+    render(
+      <SubtitleStudio
+        project={project}
+        timelineDurationMs={20_000}
+        onProjectUpdated={vi.fn()}
+        onOpenAiSettings={onOpenAiSettings}
+        onClose={vi.fn()}
+      />,
+    );
 
     const body = screen.getByRole("region", { name: /字幕審核內容/ });
     expect(body).toContainElement(screen.getByRole("button", { name: /AI 帳號／故事設定/ }));
@@ -134,9 +148,15 @@ describe("SubtitleStudio AI visual draft review tools", () => {
     );
 
     vi.spyOn(window, "confirm").mockReturnValueOnce(true);
-    fireEvent.change(screen.getByRole("textbox", { name: "本機修正指示" }), { target: { value: "更精簡且只描述可見內容" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "本機修正指示" }), {
+      target: { value: "更精簡且只描述可見內容" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /依指示用附近畫面重新產生/ }));
-    await waitFor(() => expect(regenerateSubtitleVisualCue).toHaveBeenCalledWith(expect.objectContaining({ cueId: "visual-a", instruction: "更精簡且只描述可見內容", displayLanguage: "en" })));
+    await waitFor(() =>
+      expect(regenerateSubtitleVisualCue).toHaveBeenCalledWith(
+        expect.objectContaining({ cueId: "visual-a", instruction: "更精簡且只描述可見內容", displayLanguage: "en" }),
+      ),
+    );
     await waitFor(() => expect(setSubtitleCues).toHaveBeenCalledTimes(2));
 
     fireEvent.click(screen.getByRole("button", { name: "在時間中點拆分" }));

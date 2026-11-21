@@ -1106,7 +1106,9 @@ describe("ProjectStore", () => {
       ...photoInsertion.insertionAudio!,
       sfxEnabled: false,
     });
-    expect(project.mediaInsertions.find((item) => item.id === photoInsertion.id)?.insertionAudio?.sfxEnabled).toBe(false);
+    expect(project.mediaInsertions.find((item) => item.id === photoInsertion.id)?.insertionAudio?.sfxEnabled).toBe(
+      false,
+    );
     expect(project.timelineOrder).toEqual([host.id]);
     expect(mainRenderSelections(project)).toEqual([
       { assetId: host.id, inMs: 0, outMs: 5_000 },
@@ -1147,7 +1149,9 @@ describe("ProjectStore", () => {
 
     const restored = await new ProjectStore(dataRoot).initialize();
     expect(restored.mediaInsertions).toHaveLength(2);
-    expect(restored.mediaInsertions.find((item) => item.id === photoInsertion.id)?.insertionAudio?.sfxEnabled).toBe(false);
+    expect(restored.mediaInsertions.find((item) => item.id === photoInsertion.id)?.insertionAudio?.sfxEnabled).toBe(
+      false,
+    );
     expect(
       mainRenderSelections(restored)
         .filter((clip) => clip.mediaInsertionId)

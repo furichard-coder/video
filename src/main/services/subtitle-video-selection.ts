@@ -1,10 +1,6 @@
 import type { PreviewOutputRecord } from "../../shared/domain";
 
-export type SubtitleVideoSelectionReason =
-  | "PROJECT_CONCAT"
-  | "LATEST_CONCAT"
-  | "MANUAL_PATH"
-  | "NONE";
+export type SubtitleVideoSelectionReason = "PROJECT_CONCAT" | "LATEST_CONCAT" | "MANUAL_PATH" | "NONE";
 
 export interface SubtitleVideoSelection {
   reason: SubtitleVideoSelectionReason;
@@ -52,9 +48,7 @@ export function selectSubtitleVideoSource(
   outputs: readonly PreviewOutputRecord[],
   options: SubtitleVideoSelectionOptions = {},
 ): SubtitleVideoSelection {
-  const eligible = outputs.filter(
-    (record) => record.exists && record.purpose === "CONCAT" && isSuccessful(record),
-  );
+  const eligible = outputs.filter((record) => record.exists && record.purpose === "CONCAT" && isSuccessful(record));
 
   if (options.projectId) {
     const projectRecord = latest(eligible.filter((record) => record.projectId === options.projectId));
@@ -84,9 +78,19 @@ export function clampSubtitleSamplingBatchSize(value: number): number {
   return Math.min(30, Math.max(10, Math.round(value)));
 }
 
-export function assertSubtitleVideoTimelineMatch(reason: SubtitleVideoSelectionReason, timelineDurationMs: number, videoDurationMs: number, toleranceMs = 2_000): void {
+export function assertSubtitleVideoTimelineMatch(
+  reason: SubtitleVideoSelectionReason,
+  timelineDurationMs: number,
+  videoDurationMs: number,
+  toleranceMs = 2_000,
+): void {
   if (reason === "PROJECT_CONCAT") return;
-  if (!Number.isFinite(timelineDurationMs) || !Number.isFinite(videoDurationMs) || videoDurationMs <= 0 || Math.abs(timelineDurationMs - videoDurationMs) > toleranceMs)
+  if (
+    !Number.isFinite(timelineDurationMs) ||
+    !Number.isFinite(videoDurationMs) ||
+    videoDurationMs <= 0 ||
+    Math.abs(timelineDurationMs - videoDurationMs) > toleranceMs
+  )
     throw new Error("人工／其他專案影片時長與目前專案時間線不符；為避免字幕套錯時間，本次不會寫入專案。");
 }
 
@@ -94,14 +98,24 @@ export function assertSubtitleVideoTimelineMatch(reason: SubtitleVideoSelectionR
 export function subtitleTimelineCompatibility(timelineDurationMs: number, videoDurationMs: number) {
   const toleranceMs = Math.max(2_000, Math.min(10_000, Math.round(timelineDurationMs * 0.001)));
   const differenceMs = Math.abs(timelineDurationMs - videoDurationMs);
-  const compatible = Number.isFinite(timelineDurationMs) && Number.isFinite(videoDurationMs)
-    && timelineDurationMs > 0 && videoDurationMs > 0 && differenceMs <= toleranceMs;
+  const compatible =
+    Number.isFinite(timelineDurationMs) &&
+    Number.isFinite(videoDurationMs) &&
+    timelineDurationMs > 0 &&
+    videoDurationMs > 0 &&
+    differenceMs <= toleranceMs;
   return { compatible, differenceMs, toleranceMs };
 }
 
-export function subtitleAnalysisMode(reason: SubtitleVideoSelectionReason, timelineDurationMs: number, videoDurationMs: number) {
+export function subtitleAnalysisMode(
+  reason: SubtitleVideoSelectionReason,
+  timelineDurationMs: number,
+  videoDurationMs: number,
+) {
   const comparison = subtitleTimelineCompatibility(timelineDurationMs, videoDurationMs);
   // A legacy title-only association is not proof of render/project identity.
-  return { ...comparison, mode: comparison.compatible && reason === "PROJECT_CONCAT"
-    ? "PROJECT_AWARE" as const : "VIDEO_FIRST" as const };
+  return {
+    ...comparison,
+    mode: comparison.compatible && reason === "PROJECT_CONCAT" ? ("PROJECT_AWARE" as const) : ("VIDEO_FIRST" as const),
+  };
 }

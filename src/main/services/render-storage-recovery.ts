@@ -36,8 +36,11 @@ function closestSufficientMoveSet(
         if (bytes > maximumBytes || bytes > bestBytes) break;
         items.push(eligible[index]!);
       }
-      if (bytes >= requiredBytes && bytes <= maximumBytes &&
-        (bytes < bestBytes || (bytes === bestBytes && items.length < best.length))) {
+      if (
+        bytes >= requiredBytes &&
+        bytes <= maximumBytes &&
+        (bytes < bestBytes || (bytes === bestBytes && items.length < best.length))
+      ) {
         best = items;
         bestBytes = bytes;
       }
@@ -74,17 +77,26 @@ function closestSufficientMoveSet(
 export function buildResumeStoragePlan(input: ResumeStoragePlannerInput): ResumeStoragePlan {
   const primarySchedulable = Math.max(0, input.primary.schedulableBytes);
   const shortfallBytes = Math.max(0, input.peakAdditionalBytes - primarySchedulable);
-  const planId = createHash("sha256").update(JSON.stringify({
-    checkpointId: input.checkpointId,
-    primaryFreeBytes: input.primary.freeBytes,
-    primaryReserveBytes: input.primary.reserveBytes,
-    fallbackFreeBytes: input.fallback?.freeBytes,
-    fallbackReserveBytes: input.fallback?.reserveBytes,
-    peakAdditionalBytes: input.peakAdditionalBytes,
-    nextJobBytes: input.nextJobBytes,
-    cleanup: (input.cleanupCandidates ?? []).map((item) => [item.artifactId, item.sizeBytes, item.safeToDelete]),
-    moves: (input.moveCandidates ?? []).map((item) => [item.artifactId, item.sizeBytes, item.destinationLocationId]),
-  })).digest("hex").slice(0, 32);
+  const planId = createHash("sha256")
+    .update(
+      JSON.stringify({
+        checkpointId: input.checkpointId,
+        primaryFreeBytes: input.primary.freeBytes,
+        primaryReserveBytes: input.primary.reserveBytes,
+        fallbackFreeBytes: input.fallback?.freeBytes,
+        fallbackReserveBytes: input.fallback?.reserveBytes,
+        peakAdditionalBytes: input.peakAdditionalBytes,
+        nextJobBytes: input.nextJobBytes,
+        cleanup: (input.cleanupCandidates ?? []).map((item) => [item.artifactId, item.sizeBytes, item.safeToDelete]),
+        moves: (input.moveCandidates ?? []).map((item) => [
+          item.artifactId,
+          item.sizeBytes,
+          item.destinationLocationId,
+        ]),
+      }),
+    )
+    .digest("hex")
+    .slice(0, 32);
   const base = {
     planId,
     checkpointId: input.checkpointId,
@@ -161,7 +173,8 @@ export function buildResumeStoragePlan(input: ResumeStoragePlannerInput): Resume
         expectedPrimaryFreeAfterBytes: input.primary.freeBytes + selectedBytes,
         expectedDestinationFreeAfterBytes: fallback.freeBytes - selectedBytes,
         requiresUserConfirmation: true,
-        reason: "需搬移已完成且已驗證的 Artifact；方案另含最少 512 MiB／5% 估算緩衝，執行時採 copy-verify-checkpoint-delete。",
+        reason:
+          "需搬移已完成且已驗證的 Artifact；方案另含最少 512 MiB／5% 估算緩衝，執行時採 copy-verify-checkpoint-delete。",
       };
     }
   }

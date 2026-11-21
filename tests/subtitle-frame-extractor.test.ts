@@ -24,13 +24,23 @@ describe("SubtitleFrameExtractor", () => {
     const image = jpeg.encode({ width: 64, height: 64, data: Buffer.alloc(64 * 64 * 4, 255) }, 75).data;
     const runner = async (_executable: string, args: string[]) => {
       if (args.includes("-frames:v")) await writeFile(args.at(-1)!, image);
-      return { stdout: "", stderr: args.some((arg) => arg.includes("showinfo")) ? "[showinfo] n:0 pts_time:3.250" : "" };
+      return {
+        stdout: "",
+        stderr: args.some((arg) => arg.includes("showinfo")) ? "[showinfo] n:0 pts_time:3.250" : "",
+      };
     };
     const result = await new SubtitleFrameExtractor("ffmpeg", runner as never).extract({
-      projectId: "boundaries", sourcePath, cacheRoot: path.join(root, "cache"), intervalSeconds: 2,
-      detectSceneChanges: true, deduplicateFrames: true,
-      segments: [{ type: "INTRO", startMs: 0, endMs: 2_000 }, { type: "INTRO", startMs: 2_000, endMs: 4_000 },
-        { type: "MAIN", startMs: 4_000, endMs: 12_000 }],
+      projectId: "boundaries",
+      sourcePath,
+      cacheRoot: path.join(root, "cache"),
+      intervalSeconds: 2,
+      detectSceneChanges: true,
+      deduplicateFrames: true,
+      segments: [
+        { type: "INTRO", startMs: 0, endMs: 2_000 },
+        { type: "INTRO", startMs: 2_000, endMs: 4_000 },
+        { type: "MAIN", startMs: 4_000, endMs: 12_000 },
+      ],
     });
     expect(result.frames.filter((frame) => frame.segmentType === "INTRO")).toHaveLength(2);
     expect(result.frames.some((frame) => frame.source === "SCENE_CHANGE")).toBe(true);
@@ -47,8 +57,7 @@ describe("SubtitleFrameExtractor", () => {
       calls.push(args);
       if (args.some((arg) => arg.includes("blackdetect=d=0:pix_th=0.10:pic_th=0.98")))
         return { stdout: "", stderr: "[blackdetect] black_start:0 black_end:1.500 black_duration:1.500" };
-      if (args.includes("-f") && args.includes("null"))
-        return { stdout: "", stderr: "[showinfo] n:0 pts_time:4.250" };
+      if (args.includes("-f") && args.includes("null")) return { stdout: "", stderr: "[showinfo] n:0 pts_time:4.250" };
       await writeFile(args.at(-1)!, Buffer.alloc(256, 7));
       return { stdout: "", stderr: "" };
     };
@@ -74,7 +83,9 @@ describe("SubtitleFrameExtractor", () => {
     expect(result.frames.every((frame) => frame.path.endsWith(".jpg"))).toBe(true);
     expect(calls.some((args) => args.some((arg) => arg.includes("select='gt(scene,0.30)'")))).toBe(true);
     const stillArgs = calls.find((args) => args.includes("-frames:v"))!;
-    expect(stillArgs).toContain("scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black");
+    expect(stillArgs).toContain(
+      "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black",
+    );
     expect(stillArgs).toContain("-f");
     expect(stillArgs).toContain("image2");
     expect(stillArgs).not.toContain("-c:v");
@@ -88,13 +99,15 @@ describe("SubtitleFrameExtractor", () => {
       invoked = true;
       return { stdout: "", stderr: "" };
     };
-    await expect(new SubtitleFrameExtractor("ffmpeg", runner as never).extract({
-      projectId: "project-a",
-      sourcePath: "relative.mp4",
-      cacheRoot: path.resolve("cache"),
-      segments: [],
-      intervalSeconds: 10,
-    })).rejects.toThrow("絕對路徑");
+    await expect(
+      new SubtitleFrameExtractor("ffmpeg", runner as never).extract({
+        projectId: "project-a",
+        sourcePath: "relative.mp4",
+        cacheRoot: path.resolve("cache"),
+        segments: [],
+        intervalSeconds: 10,
+      }),
+    ).rejects.toThrow("絕對路徑");
     expect(invoked).toBe(false);
   });
 
@@ -116,7 +129,9 @@ describe("SubtitleFrameExtractor", () => {
       intervalSeconds: 1,
       maxSamples: 1,
       segments: [{ type: "MAIN", startMs: 0, endMs: 601_000 }],
-      onProgress: (item) => { if (item.stage === "FRAMES") progress.push(item.completed); },
+      onProgress: (item) => {
+        if (item.stage === "FRAMES") progress.push(item.completed);
+      },
     });
     expect(result.frames).toHaveLength(601);
     expect(result.plan.counters.sent).toBe(601);
@@ -137,20 +152,24 @@ describe("SubtitleFrameExtractor", () => {
       return { stdout: "", stderr: "" };
     };
     const received: string[][] = [];
-    const result = await new SubtitleFrameExtractor("ffmpeg", runner as never).extractBatches({
-      projectId: "project-stream",
-      sourcePath,
-      cacheRoot: path.join(root, "cache"),
-      intervalSeconds: 1,
-      segments: [{ type: "MAIN", startMs: 0, endMs: 47_000 }],
-    }, async (batch, batchIndex) => {
-      expect(batch.length).toBeLessThanOrEqual(20);
-      expect(batchIndex).toBe(received.length);
-      expect(await Promise.all(batch.map(async (frame) => (await readFile(frame.path)).length))).toEqual(batch.map(() => 256));
-      if (received.length > 0)
-        await expect(readFile(received.at(-1)![0])).rejects.toMatchObject({ code: "ENOENT" });
-      received.push(batch.map((frame) => frame.path));
-    });
+    const result = await new SubtitleFrameExtractor("ffmpeg", runner as never).extractBatches(
+      {
+        projectId: "project-stream",
+        sourcePath,
+        cacheRoot: path.join(root, "cache"),
+        intervalSeconds: 1,
+        segments: [{ type: "MAIN", startMs: 0, endMs: 47_000 }],
+      },
+      async (batch, batchIndex) => {
+        expect(batch.length).toBeLessThanOrEqual(20);
+        expect(batchIndex).toBe(received.length);
+        expect(await Promise.all(batch.map(async (frame) => (await readFile(frame.path)).length))).toEqual(
+          batch.map(() => 256),
+        );
+        if (received.length > 0) await expect(readFile(received.at(-1)![0])).rejects.toMatchObject({ code: "ENOENT" });
+        received.push(batch.map((frame) => frame.path));
+      },
+    );
 
     expect(result.plan.samples).toHaveLength(47);
     expect(result.batchesEmitted).toBe(3);
@@ -169,14 +188,16 @@ describe("SubtitleFrameExtractor", () => {
       invoked = true;
       return { stdout: "", stderr: "" };
     };
-    await expect(new SubtitleFrameExtractor("ffmpeg", runner as never).extract({
-      projectId: "project-b",
-      sourcePath,
-      cacheRoot: path.join(root, "cache"),
-      intervalSeconds: 1,
-      segments: [{ type: "MAIN", startMs: 0, endMs: 5_000 }],
-      signal: controller.signal,
-    })).rejects.toMatchObject({ name: "AbortError" });
+    await expect(
+      new SubtitleFrameExtractor("ffmpeg", runner as never).extract({
+        projectId: "project-b",
+        sourcePath,
+        cacheRoot: path.join(root, "cache"),
+        intervalSeconds: 1,
+        segments: [{ type: "MAIN", startMs: 0, endMs: 5_000 }],
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
     expect(invoked).toBe(false);
   });
 });

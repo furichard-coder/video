@@ -147,7 +147,11 @@ export class OutputHistoryStore {
     }
   }
 
-  async registerRender(result: ConcatRenderResult, projectName?: string, projectId?: string): Promise<PreviewOutputRecord> {
+  async registerRender(
+    result: ConcatRenderResult,
+    projectName?: string,
+    projectId?: string,
+  ): Promise<PreviewOutputRecord> {
     const record: StoredOutput = {
       jobId: result.jobId,
       outputPath: path.resolve(result.outputPath),
@@ -162,8 +166,7 @@ export class OutputHistoryStore {
       cancelled: result.cancelled,
       includedIntroSegmentCount: result.includedIntroSegmentCount,
       projectName,
-      projectId:
-        typeof projectId === "string" && /^[a-zA-Z0-9-]{8,80}$/.test(projectId) ? projectId : undefined,
+      projectId: typeof projectId === "string" && /^[a-zA-Z0-9-]{8,80}$/.test(projectId) ? projectId : undefined,
       successful: result.cancelled !== true && result.sizeBytes > 0,
       aspectRatio: result.aspectRatio,
       attemptElapsedMs: result.attemptElapsedMs,

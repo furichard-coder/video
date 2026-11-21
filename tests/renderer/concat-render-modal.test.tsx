@@ -38,8 +38,22 @@ const api = {
       autoUpload: true,
       lowMemorySegmented: true,
       tempLocations: [
-        { id: "primary", path: "E:/RenderTemp", role: "PRIMARY", enabled: true, allowFallback: true, reserveBytes: 20 * 1024 ** 3 },
-        { id: "fallback", path: "C:/Users/test/AppData/Local/Temp", role: "FALLBACK", enabled: true, allowFallback: true, reserveBytes: 30 * 1024 ** 3 },
+        {
+          id: "primary",
+          path: "E:/RenderTemp",
+          role: "PRIMARY",
+          enabled: true,
+          allowFallback: true,
+          reserveBytes: 20 * 1024 ** 3,
+        },
+        {
+          id: "fallback",
+          path: "C:/Users/test/AppData/Local/Temp",
+          role: "FALLBACK",
+          enabled: true,
+          allowFallback: true,
+          reserveBytes: 30 * 1024 ** 3,
+        },
       ],
       tempLocationSelection: "AUTO",
       youtubeFullAutoUpload: true,
@@ -47,10 +61,42 @@ const api = {
   })),
   updateUserPreferences: vi.fn(async () => ({})),
   listRenderTempLocations: vi.fn(async () => [
-    { id: "primary", path: "E:/RenderTemp", role: "PRIMARY", enabled: true, allowFallback: true, reserveBytes: 20 * 1024 ** 3, volume: "E:/", freeBytes: 120 * 1024 ** 3, capacityBytes: 500 * 1024 ** 3, committedBytes: 0, schedulableBytes: 100 * 1024 ** 3, available: true },
-    { id: "fallback", path: "C:/Users/test/AppData/Local/Temp", role: "FALLBACK", enabled: true, allowFallback: true, reserveBytes: 30 * 1024 ** 3, volume: "C:/", freeBytes: 10 * 1024 ** 3, capacityBytes: 500 * 1024 ** 3, committedBytes: 0, schedulableBytes: 0, available: false, unavailableReason: "BELOW_RESERVE" },
+    {
+      id: "primary",
+      path: "E:/RenderTemp",
+      role: "PRIMARY",
+      enabled: true,
+      allowFallback: true,
+      reserveBytes: 20 * 1024 ** 3,
+      volume: "E:/",
+      freeBytes: 120 * 1024 ** 3,
+      capacityBytes: 500 * 1024 ** 3,
+      committedBytes: 0,
+      schedulableBytes: 100 * 1024 ** 3,
+      available: true,
+    },
+    {
+      id: "fallback",
+      path: "C:/Users/test/AppData/Local/Temp",
+      role: "FALLBACK",
+      enabled: true,
+      allowFallback: true,
+      reserveBytes: 30 * 1024 ** 3,
+      volume: "C:/",
+      freeBytes: 10 * 1024 ** 3,
+      capacityBytes: 500 * 1024 ** 3,
+      committedBytes: 0,
+      schedulableBytes: 0,
+      available: false,
+      unavailableReason: "BELOW_RESERVE",
+    },
   ]),
-  chooseRenderTempLocation: vi.fn(async () => ({ path: "F:/RenderTemp", volume: "F:/", freeBytes: 100 * 1024 ** 3, capacityBytes: 500 * 1024 ** 3 })),
+  chooseRenderTempLocation: vi.fn(async () => ({
+    path: "F:/RenderTemp",
+    volume: "F:/",
+    freeBytes: 100 * 1024 ** 3,
+    capacityBytes: 500 * 1024 ** 3,
+  })),
   setRenderTempLocations: vi.fn(async (locations) => locations),
   getBackgroundJobs: vi.fn(async () => []),
   analyzeConcatRenderResume: vi.fn(async (checkpointId: string) => ({
@@ -59,9 +105,27 @@ const api = {
     video: { status: "SAME", renderAffecting: true, reason: "same" },
     timeline: { status: "SAME", renderAffecting: true, reason: "same" },
     baseAudio: { status: "SAME", renderAffecting: true, reason: "same" },
-    storage: { status: "CHANGED", oldValue: "E:/temp", newValue: "C:/temp", renderAffecting: false, reason: "relocated" },
-    uploadSettings: { status: "IGNORED", oldValue: "舊標題", newValue: "新標題", renderAffecting: false, reason: "upload only" },
-    appVersion: { status: "CHANGED", oldValue: "v0.81", newValue: "v0.82", renderAffecting: false, reason: "migration" },
+    storage: {
+      status: "CHANGED",
+      oldValue: "E:/temp",
+      newValue: "C:/temp",
+      renderAffecting: false,
+      reason: "relocated",
+    },
+    uploadSettings: {
+      status: "IGNORED",
+      oldValue: "舊標題",
+      newValue: "新標題",
+      renderAffecting: false,
+      reason: "upload only",
+    },
+    appVersion: {
+      status: "CHANGED",
+      oldValue: "v0.81",
+      newValue: "v0.82",
+      renderAffecting: false,
+      reason: "migration",
+    },
     reusableSegmentCount: 18,
     invalidSegmentCount: 2,
     reusableDurationMs: 3_600_000,
@@ -142,8 +206,14 @@ describe("concat render background mode", () => {
       value: {
         ...api,
         getConcatRenderResumeOffer: vi.fn(async () => ({
-          checkpointId: "resume-82", projectId: "project-a", outputPath: "E:/final.mp4", mode: "LOW_MEMORY",
-          completedSegmentCount: 20, totalSegmentCount: 20, concatStatus: "FAILED", updatedAt: "2026-09-29T00:00:00Z",
+          checkpointId: "resume-82",
+          projectId: "project-a",
+          outputPath: "E:/final.mp4",
+          mode: "LOW_MEMORY",
+          completedSegmentCount: 20,
+          totalSegmentCount: 20,
+          concatStatus: "FAILED",
+          updatedAt: "2026-09-29T00:00:00Z",
         })),
       },
     });
@@ -170,15 +240,20 @@ describe("concat render background mode", () => {
 
   it("blocks checkpoint continuation when analysis cannot prove timeline compatibility", async () => {
     const analyzeConcatRenderResume = vi.fn(async () => ({
-      checkpointId: "resume-unknown", decision: "NEEDS_ANALYSIS" as const,
+      checkpointId: "resume-unknown",
+      decision: "NEEDS_ANALYSIS" as const,
       video: { status: "UNKNOWN" as const, renderAffecting: true, reason: "legacy source snapshot unavailable" },
       timeline: { status: "UNKNOWN" as const, renderAffecting: true, reason: "legacy timeline snapshot unavailable" },
       baseAudio: { status: "UNKNOWN" as const, renderAffecting: true, reason: "legacy audio snapshot unavailable" },
       storage: { status: "SAME" as const, renderAffecting: false, reason: "same location" },
       uploadSettings: { status: "IGNORED" as const, renderAffecting: false, reason: "ignored" },
       appVersion: { status: "IGNORED" as const, renderAffecting: false, reason: "migration required" },
-      reusableSegmentCount: 0, invalidSegmentCount: 20, reusableDurationMs: 0,
-      partialRecovery: "UNKNOWN" as const, migrationRequired: true, sourceCheckpointPreserved: true,
+      reusableSegmentCount: 0,
+      invalidSegmentCount: 20,
+      reusableDurationMs: 0,
+      partialRecovery: "UNKNOWN" as const,
+      migrationRequired: true,
+      sourceCheckpointPreserved: true,
     }));
     Object.defineProperty(window, "sourceApp", {
       configurable: true,
@@ -186,8 +261,14 @@ describe("concat render background mode", () => {
         ...api,
         analyzeConcatRenderResume,
         getConcatRenderResumeOffer: vi.fn(async () => ({
-          checkpointId: "resume-unknown", projectId: "project-a", outputPath: "E:/final.mp4", mode: "LOW_MEMORY",
-          completedSegmentCount: 20, totalSegmentCount: 20, concatStatus: "FAILED", updatedAt: "2026-09-29T00:00:00Z",
+          checkpointId: "resume-unknown",
+          projectId: "project-a",
+          outputPath: "E:/final.mp4",
+          mode: "LOW_MEMORY",
+          completedSegmentCount: 20,
+          totalSegmentCount: 20,
+          concatStatus: "FAILED",
+          updatedAt: "2026-09-29T00:00:00Z",
         })),
       },
     });
@@ -207,10 +288,14 @@ describe("concat render background mode", () => {
     expect((await screen.findAllByText("C:/", { exact: false })).length).toBeGreaterThan(0);
     expect(screen.getByText("低於 Soft Reserve（警告）")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /新工作 TEMP 選址/ })).toHaveValue("AUTO");
-    await waitFor(() => expect(api.estimateConcatRender).toHaveBeenCalledWith(expect.objectContaining({
-      tempLocationSelection: "AUTO",
-      tempLocations: expect.arrayContaining([expect.objectContaining({ id: "primary" })]),
-    })));
+    await waitFor(() =>
+      expect(api.estimateConcatRender).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tempLocationSelection: "AUTO",
+          tempLocations: expect.arrayContaining([expect.objectContaining({ id: "primary" })]),
+        }),
+      ),
+    );
   });
 
   it("lets each TEMP location persist an editable soft reserve", async () => {
@@ -222,9 +307,11 @@ describe("concat render background mode", () => {
     fireEvent.change(primaryReserve, { target: { value: "0.5" } });
     fireEvent.blur(primaryReserve);
 
-    await waitFor(() => expect(api.setRenderTempLocations).toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({ id: "primary", reserveBytes: 0.5 * 1024 ** 3 }),
-    ])));
+    await waitFor(() =>
+      expect(api.setRenderTempLocations).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ id: "primary", reserveBytes: 0.5 * 1024 ** 3 })]),
+      ),
+    );
   });
 
   it("requires storage analysis before Resume and disables deletion of checkpoint-referenced segments", async () => {
@@ -234,35 +321,74 @@ describe("concat render background mode", () => {
       totalBytes: 20 * 1024 ** 3,
       immediatelyReclaimableBytes: 0,
       movableBytes: 20 * 1024 ** 3,
-      items: [{
-        artifactId: "segment-01", appVersion: "v0.82", projectId: "project-a", resumeId: "resume-82",
-        artifactType: "COMPLETED_SEGMENT", path: "E:/temp/segment-01.mkv", drive: "E:/", sizeBytes: 20 * 1024 ** 3,
-        status: "RESUME_REQUIRED", referencedByCurrentCheckpoint: true, safeToDelete: false, safeToMove: true,
-        reason: "目前 checkpoint 引用此片段",
-      }],
+      items: [
+        {
+          artifactId: "segment-01",
+          appVersion: "v0.82",
+          projectId: "project-a",
+          resumeId: "resume-82",
+          artifactType: "COMPLETED_SEGMENT",
+          path: "E:/temp/segment-01.mkv",
+          drive: "E:/",
+          sizeBytes: 20 * 1024 ** 3,
+          status: "RESUME_REQUIRED",
+          referencedByCurrentCheckpoint: true,
+          safeToDelete: false,
+          safeToMove: true,
+          reason: "目前 checkpoint 引用此片段",
+        },
+      ],
     };
     const storageAnalysis = {
       capturedAt: inventory.capturedAt,
       checkpointId: "resume-82",
-      volumes: [{
-        locationId: "primary", path: "E:/RenderTemp", volume: "E:/", role: "PRIMARY",
-        freeBytes: 164 * 1024 ** 3, capacityBytes: 500 * 1024 ** 3, softReserveBytes: 1024 ** 3,
-        hardSafetyLimitBytes: 0, tempUsageBytes: 80 * 1024 ** 3, activeBytes: 0, completedBytes: 80 * 1024 ** 3,
-        movableBytes: 20 * 1024 ** 3, schedulableBytes: 163 * 1024 ** 3, writable: true, osSafetyHealthy: true,
-      }],
+      volumes: [
+        {
+          locationId: "primary",
+          path: "E:/RenderTemp",
+          volume: "E:/",
+          role: "PRIMARY",
+          freeBytes: 164 * 1024 ** 3,
+          capacityBytes: 500 * 1024 ** 3,
+          softReserveBytes: 1024 ** 3,
+          hardSafetyLimitBytes: 0,
+          tempUsageBytes: 80 * 1024 ** 3,
+          activeBytes: 0,
+          completedBytes: 80 * 1024 ** 3,
+          movableBytes: 20 * 1024 ** 3,
+          schedulableBytes: 163 * 1024 ** 3,
+          writable: true,
+          osSafetyHealthy: true,
+        },
+      ],
       estimate: {
-        remainingVideoBytes: 10 * 1024 ** 3, remainingAudioBytes: 0, intermediatePeakBytes: 4 * 1024 ** 3,
-        finalOutputBytes: 1 * 1024 ** 3, partialBytes: 0, peakConcurrentTempBytes: 4 * 1024 ** 3,
-        softReserveBytes: 1024 ** 3, peakAdditionalBytes: 15 * 1024 ** 3,
+        remainingVideoBytes: 10 * 1024 ** 3,
+        remainingAudioBytes: 0,
+        intermediatePeakBytes: 4 * 1024 ** 3,
+        finalOutputBytes: 1 * 1024 ** 3,
+        partialBytes: 0,
+        peakConcurrentTempBytes: 4 * 1024 ** 3,
+        softReserveBytes: 1024 ** 3,
+        peakAdditionalBytes: 15 * 1024 ** 3,
       },
       inventory,
       plan: {
-        planId: "plan-1", checkpointId: "resume-82", action: "RESUME", shortfallBytes: 0,
-        moveItems: [], deleteArtifactIds: [], expectedPrimaryFreeAfterBytes: 164 * 1024 ** 3,
-        requiresUserConfirmation: false, reason: "空間足夠，可直接續轉。",
+        planId: "plan-1",
+        checkpointId: "resume-82",
+        action: "RESUME",
+        shortfallBytes: 0,
+        moveItems: [],
+        deleteArtifactIds: [],
+        expectedPrimaryFreeAfterBytes: 164 * 1024 ** 3,
+        requiresUserConfirmation: false,
+        reason: "空間足夠，可直接續轉。",
       },
-      canResumeWithoutCleanup: true, completedSegmentCount: 1, completedSegmentBytes: 20 * 1024 ** 3,
-      resumeFromSegmentIndex: 1, failureKind: "FFMPEG_ENOSPC_-28", failedPath: "E:/temp/final.mkv",
+      canResumeWithoutCleanup: true,
+      completedSegmentCount: 1,
+      completedSegmentBytes: 20 * 1024 ** 3,
+      resumeFromSegmentIndex: 1,
+      failureKind: "FFMPEG_ENOSPC_-28",
+      failedPath: "E:/temp/final.mkv",
     };
     const analyzeConcatRenderStorage = vi.fn(async () => storageAnalysis);
     const analyzeTemporaryArtifacts = vi.fn(async () => inventory);
@@ -273,8 +399,14 @@ describe("concat render background mode", () => {
         analyzeConcatRenderStorage,
         analyzeTemporaryArtifacts,
         getConcatRenderResumeOffer: vi.fn(async () => ({
-          checkpointId: "resume-82", projectId: "project-a", outputPath: "E:/final.mp4", mode: "LOW_MEMORY",
-          completedSegmentCount: 10, totalSegmentCount: 10, concatStatus: "FAILED", updatedAt: "2026-09-29T00:00:00Z",
+          checkpointId: "resume-82",
+          projectId: "project-a",
+          outputPath: "E:/final.mp4",
+          mode: "LOW_MEMORY",
+          completedSegmentCount: 10,
+          totalSegmentCount: 10,
+          concatStatus: "FAILED",
+          updatedAt: "2026-09-29T00:00:00Z",
         })),
       },
     });
@@ -292,46 +424,138 @@ describe("concat render background mode", () => {
 
   it("shows the recovery wizard and resumes only after the refreshed analysis allows it", async () => {
     const item = {
-      artifactId: "segment-move", appVersion: "v0.82", artifactType: "COMPLETED_SEGMENT",
-      path: "E:/RenderTemp/segment.mkv", fileName: "segment.mkv", drive: "E:/", sizeBytes: 11 * 1024 ** 3,
-      status: "RESUME_REQUIRED", referencedByCurrentCheckpoint: true, safeToDelete: false, safeToMove: true,
+      artifactId: "segment-move",
+      appVersion: "v0.82",
+      artifactType: "COMPLETED_SEGMENT",
+      path: "E:/RenderTemp/segment.mkv",
+      fileName: "segment.mkv",
+      drive: "E:/",
+      sizeBytes: 11 * 1024 ** 3,
+      status: "RESUME_REQUIRED",
+      referencedByCurrentCheckpoint: true,
+      safeToDelete: false,
+      safeToMove: true,
       reason: "目前 checkpoint 引用此片段",
     };
-    const inventory = { capturedAt: "2026-09-29T00:00:00.000Z", roots: ["E:/RenderTemp"], totalBytes: item.sizeBytes,
-      immediatelyReclaimableBytes: 0, movableBytes: item.sizeBytes, items: [item] };
+    const inventory = {
+      capturedAt: "2026-09-29T00:00:00.000Z",
+      roots: ["E:/RenderTemp"],
+      totalBytes: item.sizeBytes,
+      immediatelyReclaimableBytes: 0,
+      movableBytes: item.sizeBytes,
+      items: [item],
+    };
     const storageAnalysis = {
-      capturedAt: inventory.capturedAt, checkpointId: "resume-wizard", volumes: [
-        { locationId: "primary", path: "E:/RenderTemp", volume: "E:/", role: "PRIMARY", freeBytes: 15 * 1024 ** 3,
-          capacityBytes: 100 * 1024 ** 3, softReserveBytes: 2 * 1024 ** 3, hardSafetyLimitBytes: 0, tempUsageBytes: item.sizeBytes,
-          activeBytes: 0, completedBytes: item.sizeBytes, movableBytes: item.sizeBytes, schedulableBytes: 13 * 1024 ** 3, writable: true, osSafetyHealthy: true },
-        { locationId: "fallback", path: "C:/Users/test/AppData/Local/Temp", volume: "C:/", role: "FALLBACK", freeBytes: 30 * 1024 ** 3,
-          capacityBytes: 100 * 1024 ** 3, softReserveBytes: 1 * 1024 ** 3, hardSafetyLimitBytes: 0, tempUsageBytes: 0,
-          activeBytes: 0, completedBytes: 0, movableBytes: 0, schedulableBytes: 29 * 1024 ** 3, writable: true, osSafetyHealthy: true },
+      capturedAt: inventory.capturedAt,
+      checkpointId: "resume-wizard",
+      volumes: [
+        {
+          locationId: "primary",
+          path: "E:/RenderTemp",
+          volume: "E:/",
+          role: "PRIMARY",
+          freeBytes: 15 * 1024 ** 3,
+          capacityBytes: 100 * 1024 ** 3,
+          softReserveBytes: 2 * 1024 ** 3,
+          hardSafetyLimitBytes: 0,
+          tempUsageBytes: item.sizeBytes,
+          activeBytes: 0,
+          completedBytes: item.sizeBytes,
+          movableBytes: item.sizeBytes,
+          schedulableBytes: 13 * 1024 ** 3,
+          writable: true,
+          osSafetyHealthy: true,
+        },
+        {
+          locationId: "fallback",
+          path: "C:/Users/test/AppData/Local/Temp",
+          volume: "C:/",
+          role: "FALLBACK",
+          freeBytes: 30 * 1024 ** 3,
+          capacityBytes: 100 * 1024 ** 3,
+          softReserveBytes: 1 * 1024 ** 3,
+          hardSafetyLimitBytes: 0,
+          tempUsageBytes: 0,
+          activeBytes: 0,
+          completedBytes: 0,
+          movableBytes: 0,
+          schedulableBytes: 29 * 1024 ** 3,
+          writable: true,
+          osSafetyHealthy: true,
+        },
       ],
-      estimate: { remainingVideoBytes: 1, remainingAudioBytes: 0, intermediatePeakBytes: 1, finalOutputBytes: 1,
-        partialBytes: 0, peakConcurrentTempBytes: 1, softReserveBytes: 0, peakAdditionalBytes: 1 },
+      estimate: {
+        remainingVideoBytes: 1,
+        remainingAudioBytes: 0,
+        intermediatePeakBytes: 1,
+        finalOutputBytes: 1,
+        partialBytes: 0,
+        peakConcurrentTempBytes: 1,
+        softReserveBytes: 0,
+        peakAdditionalBytes: 1,
+      },
       inventory,
-      plan: { planId: "plan-wizard", checkpointId: "resume-wizard", action: "PROPOSE_MOVE", shortfallBytes: 1,
-        moveItems: [{ artifactId: item.artifactId, sourcePath: item.path, destinationPath: "C:/Users/test/AppData/Local/Temp/segment.mkv",
-          sizeBytes: item.sizeBytes, sourceLocationId: "primary", destinationLocationId: "fallback", reason: "空間需求" }], deleteArtifactIds: [],
-        expectedPrimaryFreeAfterBytes: 10, expectedDestinationFreeAfterBytes: 10, requiresUserConfirmation: true, reason: "需要先搬移片段" },
-      canResumeWithoutCleanup: false, completedSegmentCount: 1, completedSegmentBytes: item.sizeBytes,
+      plan: {
+        planId: "plan-wizard",
+        checkpointId: "resume-wizard",
+        action: "PROPOSE_MOVE",
+        shortfallBytes: 1,
+        moveItems: [
+          {
+            artifactId: item.artifactId,
+            sourcePath: item.path,
+            destinationPath: "C:/Users/test/AppData/Local/Temp/segment.mkv",
+            sizeBytes: item.sizeBytes,
+            sourceLocationId: "primary",
+            destinationLocationId: "fallback",
+            reason: "空間需求",
+          },
+        ],
+        deleteArtifactIds: [],
+        expectedPrimaryFreeAfterBytes: 10,
+        expectedDestinationFreeAfterBytes: 10,
+        requiresUserConfirmation: true,
+        reason: "需要先搬移片段",
+      },
+      canResumeWithoutCleanup: false,
+      completedSegmentCount: 1,
+      completedSegmentBytes: item.sizeBytes,
       resumeFromSegmentIndex: 1,
     };
-    const refreshedAnalysis = { ...storageAnalysis, canResumeWithoutCleanup: true, plan: { ...storageAnalysis.plan, action: "RESUME" } };
+    const refreshedAnalysis = {
+      ...storageAnalysis,
+      canResumeWithoutCleanup: true,
+      plan: { ...storageAnalysis.plan, action: "RESUME" },
+    };
     const resumeConcatRender = vi.fn(async () => ({}));
-    const executeConcatRenderStoragePlan = vi.fn(async () => ({ checkpointId: "resume-wizard", copiedBytes: item.sizeBytes,
-      deletedSourceBytes: 1024, migratedArtifactIds: [item.artifactId], sourcePreservedArtifactIds: [], analysis: refreshedAnalysis }));
+    const executeConcatRenderStoragePlan = vi.fn(async () => ({
+      checkpointId: "resume-wizard",
+      copiedBytes: item.sizeBytes,
+      deletedSourceBytes: 1024,
+      migratedArtifactIds: [item.artifactId],
+      sourcePreservedArtifactIds: [],
+      analysis: refreshedAnalysis,
+    }));
     const revealRegisteredRenderTempPath = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn(async () => {}) } });
     Object.defineProperty(window, "sourceApp", {
       configurable: true,
       value: {
-        ...api, resumeConcatRender, executeConcatRenderStoragePlan, revealRegisteredRenderTempPath,
+        ...api,
+        resumeConcatRender,
+        executeConcatRenderStoragePlan,
+        revealRegisteredRenderTempPath,
         analyzeConcatRenderStorage: vi.fn(async () => storageAnalysis),
-        getConcatRenderResumeOffer: vi.fn(async () => ({ checkpointId: "resume-wizard", projectId: "project-a",
-          outputPath: "E:/final.mp4", mode: "LOW_MEMORY", completedSegmentCount: 1, totalSegmentCount: 2,
-          concatStatus: "FAILED", updatedAt: "2026-09-29T00:00:00Z" })),
+        getConcatRenderResumeOffer: vi.fn(async () => ({
+          checkpointId: "resume-wizard",
+          projectId: "project-a",
+          outputPath: "E:/final.mp4",
+          mode: "LOW_MEMORY",
+          completedSegmentCount: 1,
+          totalSegmentCount: 2,
+          concatStatus: "FAILED",
+          updatedAt: "2026-09-29T00:00:00Z",
+        })),
       },
     });
     render(<ConcatRenderModal assets={[asset]} onClose={vi.fn()} />);
@@ -357,9 +581,11 @@ describe("concat render background mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "複製目的地路徑" }));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("C:/Users/test/AppData/Local/Temp/segment.mkv");
     fireEvent.click(screen.getByRole("button", { name: "選擇並登錄次要 TEMP…" }));
-    await waitFor(() => expect(api.setRenderTempLocations).toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({ role: "FALLBACK", path: "F:/RenderTemp" }),
-    ])));
+    await waitFor(() =>
+      expect(api.setRenderTempLocations).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ role: "FALLBACK", path: "F:/RenderTemp" })]),
+      ),
+    );
     expect(screen.getByRole("checkbox", { name: /自動繼續轉檔/ })).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "由 APP 搬移 1 個項目" }));
     await waitFor(() => expect(resumeConcatRender).toHaveBeenCalledWith("resume-wizard"));
@@ -411,7 +637,10 @@ describe("concat render background mode", () => {
       mediaInfo: { durationMs: 3_000 },
     } as never;
     const host = {
-      id: "a", kind: "VIDEO", fileName: "測試.mp4", sourcePath: "C:/測試.mp4",
+      id: "a",
+      kind: "VIDEO",
+      fileName: "測試.mp4",
+      sourcePath: "C:/測試.mp4",
       mediaInfo: { durationMs: 8_000, audioCodec: "aac" },
     } as never;
     const project = {
@@ -437,26 +666,68 @@ describe("concat render background mode", () => {
       introExcludedSegmentIds: [],
       recentIntroRemovals: [],
       placementDecisions: [],
-      mediaInsertions: [{
-        id: "insert-a", anchorVideoAssetId: "a", insertedAssetId: "photo-a", atMs: 4_000,
-        sourceInMs: 0, sourceOutMs: 3_000, sequenceIndex: 0, previousPlacement: "PENDING",
-        previousTimelineIndex: 1, createdAt: "", insertionAudio: {
-          sfxEnabled: true, sfxId: "DUNES_CAMERA_SHUTTER_CLICK_14671", sfxVolumePercent: 70,
-          bgmTrackId: "music", bgmVolumePercent: 28, fadeMs: 180, loopCrossfadeMs: 120,
+      mediaInsertions: [
+        {
+          id: "insert-a",
+          anchorVideoAssetId: "a",
+          insertedAssetId: "photo-a",
+          atMs: 4_000,
+          sourceInMs: 0,
+          sourceOutMs: 3_000,
+          sequenceIndex: 0,
+          previousPlacement: "PENDING",
+          previousTimelineIndex: 1,
+          createdAt: "",
+          insertionAudio: {
+            sfxEnabled: true,
+            sfxId: "DUNES_CAMERA_SHUTTER_CLICK_14671",
+            sfxVolumePercent: 70,
+            bgmTrackId: "music",
+            bgmVolumePercent: 28,
+            fadeMs: 180,
+            loopCrossfadeMs: 120,
+          },
         },
-      }],
+      ],
       photoSoundEffect: {
-        id: "DUNES_CAMERA_SHUTTER_CLICK_14671", displayName: "相機快門效果音（SFX）", sourceProject: "licensed",
-        sourceUrl: "", licenseUrl: "", sha256: "0AC71ECABF302784F5FFB9483C2939C46B1784AA0D016A322CB6D1A0ECA07B93", volumePercent: 70,
+        id: "DUNES_CAMERA_SHUTTER_CLICK_14671",
+        displayName: "相機快門效果音（SFX）",
+        sourceProject: "licensed",
+        sourceUrl: "",
+        licenseUrl: "",
+        sha256: "0AC71ECABF302784F5FFB9483C2939C46B1784AA0D016A322CB6D1A0ECA07B93",
+        volumePercent: 70,
       },
-      bgmTracks: [{
-        id: "music", sourcePath: "C:/music.mp3", fileName: "旅程.mp3", sizeBytes: 1, durationMs: 1_000,
-        sourceInMs: 0, sourceOutMs: 1_000, timelineInMs: 0, timelineOutMs: 1_000,
-        fadeInMs: 0, fadeOutMs: 0, volumePercent: 35, sourcePolicy: "READ_ONLY", addedAt: "",
-      }],
+      bgmTracks: [
+        {
+          id: "music",
+          sourcePath: "C:/music.mp3",
+          fileName: "旅程.mp3",
+          sizeBytes: 1,
+          durationMs: 1_000,
+          sourceInMs: 0,
+          sourceOutMs: 1_000,
+          timelineInMs: 0,
+          timelineOutMs: 1_000,
+          fadeInMs: 0,
+          fadeOutMs: 0,
+          volumePercent: 35,
+          sourcePolicy: "READ_ONLY",
+          addedAt: "",
+        },
+      ],
       sourceAudioVolumePercent: 100,
-      aiStoryContext: { topic: "", locations: [], people: [], storySummary: "", audiencePromise: "", subtitleLanguage: "zh-TW" },
-      subtitleCues: [], timelineRevision: 1, subtitleTimelineRevision: 1,
+      aiStoryContext: {
+        topic: "",
+        locations: [],
+        people: [],
+        storySummary: "",
+        audiencePromise: "",
+        subtitleLanguage: "zh-TW",
+      },
+      subtitleCues: [],
+      timelineRevision: 1,
+      subtitleTimelineRevision: 1,
       audioMixPolicy: "ORIGINAL_PLUS_BGM_LIMITED_0_95",
     } as never;
     const localApi = {
@@ -471,11 +742,13 @@ describe("concat render background mode", () => {
       <ConcatRenderModal
         project={project}
         assets={[host, photo]}
-        mainClips={[
-          { assetId: "a", inMs: 0, outMs: 4_000 },
-          { assetId: "photo-a", inMs: 0, outMs: 3_000, mediaInsertionId: "insert-a" },
-          { assetId: "a", inMs: 4_000, outMs: 8_000 },
-        ] as never}
+        mainClips={
+          [
+            { assetId: "a", inMs: 0, outMs: 4_000 },
+            { assetId: "photo-a", inMs: 0, outMs: 3_000, mediaInsertionId: "insert-a" },
+            { assetId: "a", inMs: 4_000, outMs: 8_000 },
+          ] as never
+        }
         onClose={vi.fn()}
       />,
     );

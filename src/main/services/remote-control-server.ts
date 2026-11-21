@@ -60,7 +60,7 @@ function lanAddresses(): string[] {
       result.add(record.address);
     }
   }
-  const priority = (address: string) => address.startsWith("192.168.") ? 0 : address.startsWith("10.") ? 1 : 2;
+  const priority = (address: string) => (address.startsWith("192.168.") ? 0 : address.startsWith("10.") ? 1 : 2);
   return [...result].sort((left, right) => priority(left) - priority(right) || left.localeCompare(right));
 }
 
@@ -81,7 +81,8 @@ function text(response: ServerResponse, status: number, contentType: string, bod
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
-    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    "Content-Security-Policy":
+      "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
   });
   response.end(body);
 }
@@ -250,7 +251,11 @@ export class RemoteControlServer {
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     try {
-      if (!isPrivateLanAddress(request.socket.remoteAddress) || !this.allowedHost(request) || !this.allowedOrigin(request)) {
+      if (
+        !isPrivateLanAddress(request.socket.remoteAddress) ||
+        !this.allowedHost(request) ||
+        !this.allowedOrigin(request)
+      ) {
         json(response, 403, { error: "只允许同一局域网的安全连接。" });
         return;
       }
@@ -259,9 +264,12 @@ export class RemoteControlServer {
         return;
       }
       const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
-      if (request.method === "GET" && url.pathname === "/") return text(response, 200, "text/html; charset=utf-8", REMOTE_HTML);
-      if (request.method === "GET" && url.pathname === "/styles.css") return text(response, 200, "text/css; charset=utf-8", REMOTE_CSS);
-      if (request.method === "GET" && url.pathname === "/app.js") return text(response, 200, "text/javascript; charset=utf-8", REMOTE_JS);
+      if (request.method === "GET" && url.pathname === "/")
+        return text(response, 200, "text/html; charset=utf-8", REMOTE_HTML);
+      if (request.method === "GET" && url.pathname === "/styles.css")
+        return text(response, 200, "text/css; charset=utf-8", REMOTE_CSS);
+      if (request.method === "GET" && url.pathname === "/app.js")
+        return text(response, 200, "text/javascript; charset=utf-8", REMOTE_JS);
       if (request.method === "POST" && url.pathname === "/api/pair") {
         if (!this.pairingAllowed(request)) {
           json(response, 429, { error: "配对失败次数过多，请在 Windows 端重新产生 QR Code 后稍候再试。" });
@@ -269,7 +277,12 @@ export class RemoteControlServer {
         }
         const body = await readJsonBody(request);
         const raw = typeof body.token === "string" ? body.token : "";
-        if (!this.pairing || this.pairing.consumed || this.pairing.expiresAt <= Date.now() || hash(raw) !== this.pairing.tokenHash) {
+        if (
+          !this.pairing ||
+          this.pairing.consumed ||
+          this.pairing.expiresAt <= Date.now() ||
+          hash(raw) !== this.pairing.tokenHash
+        ) {
           json(response, 401, { error: "一次性配对连结无效或已使用，请在 Windows 端重新产生。" });
           return;
         }
@@ -285,7 +298,10 @@ export class RemoteControlServer {
         });
         this.pairingRates.delete(normalizeAddress(request.socket.remoteAddress));
         this.notifyStatus();
-        response.setHeader("Set-Cookie", `scenery_remote=${sessionToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`);
+        response.setHeader(
+          "Set-Cookie",
+          `scenery_remote=${sessionToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
+        );
         json(response, 200, { csrfToken, expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString() });
         return;
       }
@@ -324,10 +340,14 @@ export class RemoteControlServer {
         const cancelNonce = token(24);
         authenticatedSession.cancelNonceHash = hash(cancelNonce);
         authenticatedSession.cancelNonceExpiresAt = Date.now() + 30_000;
-        json(response, 200, { cancelNonce, expiresAt: new Date(authenticatedSession.cancelNonceExpiresAt).toISOString() });
+        json(response, 200, {
+          cancelNonce,
+          expiresAt: new Date(authenticatedSession.cancelNonceExpiresAt).toISOString(),
+        });
         return;
       }
-      const command = request.method === "POST" ? /^\/api\/command\/(start|pause|resume|cancel)$/.exec(url.pathname)?.[1] : undefined;
+      const command =
+        request.method === "POST" ? /^\/api\/command\/(start|pause|resume|cancel)$/.exec(url.pathname)?.[1] : undefined;
       if (command) {
         const body = await readJsonBody(request);
         if (

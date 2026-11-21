@@ -378,14 +378,17 @@ function buildBgmSourceChain(
       outputLabel = nextLabel;
     }
     const trimmedLabel = `${prefix}looped`;
-    filters.push(`[${outputLabel}]atrim=duration=${ffmpegNumber(durationSeconds)},asetpts=PTS-STARTPTS[${trimmedLabel}]`);
+    filters.push(
+      `[${outputLabel}]atrim=duration=${ffmpegNumber(durationSeconds)},asetpts=PTS-STARTPTS[${trimmedLabel}]`,
+    );
     return { filters, outputLabel: trimmedLabel };
   }
   if (track.loop && repeatCount > 1) {
     const smoothingSeconds = Math.min(Math.max(0.005, crossfadeSeconds || 0.06), sourceSpanSeconds / 4);
-    const seamGain = smoothingSeconds > 0
-      ? `if(lt(mod(t\,${ffmpegNumber(sourceSpanSeconds)})\,${ffmpegNumber(smoothingSeconds)})\,mod(t\,${ffmpegNumber(sourceSpanSeconds)})/${ffmpegNumber(smoothingSeconds)}\,if(gt(mod(t\,${ffmpegNumber(sourceSpanSeconds)})\,${ffmpegNumber(sourceSpanSeconds - smoothingSeconds)})\,(${ffmpegNumber(sourceSpanSeconds)}-mod(t\,${ffmpegNumber(sourceSpanSeconds)}))/${ffmpegNumber(smoothingSeconds)}\,1))`
-      : "1";
+    const seamGain =
+      smoothingSeconds > 0
+        ? `if(lt(mod(t\,${ffmpegNumber(sourceSpanSeconds)})\,${ffmpegNumber(smoothingSeconds)})\,mod(t\,${ffmpegNumber(sourceSpanSeconds)})/${ffmpegNumber(smoothingSeconds)}\,if(gt(mod(t\,${ffmpegNumber(sourceSpanSeconds)})\,${ffmpegNumber(sourceSpanSeconds - smoothingSeconds)})\,(${ffmpegNumber(sourceSpanSeconds)}-mod(t\,${ffmpegNumber(sourceSpanSeconds)}))/${ffmpegNumber(smoothingSeconds)}\,1))`
+        : "1";
     const outputLabel = `${prefix}looped`;
     return {
       filters: [
@@ -715,9 +718,7 @@ export function buildConcatFilterGraph(
     const sourceSpanMs = Math.max(1, track.sourceSpanMs ?? track.sourceOutMs - track.sourceInMs);
     const source = buildBgmSourceChain(inputIndex, bgmIndex, track, durationSeconds, sourceSpanMs);
     filters.push(...source.filters);
-    const chain = [
-      `[${source.outputLabel}]volume=${ffmpegNumber(track.volumePercent / 100)}`,
-    ];
+    const chain = [`[${source.outputLabel}]volume=${ffmpegNumber(track.volumePercent / 100)}`];
     if (track.fadeInMs > 0) chain.push(`afade=t=in:st=0:d=${ffmpegNumber(track.fadeInMs / 1000)}`);
     if (track.fadeOutMs > 0) {
       const effectiveFadeOut = Math.min(track.fadeOutMs / 1000, durationSeconds);
@@ -989,10 +990,55 @@ export function buildIntermediateVideoCodecArgs(
 ): string[] {
   const rate = intermediateBitrateArgs(resolution, resourceProfile);
   if (videoCodec === "H264_NVENC" || videoCodec === "H265_NVENC")
-    return ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "20", "-b:v", rate.bitrate, "-maxrate", rate.maxrate, "-bufsize", rate.bufsize, "-profile:v", "high"];
+    return [
+      "-c:v",
+      "h264_nvenc",
+      "-preset",
+      "p4",
+      "-rc",
+      "vbr",
+      "-cq",
+      "20",
+      "-b:v",
+      rate.bitrate,
+      "-maxrate",
+      rate.maxrate,
+      "-bufsize",
+      rate.bufsize,
+      "-profile:v",
+      "high",
+    ];
   if (videoCodec === "H265_QSV" || videoCodec === "H264_QSV")
-    return ["-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "20", "-b:v", rate.bitrate, "-maxrate", rate.maxrate, "-bufsize", rate.bufsize, "-profile:v", "high"];
-  return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-maxrate", rate.maxrate, "-bufsize", rate.bufsize, "-profile:v", "high"];
+    return [
+      "-c:v",
+      "h264_qsv",
+      "-preset",
+      "medium",
+      "-global_quality",
+      "20",
+      "-b:v",
+      rate.bitrate,
+      "-maxrate",
+      rate.maxrate,
+      "-bufsize",
+      rate.bufsize,
+      "-profile:v",
+      "high",
+    ];
+  return [
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "18",
+    "-maxrate",
+    rate.maxrate,
+    "-bufsize",
+    rate.bufsize,
+    "-profile:v",
+    "high",
+  ];
 }
 
 function encoderName(videoCodec: RenderVideoCodec, intermediate = false): string {
@@ -1122,21 +1168,29 @@ function legacyInputCheckpointKey(input: ConcatInput, index: number): string {
   return checkpointKey({
     index,
     ...legacyStableInput,
-    ...(card ? { mainStartCard: {
-      durationSeconds: card.durationSeconds,
-      line1: card.line1,
-      line2: card.line2,
-      line1FontSize1080p: card.line1FontSize1080p,
-      line2FontSize1080p: card.line2FontSize1080p,
-      lineGap1080p: card.lineGap1080p,
-      overlayOpacityPercent: card.overlayOpacityPercent,
-      transitionStyle: card.transitionStyle,
-      sourceDurationMs: card.sourceDurationMs,
-    } } : {}),
+    ...(card
+      ? {
+          mainStartCard: {
+            durationSeconds: card.durationSeconds,
+            line1: card.line1,
+            line2: card.line2,
+            line1FontSize1080p: card.line1FontSize1080p,
+            line2FontSize1080p: card.line2FontSize1080p,
+            lineGap1080p: card.lineGap1080p,
+            overlayOpacityPercent: card.overlayOpacityPercent,
+            transitionStyle: card.transitionStyle,
+            sourceDurationMs: card.sourceDurationMs,
+          },
+        }
+      : {}),
   });
 }
 
-export function legacyLevelOneIdsForProject(project: ProjectManifest, request: ConcatRenderRequest, maximumInputs: number): string[] | undefined {
+export function legacyLevelOneIdsForProject(
+  project: ProjectManifest,
+  request: ConcatRenderRequest,
+  maximumInputs: number,
+): string[] | undefined {
   if (request.purpose !== "CONCAT" || !request.clipSelections?.length) return undefined;
   const intro = introSegmentsForOutput(project.introSegments, project.introSegmentMaxDurationMs);
   const assetsById = new Map(project.sources.map((asset) => [asset.id, asset]));
@@ -1144,7 +1198,8 @@ export function legacyLevelOneIdsForProject(project: ProjectManifest, request: C
   const inputs: ConcatInput[] = request.orderedAssetIds.map((assetId, index) => {
     const asset = assetsById.get(assetId);
     const range = request.clipSelections![index];
-    if (!asset || !range || range.assetId !== asset.id || asset.metadataState !== "READY") throw new Error("Current Project does not match checkpoint selections.");
+    if (!asset || !range || range.assetId !== asset.id || asset.metadataState !== "READY")
+      throw new Error("Current Project does not match checkpoint selections.");
     const isIntro = Boolean(request.prependIntro) && index < intro.length;
     const startMs = Math.round(range.inMs);
     const durationMs = Math.round(range.outMs) - startMs;
@@ -1186,13 +1241,28 @@ export function legacyLevelOneIdsForProject(project: ProjectManifest, request: C
       photoSoundEnabled: false,
       volumeSegments: [],
       zoomSegments: [],
-      mainStartCard: { ...mainStartCard, sourceDurationMs: background.durationMs, line1TextFilePath: "", line2TextFilePath: "", fontFilePath: "" },
+      mainStartCard: {
+        ...mainStartCard,
+        sourceDurationMs: background.durationMs,
+        line1TextFilePath: "",
+        line2TextFilePath: "",
+        fontFilePath: "",
+      },
     });
   }
   const leafKeys = inputs.map(legacyInputCheckpointKey);
   const ids: string[] = [];
   for (let index = 0; index < leafKeys.length; index += maximumInputs)
-    ids.push(checkpointKey({ segmentPipelineVersion: 2, level: 0, inputs: leafKeys.slice(index, index + maximumInputs), transitionSeconds: request.transitionSeconds, resolution: request.resolution, portrait: false }));
+    ids.push(
+      checkpointKey({
+        segmentPipelineVersion: 2,
+        level: 0,
+        inputs: leafKeys.slice(index, index + maximumInputs),
+        transitionSeconds: request.transitionSeconds,
+        resolution: request.resolution,
+        portrait: false,
+      }),
+    );
   return ids;
 }
 
@@ -1200,10 +1270,12 @@ function canonicalSerialize(value: unknown): string {
   const normalize = (item: unknown): unknown => {
     if (Array.isArray(item)) return item.map(normalize);
     if (!item || typeof item !== "object") return item;
-    return Object.fromEntries(Object.entries(item as Record<string, unknown>)
-      .filter(([, entry]) => entry !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => [key, normalize(entry)]));
+    return Object.fromEntries(
+      Object.entries(item as Record<string, unknown>)
+        .filter(([, entry]) => entry !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, normalize(entry)]),
+    );
   };
   return JSON.stringify(normalize(value));
 }
@@ -1263,24 +1335,26 @@ function projectWithoutInsertionAudio(project: ProjectManifest): unknown {
   const mutable = stable as unknown as Record<string, any>;
   mutable.mediaInsertions = mutable.mediaInsertions.map(({ insertionAudio: _audio, ...item }: any) => item);
   mutable.introSegments = mutable.introSegments.map(({ insertionAudio: _audio, ...item }: any) => item);
-  mutable.sources = mutable.sources.map(({
-    sourcePath: _sourcePath,
-    sourceIdentity: _sourceIdentity,
-    fileName: _fileName,
-    extension: _extension,
-    fileCreatedAt: _fileCreatedAt,
-    addedAt: _addedAt,
-    addedOrder: _addedOrder,
-    sourcePolicy: _assetSourcePolicy,
-    previewPolicy: _assetPreviewPolicy,
-    previewCacheKey: _previewCacheKey,
-    metadataState: _metadataState,
-    metadataError: _metadataError,
-    mainAudioGates: _gates,
-    photoSoundEnabled: _sfx,
-    dubWithBgm: _dub,
-    ...asset
-  }: any) => asset);
+  mutable.sources = mutable.sources.map(
+    ({
+      sourcePath: _sourcePath,
+      sourceIdentity: _sourceIdentity,
+      fileName: _fileName,
+      extension: _extension,
+      fileCreatedAt: _fileCreatedAt,
+      addedAt: _addedAt,
+      addedOrder: _addedOrder,
+      sourcePolicy: _assetSourcePolicy,
+      previewPolicy: _assetPreviewPolicy,
+      previewCacheKey: _previewCacheKey,
+      metadataState: _metadataState,
+      metadataError: _metadataError,
+      mainAudioGates: _gates,
+      photoSoundEnabled: _sfx,
+      dubWithBgm: _dub,
+      ...asset
+    }: any) => asset,
+  );
   mutable.bgmTracks = [];
   mutable.mainStartCue = { enabled: false, durationMs: 0 };
   return mutable;
@@ -1303,12 +1377,14 @@ export function pictureBaseRenderSignature(project: ProjectManifest, request: Co
     ...stableRequest
   } = request;
   return createHash("sha256")
-    .update(canonicalSerialize({
-      project: projectWithoutInsertionAudio(project),
-      request: stableRequest,
-      orientationNormalizerVersion: ORIENTATION_NORMALIZER_VERSION,
-      baseMasterVersion: "timeline-base-master-v1",
-    }))
+    .update(
+      canonicalSerialize({
+        project: projectWithoutInsertionAudio(project),
+        request: stableRequest,
+        orientationNormalizerVersion: ORIENTATION_NORMALIZER_VERSION,
+        baseMasterVersion: "timeline-base-master-v1",
+      }),
+    )
     .digest("hex")
     .toUpperCase();
 }
@@ -1320,14 +1396,16 @@ export function finalInsertionAudioSignature(
   postBgmTracks: readonly BgmRenderInput[] = [],
 ): string {
   return createHash("sha256")
-    .update(canonicalSerialize({
-      pictureSignature,
-      plan,
-      postBgmTracks,
-      audioProcessing: sanitizeAudioProcessingOptions(request.audioProcessing),
-      audioProtection: validateAudioProtectionOptions(request.audioProtection),
-      postVersion: "canonical-track-gates-post-v2",
-    }))
+    .update(
+      canonicalSerialize({
+        pictureSignature,
+        plan,
+        postBgmTracks,
+        audioProcessing: sanitizeAudioProcessingOptions(request.audioProcessing),
+        audioProtection: validateAudioProtectionOptions(request.audioProtection),
+        postVersion: "canonical-track-gates-post-v2",
+      }),
+    )
     .digest("hex")
     .toUpperCase();
 }
@@ -1427,20 +1505,31 @@ export class ConcatRenderService {
   ): Promise<ResumeCompatibilityReport> {
     const project = this.store.getProject();
     let checkpoint = await this.checkpoints.load(project.id);
-    if (!checkpoint || (checkpoint.checkpointId !== checkpointId && checkpoint.recoveryMigration?.sourceCheckpointId !== checkpointId))
+    if (
+      !checkpoint ||
+      (checkpoint.checkpointId !== checkpointId && checkpoint.recoveryMigration?.sourceCheckpointId !== checkpointId)
+    )
       throw new Error("找不到可分析的 Resume checkpoint。");
-    const hasMissingCompletedArtifact = (await Promise.all(checkpoint.segments.map(async (segment) => {
-      if (segment.status !== "COMPLETED") return false;
-      const item = await stat(segment.outputPath).catch(() => undefined);
-      return !item?.isFile() || Boolean(segment.sizeBytes && item.size !== segment.sizeBytes);
-    }))).some(Boolean);
+    const hasMissingCompletedArtifact = (
+      await Promise.all(
+        checkpoint.segments.map(async (segment) => {
+          if (segment.status !== "COMPLETED") return false;
+          const item = await stat(segment.outputPath).catch(() => undefined);
+          return !item?.isFile() || Boolean(segment.sizeBytes && item.size !== segment.sizeBytes);
+        }),
+      )
+    ).some(Boolean);
     if (hasMissingCompletedArtifact) {
       const roots = [...configuredLocations, ...(checkpoint.tempLocations ?? [])]
         .filter((item) => item.enabled !== false)
         .map((item) => item.path);
       if (roots.length) {
         const preview = await this.checkpoints.discoverAndRemapCompletedArtifacts(
-          project.id, checkpoint.checkpointId, roots, true, false,
+          project.id,
+          checkpoint.checkpointId,
+          roots,
+          true,
+          false,
         );
         for (const segment of checkpoint.segments) {
           const relocated = preview.remappedPaths?.[segment.id];
@@ -1450,27 +1539,50 @@ export class ConcatRenderService {
     }
     const currentPictureSignature = pictureBaseRenderSignature(project, checkpoint.request);
     const pictureProvenSame = checkpoint.pictureBaseSignature === currentPictureSignature;
-    const validity = await Promise.all(checkpoint.segments.map(async (segment) =>
-      segment.status === "COMPLETED" && await this.checkpoints.validateSegment(segment),
-    ));
+    const validity = await Promise.all(
+      checkpoint.segments.map(
+        async (segment) => segment.status === "COMPLETED" && (await this.checkpoints.validateSegment(segment)),
+      ),
+    );
     const reusable = checkpoint.segments.filter((_segment, index) => validity[index]);
-    const referencedAssets = [...new Set(checkpoint.request.orderedAssetIds)].map((id) => project.sources.find((asset) => asset.id === id));
-    const sourceContinuity = referencedAssets.every(Boolean) && (await Promise.all(referencedAssets.map(async (asset) => {
-      if (!asset) return false;
-      const observed = await stat(asset.sourcePath).catch(() => undefined);
-      return Boolean(observed?.isFile()) && observed!.size === asset.sizeBytes &&
-        observed!.mtime.toISOString() === asset.fileModifiedAt && Date.parse(asset.fileModifiedAt) <= Date.parse(checkpoint.createdAt);
-    }))).every(Boolean);
+    const referencedAssets = [...new Set(checkpoint.request.orderedAssetIds)].map((id) =>
+      project.sources.find((asset) => asset.id === id),
+    );
+    const sourceContinuity =
+      referencedAssets.every(Boolean) &&
+      (
+        await Promise.all(
+          referencedAssets.map(async (asset) => {
+            if (!asset) return false;
+            const observed = await stat(asset.sourcePath).catch(() => undefined);
+            return (
+              Boolean(observed?.isFile()) &&
+              observed!.size === asset.sizeBytes &&
+              observed!.mtime.toISOString() === asset.fileModifiedAt &&
+              Date.parse(asset.fileModifiedAt) <= Date.parse(checkpoint.createdAt)
+            );
+          }),
+        )
+      ).every(Boolean);
     const maximumInputs = checkpoint.request.runtimePolicy?.maxVisualInputsPerStage ?? 10;
     const expectedLegacyIds = legacyLevelOneIdsForProject(project, checkpoint.request, maximumInputs);
-    const completedLevelOne = checkpoint.segments.filter((segment) => segment.level === 1 && segment.status === "COMPLETED").sort((left, right) => left.index - right.index);
-    const legacyIdsMatch = Boolean(expectedLegacyIds?.length) && expectedLegacyIds!.length === completedLevelOne.length &&
+    const completedLevelOne = checkpoint.segments
+      .filter((segment) => segment.level === 1 && segment.status === "COMPLETED")
+      .sort((left, right) => left.index - right.index);
+    const legacyIdsMatch =
+      Boolean(expectedLegacyIds?.length) &&
+      expectedLegacyIds!.length === completedLevelOne.length &&
       completedLevelOne.every((segment, index) => segment.id === expectedLegacyIds![index]);
-    const semanticallyValidatedLegacySegments = !pictureProvenSame && sourceContinuity && legacyIdsMatch &&
-      completedLevelOne.length > 0 && completedLevelOne.every((segment) => reusable.includes(segment));
-    const unknownReason = "Legacy checkpoint does not contain an old canonical Project snapshot; content change cannot be inferred from a whole-project hash.";
+    const semanticallyValidatedLegacySegments =
+      !pictureProvenSame &&
+      sourceContinuity &&
+      legacyIdsMatch &&
+      completedLevelOne.length > 0 &&
+      completedLevelOne.every((segment) => reusable.includes(segment));
+    const unknownReason =
+      "Legacy checkpoint does not contain an old canonical Project snapshot; content change cannot be inferred from a whole-project hash.";
     const renderDomain = (label: string) => ({
-      status: pictureProvenSame ? "SAME" as const : "UNKNOWN" as const,
+      status: pictureProvenSame ? ("SAME" as const) : ("UNKNOWN" as const),
       oldValue: checkpoint.pictureBaseSignature,
       newValue: currentPictureSignature,
       renderAffecting: true,
@@ -1481,25 +1593,51 @@ export class ConcatRenderService {
       // Physical validity alone does not prove semantic ownership of a
       // timeline range. The render path additionally requires deterministic
       // segment keys before it reuses any of these files.
-      decision: pictureProvenSame ? "FULL_RESUME" : semanticallyValidatedLegacySegments ? "VALIDATED_SEGMENT_REUSE" : "NEEDS_ANALYSIS",
+      decision: pictureProvenSame
+        ? "FULL_RESUME"
+        : semanticallyValidatedLegacySegments
+          ? "VALIDATED_SEGMENT_REUSE"
+          : "NEEDS_ANALYSIS",
       video: renderDomain("Video"),
       timeline: renderDomain("Timeline"),
       baseAudio: renderDomain("Base audio"),
       storage: {
         status: "IGNORED",
         oldValue: checkpoint.request.renderTemporaryFolder ?? path.dirname(checkpoint.workRoot),
-        newValue: checkpoint.request.tempLocations?.map((item) => item.path).join(" | ") ?? checkpoint.request.renderTemporaryFolder,
+        newValue:
+          checkpoint.request.tempLocations?.map((item) => item.path).join(" | ") ??
+          checkpoint.request.renderTemporaryFolder,
         renderAffecting: false,
         reason: "Artifact storage location is excluded from render identity.",
       },
-      uploadSettings: { status: "IGNORED", renderAffecting: false, reason: "YouTube/upload/UI settings are not render identity." },
-      appVersion: { status: "IGNORED", oldValue: checkpoint.checkpointProducer ?? "legacy", newValue: "v0.82", renderAffecting: false, reason: "App version requires migration, not re-rendering." },
-      reusableSegmentCount: pictureProvenSame ? reusable.length : semanticallyValidatedLegacySegments ? completedLevelOne.length : 0,
+      uploadSettings: {
+        status: "IGNORED",
+        renderAffecting: false,
+        reason: "YouTube/upload/UI settings are not render identity.",
+      },
+      appVersion: {
+        status: "IGNORED",
+        oldValue: checkpoint.checkpointProducer ?? "legacy",
+        newValue: "v0.82",
+        renderAffecting: false,
+        reason: "App version requires migration, not re-rendering.",
+      },
+      reusableSegmentCount: pictureProvenSame
+        ? reusable.length
+        : semanticallyValidatedLegacySegments
+          ? completedLevelOne.length
+          : 0,
       invalidSegmentCount: checkpoint.segments.length - reusable.length,
-      reusableDurationMs: (pictureProvenSame ? reusable : semanticallyValidatedLegacySegments ? completedLevelOne : []).reduce((sum, segment) => sum + segment.durationMs, 0),
+      reusableDurationMs: (pictureProvenSame
+        ? reusable
+        : semanticallyValidatedLegacySegments
+          ? completedLevelOne
+          : []
+      ).reduce((sum, segment) => sum + segment.durationMs, 0),
       partialRecovery: checkpoint.recoverablePartial ? "UNKNOWN" : "NOT_FOUND",
       migrationRequired: checkpoint.checkpointProducer !== "v0.82",
-      sourceCheckpointPreserved: checkpoint.checkpointProducer !== "v0.82" || Boolean(checkpoint.recoveryMigration?.sourcePreserved),
+      sourceCheckpointPreserved:
+        checkpoint.checkpointProducer !== "v0.82" || Boolean(checkpoint.recoveryMigration?.sourcePreserved),
     };
   }
 
@@ -1518,9 +1656,10 @@ export class ConcatRenderService {
     const project = this.store.getProject();
     const checkpoint = await this.checkpoints.load(project.id);
     if (!checkpoint) throw new Error("找不到可重新掃描的 Resume checkpoint。");
-    const writable = checkpoint.checkpointProducer === "v0.82"
-      ? checkpoint
-      : await this.checkpoints.importResumeRecoveryCopy(project.id, checkpointId);
+    const writable =
+      checkpoint.checkpointProducer === "v0.82"
+        ? checkpoint
+        : await this.checkpoints.importResumeRecoveryCopy(project.id, checkpointId);
     if (!writable) throw new Error("無法建立安全的 checkpoint migration copy。");
     await this.checkpoints.appendDiagnostic(writable, { event: "[RESUME] VERIFYING_MOVED_ARTIFACTS" });
     return this.checkpoints.discoverAndRemapCompletedArtifacts(
@@ -1538,9 +1677,12 @@ export class ConcatRenderService {
   ): Promise<ResumeStorageAnalysis> {
     const project = this.store.getProject();
     const checkpoint = await this.checkpoints.load(project.id);
-    if (!checkpoint || (checkpoint.checkpointId !== checkpointId && checkpoint.recoveryMigration?.sourceCheckpointId !== checkpointId))
+    if (
+      !checkpoint ||
+      (checkpoint.checkpointId !== checkpointId && checkpoint.recoveryMigration?.sourceCheckpointId !== checkpointId)
+    )
       throw new Error("找不到可分析空間的 Resume checkpoint。");
-    const locations = configuredLocations.length ? configuredLocations : checkpoint.tempLocations ?? [];
+    const locations = configuredLocations.length ? configuredLocations : (checkpoint.tempLocations ?? []);
     const statuses = await probeRenderTempLocations(locations);
     const completed = checkpoint.segments.filter((segment) => segment.status === "COMPLETED");
     const ownedRoots = (checkpoint.ownedWorkRoots ?? [checkpoint.workRoot]).map((root) => path.resolve(root));
@@ -1571,30 +1713,33 @@ export class ConcatRenderService {
         contentFingerprint: segment.sha256,
       };
     });
-    if (checkpoint.recoverablePartial) items.push({
-      artifactId: `partial:${checkpoint.checkpointId}`,
-      projectId: checkpoint.projectId,
-      resumeId: checkpoint.checkpointId,
-      artifactType: "PARTIAL",
-      fileName: path.basename(checkpoint.recoverablePartial.path),
-      path: checkpoint.recoverablePartial.path,
-      drive: volumeRoot(checkpoint.recoverablePartial.path),
-      sizeBytes: checkpoint.recoverablePartial.sizeBytes,
-      createdAt: checkpoint.recoverablePartial.recordedAt,
-      modifiedAt: checkpoint.recoverablePartial.recordedAt,
-      status: "RECOVERABLE_PARTIAL",
-      referencedByCurrentCheckpoint: true,
-      safeToDelete: false,
-      safeToMove: false,
-      reason: "Partial 尚可能恢復，未完成內容驗證前一律保留。",
-      contentFingerprint: undefined,
-    });
+    if (checkpoint.recoverablePartial)
+      items.push({
+        artifactId: `partial:${checkpoint.checkpointId}`,
+        projectId: checkpoint.projectId,
+        resumeId: checkpoint.checkpointId,
+        artifactType: "PARTIAL",
+        fileName: path.basename(checkpoint.recoverablePartial.path),
+        path: checkpoint.recoverablePartial.path,
+        drive: volumeRoot(checkpoint.recoverablePartial.path),
+        sizeBytes: checkpoint.recoverablePartial.sizeBytes,
+        createdAt: checkpoint.recoverablePartial.recordedAt,
+        modifiedAt: checkpoint.recoverablePartial.recordedAt,
+        status: "RECOVERABLE_PARTIAL",
+        referencedByCurrentCheckpoint: true,
+        safeToDelete: false,
+        safeToMove: false,
+        reason: "Partial 尚可能恢復，未完成內容驗證前一律保留。",
+        contentFingerprint: undefined,
+      });
     const knownInventory: TemporaryArtifactInventory = {
       capturedAt: new Date().toISOString(),
       roots: [...new Set(locations.map((location) => path.resolve(location.path)))],
       items,
       totalBytes: items.reduce((sum, item) => sum + item.sizeBytes, 0),
-      immediatelyReclaimableBytes: items.filter((item) => item.safeToDelete).reduce((sum, item) => sum + item.sizeBytes, 0),
+      immediatelyReclaimableBytes: items
+        .filter((item) => item.safeToDelete)
+        .reduce((sum, item) => sum + item.sizeBytes, 0),
       movableBytes: items.filter((item) => item.safeToMove).reduce((sum, item) => sum + item.sizeBytes, 0),
     };
     const inventory = await scanRegisteredTemporaryArtifacts(
@@ -1602,7 +1747,8 @@ export class ConcatRenderService {
       knownInventory,
       project.sources.map((asset) => asset.sourcePath),
     );
-    const expectedDurationMs = checkpoint.request.estimatedDurationMs ?? completed.reduce((sum, segment) => sum + segment.durationMs, 0);
+    const expectedDurationMs =
+      checkpoint.request.estimatedDurationMs ?? completed.reduce((sum, segment) => sum + segment.durationMs, 0);
     const externalBytes = checkpoint.recoveryMigration?.validatedExternalSegmentBytes ?? 0;
     const externalDurationMs = checkpoint.recoveryMigration?.validatedExternalSegmentDurationMs ?? 0;
     const legacyPeakBytes = Math.max(
@@ -1618,24 +1764,28 @@ export class ConcatRenderService {
           estimatedFinalOutputBytes: checkpoint.request.estimatedFinalOutputBytes ?? 0,
         })
       : undefined;
-    const remainingVideoBytes = checkpoint.audioMaster?.status === "COMPLETED" ? 0 : recovery?.baseMasterBytes ?? legacyPeakBytes;
+    const remainingVideoBytes =
+      checkpoint.audioMaster?.status === "COMPLETED" ? 0 : (recovery?.baseMasterBytes ?? legacyPeakBytes);
     const remainingAudioBytes = Math.ceil((Math.max(0, expectedDurationMs) / 1_000) * 192_000 + 512 * 1024 ** 2);
     const finalOutputBytes = recovery?.finalVideoBytes ?? checkpoint.request.estimatedFinalOutputBytes ?? 0;
     const partialBytes = checkpoint.recoverablePartial?.sizeBytes ?? 0;
-    const peakAdditionalBytes = recovery?.peakAdditionalBytes ?? Math.max(remainingVideoBytes, finalOutputBytes + remainingAudioBytes);
+    const peakAdditionalBytes =
+      recovery?.peakAdditionalBytes ?? Math.max(remainingVideoBytes, finalOutputBytes + remainingAudioBytes);
     const primary = statuses.find((item) => item.role === "PRIMARY") ?? statuses[0];
     if (!primary) throw new Error("沒有可分析的 Render TEMP 位置。");
     const fallback = statuses.find((item) => item.role === "FALLBACK" && item.allowFallback !== false);
     const nextJobBytes = Math.max(1, remainingVideoBytes || finalOutputBytes);
-    const moveCandidates = items.filter((item) => item.safeToMove && item.drive === primary.volume && fallback).map((item) => ({
-      artifactId: item.artifactId,
-      sourcePath: item.path,
-      destinationPath: artifactDestination(fallback!.path, checkpoint.workRoot, item.path),
-      sizeBytes: item.sizeBytes,
-      sourceLocationId: primary.id,
-      destinationLocationId: fallback!.id,
-      reason: item.reason,
-    }));
+    const moveCandidates = items
+      .filter((item) => item.safeToMove && item.drive === primary.volume && fallback)
+      .map((item) => ({
+        artifactId: item.artifactId,
+        sourcePath: item.path,
+        destinationPath: artifactDestination(fallback!.path, checkpoint.workRoot, item.path),
+        sizeBytes: item.sizeBytes,
+        sourceLocationId: primary.id,
+        destinationLocationId: fallback!.id,
+        reason: item.reason,
+      }));
     const plan = buildResumeStoragePlan({
       checkpointId: checkpoint.checkpointId,
       primary,
@@ -1658,11 +1808,14 @@ export class ConcatRenderService {
         hardSafetyLimitBytes: hardSafetyLimitBytes(status.path),
         tempUsageBytes: volumeItems.reduce((sum, item) => sum + item.sizeBytes, 0),
         activeBytes: 0,
-        completedBytes: volumeItems.filter((item) => item.artifactType === "COMPLETED_SEGMENT").reduce((sum, item) => sum + item.sizeBytes, 0),
+        completedBytes: volumeItems
+          .filter((item) => item.artifactType === "COMPLETED_SEGMENT")
+          .reduce((sum, item) => sum + item.sizeBytes, 0),
         movableBytes: volumeItems.filter((item) => item.safeToMove).reduce((sum, item) => sum + item.sizeBytes, 0),
         schedulableBytes: status.schedulableBytes,
         writable: status.unavailableReason !== "UNWRITABLE",
-        osSafetyHealthy: status.unavailableReason !== "UNWRITABLE" && status.freeBytes > hardSafetyLimitBytes(status.path),
+        osSafetyHealthy:
+          status.unavailableReason !== "UNWRITABLE" && status.freeBytes > hardSafetyLimitBytes(status.path),
       };
     });
     return {
@@ -1687,13 +1840,19 @@ export class ConcatRenderService {
       completedSegmentCount: completed.length,
       completedSegmentBytes: completed.reduce((sum, segment) => sum + Math.max(0, segment.sizeBytes ?? 0), 0),
       resumeFromSegmentIndex: checkpoint.segments.findIndex((segment) => segment.status !== "COMPLETED"),
-      failureKind: checkpoint.diskState?.status === "FAILED_ENOSPC" ? "FFMPEG_ENOSPC_-28" : checkpoint.concatStatus === "PAUSED_DISK_SPACE" ? "APP_PREEMPTIVE_DISK_PAUSE" : undefined,
+      failureKind:
+        checkpoint.diskState?.status === "FAILED_ENOSPC"
+          ? "FFMPEG_ENOSPC_-28"
+          : checkpoint.concatStatus === "PAUSED_DISK_SPACE"
+            ? "APP_PREEMPTIVE_DISK_PAUSE"
+            : undefined,
       failedPath: checkpoint.diskState?.failedPath,
-      recoveryState: plan.action === "RESUME" || plan.action === "REDIRECT_FUTURE_JOBS"
-        ? "READY_TO_RESUME"
-        : plan.action === "PROPOSE_MOVE"
-          ? "MOVE_REQUIRED"
-          : "WAITING_FOR_USER_MOVE",
+      recoveryState:
+        plan.action === "RESUME" || plan.action === "REDIRECT_FUTURE_JOBS"
+          ? "READY_TO_RESUME"
+          : plan.action === "PROPOSE_MOVE"
+            ? "MOVE_REQUIRED"
+            : "WAITING_FOR_USER_MOVE",
     };
   }
 
@@ -1708,14 +1867,16 @@ export class ConcatRenderService {
     if (before.plan.action !== "PROPOSE_MOVE" || !before.plan.requiresUserConfirmation)
       throw new Error("目前方案沒有可執行的 Artifact 搬移。");
     const allowed = new Set(before.plan.moveItems.map((item) => item.artifactId));
-    if (!artifactIds.length || artifactIds.some((id) => !allowed.has(id))) throw new Error("搬移清單不符合最新分析方案。");
+    if (!artifactIds.length || artifactIds.some((id) => !allowed.has(id)))
+      throw new Error("搬移清單不符合最新分析方案。");
     const destination = configuredLocations.find((item) => item.id === before.plan.targetLocationId);
     if (!destination) throw new Error("搬移目的 TEMP 已不存在。");
     const projectId = this.store.getProject().id;
     const sourceCheckpoint = await this.checkpoints.load(projectId);
-    const writableCheckpoint = sourceCheckpoint?.checkpointProducer === "v0.82"
-      ? sourceCheckpoint
-      : await this.checkpoints.importResumeRecoveryCopy(projectId, checkpointId);
+    const writableCheckpoint =
+      sourceCheckpoint?.checkpointProducer === "v0.82"
+        ? sourceCheckpoint
+        : await this.checkpoints.importResumeRecoveryCopy(projectId, checkpointId);
     if (!writableCheckpoint) throw new Error("無法建立安全的 checkpoint migration copy。");
     await this.checkpoints.authorizeRecoveryTempLocation(projectId, writableCheckpoint.checkpointId, destination);
     const result = await this.checkpoints.migrateCompletedArtifacts(
@@ -1759,14 +1920,23 @@ export class ConcatRenderService {
     const roots = [...(tempLocations ?? []), ...(checkpoint.tempLocations ?? [])]
       .filter((item) => item.enabled !== false)
       .map((item) => item.path);
-    const hasMissingCompletedArtifact = (await Promise.all(checkpoint.segments.map(async (segment) => {
-      if (segment.status !== "COMPLETED") return false;
-      const item = await stat(segment.outputPath).catch(() => undefined);
-      return !item?.isFile() || Boolean(segment.sizeBytes && item.size !== segment.sizeBytes);
-    }))).some(Boolean);
+    const hasMissingCompletedArtifact = (
+      await Promise.all(
+        checkpoint.segments.map(async (segment) => {
+          if (segment.status !== "COMPLETED") return false;
+          const item = await stat(segment.outputPath).catch(() => undefined);
+          return !item?.isFile() || Boolean(segment.sizeBytes && item.size !== segment.sizeBytes);
+        }),
+      )
+    ).some(Boolean);
     if (hasMissingCompletedArtifact && roots.length) {
       await this.checkpoints.appendDiagnostic(checkpoint, { event: "[RESUME] SEARCHING_RELOCATED_ARTIFACTS", roots });
-      const recovery = await this.checkpoints.discoverAndRemapCompletedArtifacts(project.id, checkpoint.checkpointId, roots, true);
+      const recovery = await this.checkpoints.discoverAndRemapCompletedArtifacts(
+        project.id,
+        checkpoint.checkpointId,
+        roots,
+        true,
+      );
       if (recovery.missingArtifactIds.length || recovery.invalidCandidates.length)
         throw new Error(`Resume Artifact 復原未完成：仍缺少 ${recovery.missingArtifactIds.length} 個片段。`);
       checkpoint = await this.checkpoints.load(project.id);
@@ -1835,22 +2005,26 @@ export class ConcatRenderService {
         groupedKeys.push(expectedInputKeys.slice(index, index + maximumInputs));
       for (let index = 0; index < expectedLegacyInputKeys.length; index += maximumInputs)
         groupedLegacyKeys.push(expectedLegacyInputKeys.slice(index, index + maximumInputs));
-      const expectedIds = groupedKeys.map((inputs) => checkpointKey({
-        segmentPipelineVersion: 3,
-        level: expectedLevel,
-        inputs,
-        transitionSeconds,
-        resolution,
-        portrait,
-      }));
-      const expectedLegacyIds = groupedLegacyKeys.map((inputs) => checkpointKey({
-        segmentPipelineVersion: 2,
-        level: expectedLevel,
-        inputs,
-        transitionSeconds,
-        resolution,
-        portrait,
-      }));
+      const expectedIds = groupedKeys.map((inputs) =>
+        checkpointKey({
+          segmentPipelineVersion: 3,
+          level: expectedLevel,
+          inputs,
+          transitionSeconds,
+          resolution,
+          portrait,
+        }),
+      );
+      const expectedLegacyIds = groupedLegacyKeys.map((inputs) =>
+        checkpointKey({
+          segmentPipelineVersion: 2,
+          level: expectedLevel,
+          inputs,
+          transitionSeconds,
+          resolution,
+          portrait,
+        }),
+      );
       expectedInputKeys = expectedIds;
       expectedLegacyInputKeys = expectedLegacyIds;
       expectedCount = expectedInputKeys.length;
@@ -1869,13 +2043,17 @@ export class ConcatRenderService {
       // accepting a whole completed level from a legacy checkpoint.
       const expectedIds = expectedIdsByLevel[candidateLevel - 1];
       const v3KeysMatch = candidates.every((segment, index) => segment.id === expectedIds[index]);
-      const legacySourceEvidenceValid = (checkpoint.checkpointProducer !== "v0.82" || Boolean(checkpoint.recoveryMigration)) && originalInputs.every((input) =>
-        input.sourceStatMatchesManifest === true &&
-        Boolean(input.sourceRenderIdentity?.modifiedAt) &&
-        Date.parse(input.sourceRenderIdentity!.modifiedAt) <= Date.parse(checkpoint.createdAt),
-      );
+      const legacySourceEvidenceValid =
+        (checkpoint.checkpointProducer !== "v0.82" || Boolean(checkpoint.recoveryMigration)) &&
+        originalInputs.every(
+          (input) =>
+            input.sourceStatMatchesManifest === true &&
+            Boolean(input.sourceRenderIdentity?.modifiedAt) &&
+            Date.parse(input.sourceRenderIdentity!.modifiedAt) <= Date.parse(checkpoint.createdAt),
+        );
       const legacyIds = expectedLegacyIdsByLevel[candidateLevel - 1];
-      const legacyKeysMatch = legacySourceEvidenceValid && candidates.every((segment, index) => segment.id === legacyIds[index]);
+      const legacyKeysMatch =
+        legacySourceEvidenceValid && candidates.every((segment, index) => segment.id === legacyIds[index]);
       if (!v3KeysMatch && !legacyKeysMatch) continue;
       const validity = await Promise.all(candidates.map((segment) => this.checkpoints.validateSegment(segment)));
       if (!validity.every(Boolean)) continue;
@@ -1889,7 +2067,8 @@ export class ConcatRenderService {
       level = candidateLevel;
       resumedSegmentCount = candidates.length;
       completedJobs = checkpoint.segments.filter(
-        (segment) => segment.level <= candidateLevel && (segment.status === "COMPLETED" || segment.status === "RELEASED"),
+        (segment) =>
+          segment.level <= candidateLevel && (segment.status === "COMPLETED" || segment.status === "RELEASED"),
       ).length;
       break;
     }
@@ -1910,11 +2089,7 @@ export class ConcatRenderService {
         if (signal?.aborted) throw new DOMException("分段轉檔已取消。", "AbortError");
         const stageInputs = withLocalPhotoSoundIndexes(groups[groupIndex]);
         const decodeBackend = hardwareDecodeBackendFor(videoCodec);
-        let qsvIndexes = hardwareDecodeIndexes(
-          stageInputs,
-          Boolean(decodeBackend),
-          portrait,
-        );
+        let qsvIndexes = hardwareDecodeIndexes(stageInputs, Boolean(decodeBackend), portrait);
         const stagePlanFor = (decodeIndexes: ReadonlySet<number>) =>
           buildConcatFilterGraph(
             stageInputs,
@@ -1975,14 +2150,24 @@ export class ConcatRenderService {
         let selectedLocation: ReturnType<typeof selectRenderTempForNextJob>;
         const previousSelection = locationSelectionTail;
         let releaseSelection!: () => void;
-        locationSelectionTail = new Promise<void>((resolve) => { releaseSelection = resolve; });
+        locationSelectionTail = new Promise<void>((resolve) => {
+          releaseSelection = resolve;
+        });
         await previousSelection;
         try {
           const configs = checkpoint.request.tempLocations?.length
             ? checkpoint.request.tempLocations
             : checkpoint.tempLocations?.length
               ? checkpoint.tempLocations
-            : [{ id: "primary", path: path.dirname(checkpoint.workRoot), role: "PRIMARY" as const, enabled: true, allowFallback: true }];
+              : [
+                  {
+                    id: "primary",
+                    path: path.dirname(checkpoint.workRoot),
+                    role: "PRIMARY" as const,
+                    enabled: true,
+                    allowFallback: true,
+                  },
+                ];
           const statuses = await probeRenderTempLocations(configs, committedBytesByVolume);
           selectedLocation = selectRenderTempForNextJob(
             statuses.map((status) => ({
@@ -2009,9 +2194,10 @@ export class ConcatRenderService {
             snapshot,
           );
         }
-        const locationRoot = path.resolve(selectedLocation.path) === path.resolve(path.dirname(checkpoint.workRoot))
-          ? checkpoint.workRoot
-          : path.join(selectedLocation.path, path.basename(checkpoint.workRoot));
+        const locationRoot =
+          path.resolve(selectedLocation.path) === path.resolve(path.dirname(checkpoint.workRoot))
+            ? checkpoint.workRoot
+            : path.join(selectedLocation.path, path.basename(checkpoint.workRoot));
         await mkdir(locationRoot, { recursive: true });
         checkpoint.ownedWorkRoots ??= [checkpoint.workRoot];
         if (!checkpoint.ownedWorkRoots.some((root) => path.resolve(root) === path.resolve(locationRoot))) {
@@ -2620,13 +2806,17 @@ export class ConcatRenderService {
     }
     const assets = request.orderedAssetIds.map((assetId) => assetsById.get(assetId)!);
     const sourceStatMatchesManifest = new Map<string, boolean>();
-    await Promise.all([...assetsById.values()].map(async (asset) => {
-      const observed = await stat(asset.sourcePath);
-      sourceStatMatchesManifest.set(
-        asset.id,
-        observed.isFile() && observed.size === asset.sizeBytes && observed.mtime.toISOString() === asset.fileModifiedAt,
-      );
-    }));
+    await Promise.all(
+      [...assetsById.values()].map(async (asset) => {
+        const observed = await stat(asset.sourcePath);
+        sourceStatMatchesManifest.set(
+          asset.id,
+          observed.isFile() &&
+            observed.size === asset.sizeBytes &&
+            observed.mtime.toISOString() === asset.fileModifiedAt,
+        );
+      }),
+    );
     if (
       assets.some(
         (asset) => asset.metadataState !== "READY" || (asset.kind === "VIDEO" && !asset.mediaInfo?.durationMs),
@@ -2853,7 +3043,10 @@ export class ConcatRenderService {
           (item) => item.scope === "MAIN" && item.assetId === asset.id && item.timelineStartMs === startMs,
         );
         if (canonicalItem?.gates.bgm === false) return;
-        const sourceSpanMs = Math.max(1, dubSourceTrack.sourceOutMs - dubSourceTrack.sourceInMs || dubSourceTrack.durationMs);
+        const sourceSpanMs = Math.max(
+          1,
+          dubSourceTrack.sourceOutMs - dubSourceTrack.sourceInMs || dubSourceTrack.durationMs,
+        );
         autoDubTracks.push({
           ...dubSourceTrack,
           id: randomUUID(),
@@ -2867,27 +3060,28 @@ export class ConcatRenderService {
         });
       });
     }
-    const insertionBgmTracks: BgmRenderInput[] = request.includeBgm === false
-      ? []
-      : insertionAudioPlan.bgmRanges.map((range) => {
-          const track = currentProject.bgmTracks.find((candidate) => candidate.id === range.bgmTrackId)!;
-          return {
-            ...track,
-            id: range.id,
-            timelineInMs: range.timelineStartMs,
-            timelineOutMs: range.timelineEndMs,
-            sourceInMs: range.sourceInMs,
-            sourceOutMs: range.sourceInMs + range.sourceSpanMs,
-            volumePercent: range.volumePercent,
-            fadeInMs: range.fadeInMs,
-            fadeOutMs: range.fadeOutMs,
-            loop: range.usesLoop,
-            sourceSpanMs: range.sourceSpanMs,
-            insertionRangeId: range.id,
-            loopCrossfadeMs: range.loopCrossfadeMs,
-            loopStrategy: range.loopStrategy,
-          };
-        });
+    const insertionBgmTracks: BgmRenderInput[] =
+      request.includeBgm === false
+        ? []
+        : insertionAudioPlan.bgmRanges.map((range) => {
+            const track = currentProject.bgmTracks.find((candidate) => candidate.id === range.bgmTrackId)!;
+            return {
+              ...track,
+              id: range.id,
+              timelineInMs: range.timelineStartMs,
+              timelineOutMs: range.timelineEndMs,
+              sourceInMs: range.sourceInMs,
+              sourceOutMs: range.sourceInMs + range.sourceSpanMs,
+              volumePercent: range.volumePercent,
+              fadeInMs: range.fadeInMs,
+              fadeOutMs: range.fadeOutMs,
+              loop: range.usesLoop,
+              sourceSpanMs: range.sourceSpanMs,
+              insertionRangeId: range.id,
+              loopCrossfadeMs: range.loopCrossfadeMs,
+              loopStrategy: range.loopStrategy,
+            };
+          });
     // Every optional music/SFX layer stays out of the reusable picture/source-audio
     // master. Track-gate changes therefore only rerun the post-audio pass.
     const postBgmTracks = [...bgmTracks, ...autoDubTracks];
@@ -2917,9 +3111,7 @@ export class ConcatRenderService {
       throw new Error(
         `Shorts 總長 ${Math.ceil(basePlan.expectedDurationMs / 1000)} 秒超過目前 ${request.shortsMaxDurationSec ?? 60} 秒上限。`,
       );
-    const activePostBgmTracks = postBgmTracks.filter(
-      (track) => track.timelineInMs < basePlan.expectedDurationMs,
-    );
+    const activePostBgmTracks = postBgmTracks.filter((track) => track.timelineInMs < basePlan.expectedDurationMs);
     onProgress({
       phase: "PREPARING",
       percent: 0,
@@ -2937,7 +3129,12 @@ export class ConcatRenderService {
     const lowMemoryActive = request.lowMemorySegmented === true && segmentedActive;
     const signature = renderRequestSignature(currentProject.id, currentProject.updatedAt, request);
     let pictureBaseSignature = pictureBaseRenderSignature(currentProject, request);
-    let finalAudioSignature = finalInsertionAudioSignature(pictureBaseSignature, insertionAudioPlan, request, activePostBgmTracks);
+    let finalAudioSignature = finalInsertionAudioSignature(
+      pictureBaseSignature,
+      insertionAudioPlan,
+      request,
+      activePostBgmTracks,
+    );
     let checkpoint: RenderCheckpointRecord | undefined;
     let resumeRequiresSegmentValidation = false;
     let resumeStoredPictureSignature: string | undefined;
@@ -2955,17 +3152,24 @@ export class ConcatRenderService {
       // v0.79/v0.80 included TEMP paths in the picture hash. Permit a
       // copy-on-write continuation when the project revision is unchanged and
       // the canonical picture request (excluding only storage settings) matches.
-      const samePictureAfterTempChange = checkpoint.projectUpdatedAt === currentProject.updatedAt &&
+      const samePictureAfterTempChange =
+        checkpoint.projectUpdatedAt === currentProject.updatedAt &&
         pictureBaseRenderSignature(currentProject, checkpoint.request) === pictureBaseSignature;
       resumeRequiresSegmentValidation = !originalSignatureMatches && !samePictureAfterTempChange;
       if (checkpoint.pictureBaseSignature && !resumeRequiresSegmentValidation) {
         // Keep the verified legacy base-master key. Re-keying would discard a
         // reusable picture master and could re-encode many hours of video.
         pictureBaseSignature = checkpoint.pictureBaseSignature;
-        finalAudioSignature = finalInsertionAudioSignature(pictureBaseSignature, insertionAudioPlan, request, activePostBgmTracks);
+        finalAudioSignature = finalInsertionAudioSignature(
+          pictureBaseSignature,
+          insertionAudioPlan,
+          request,
+          activePostBgmTracks,
+        );
       }
     } else if (existing) {
-      const samePictureAfterTempChange = existing.projectUpdatedAt === currentProject.updatedAt &&
+      const samePictureAfterTempChange =
+        existing.projectUpdatedAt === currentProject.updatedAt &&
         pictureBaseRenderSignature(currentProject, existing.request) === pictureBaseSignature;
       if (existing.pictureBaseSignature !== pictureBaseSignature && !samePictureAfterTempChange) {
         // Never delete a pre-v0.82 recovery checkpoint merely because a broad
@@ -2986,7 +3190,12 @@ export class ConcatRenderService {
         checkpoint = existing;
         if (existing.pictureBaseSignature) {
           pictureBaseSignature = existing.pictureBaseSignature;
-          finalAudioSignature = finalInsertionAudioSignature(pictureBaseSignature, insertionAudioPlan, request, activePostBgmTracks);
+          finalAudioSignature = finalInsertionAudioSignature(
+            pictureBaseSignature,
+            insertionAudioPlan,
+            request,
+            activePostBgmTracks,
+          );
         }
       }
     } else {
@@ -3012,7 +3221,11 @@ export class ConcatRenderService {
       const historical = checkpoint.tempLocations ?? [];
       checkpoint.tempLocations = [...historical];
       for (const location of request.tempLocations) {
-        if (!checkpoint.tempLocations.some((item) => path.resolve(item.path).toLowerCase() === path.resolve(location.path).toLowerCase()))
+        if (
+          !checkpoint.tempLocations.some(
+            (item) => path.resolve(item.path).toLowerCase() === path.resolve(location.path).toLowerCase(),
+          )
+        )
           checkpoint.tempLocations.push(structuredClone(location));
       }
     }
@@ -3037,7 +3250,7 @@ export class ConcatRenderService {
     // The primary may have been unplugged since the previous run. Re-anchor
     // only future work on the first currently writable location; completed
     // E:/C: segment paths, old checkpoint media and recovery source stay put.
-    const writableConfigs = request.tempLocations?.length ? request.tempLocations : checkpoint.tempLocations ?? [];
+    const writableConfigs = request.tempLocations?.length ? request.tempLocations : (checkpoint.tempLocations ?? []);
     if (writableConfigs.length) {
       const writableStatuses = await probeRenderTempLocations(writableConfigs);
       const writableRoot = selectRenderTempForNextJob(
@@ -3055,15 +3268,18 @@ export class ConcatRenderService {
     }
     const legacyEstimatedPeakDiskBytes = Math.max(
       request.estimatedPeakDiskBytes ?? 0,
-      (runtimePolicy.estimatedWorkingBytesPerJob ?? 0) * Math.max(1, Math.ceil(inputs.length / runtimePolicy.maxVisualInputsPerStage)),
+      (runtimePolicy.estimatedWorkingBytesPerJob ?? 0) *
+        Math.max(1, Math.ceil(inputs.length / runtimePolicy.maxVisualInputsPerStage)),
       request.estimatedFinalOutputBytes ?? 0,
     );
     const migrationSegments = checkpoint.recoveryMigration
       ? checkpoint.segments.filter((segment) => segment.status === "COMPLETED")
       : [];
-    const validatedExternalSegmentBytes = checkpoint.recoveryMigration?.validatedExternalSegmentBytes ??
+    const validatedExternalSegmentBytes =
+      checkpoint.recoveryMigration?.validatedExternalSegmentBytes ??
       migrationSegments.reduce((sum, segment) => sum + Math.max(0, segment.sizeBytes ?? 0), 0);
-    const validatedExternalSegmentDurationMs = checkpoint.recoveryMigration?.validatedExternalSegmentDurationMs ??
+    const validatedExternalSegmentDurationMs =
+      checkpoint.recoveryMigration?.validatedExternalSegmentDurationMs ??
       migrationSegments.reduce((sum, segment) => sum + Math.max(0, segment.durationMs), 0);
     const recoveryDiskEstimate = checkpoint.recoveryMigration
       ? estimateResumeAdditionalPeak({
@@ -3101,7 +3317,15 @@ export class ConcatRenderService {
         ? checkpoint!.request.tempLocations
         : checkpoint!.tempLocations?.length
           ? checkpoint!.tempLocations
-        : [{ id: "primary", path: path.dirname(checkpoint!.workRoot), role: "PRIMARY" as const, enabled: true, allowFallback: true }];
+          : [
+              {
+                id: "primary",
+                path: path.dirname(checkpoint!.workRoot),
+                role: "PRIMARY" as const,
+                enabled: true,
+                allowFallback: true,
+              },
+            ];
       const statuses = await probeRenderTempLocations(configs);
       const selected = selectRenderTempForNextJob(
         statuses.map((status) => ({
@@ -3121,9 +3345,10 @@ export class ConcatRenderService {
           snapshot,
         );
       }
-      const root = path.resolve(selected.path) === path.resolve(path.dirname(checkpoint!.workRoot))
-        ? checkpoint!.workRoot
-        : path.join(selected.path, path.basename(checkpoint!.workRoot));
+      const root =
+        path.resolve(selected.path) === path.resolve(path.dirname(checkpoint!.workRoot))
+          ? checkpoint!.workRoot
+          : path.join(selected.path, path.basename(checkpoint!.workRoot));
       await mkdir(root, { recursive: true });
       checkpoint!.ownedWorkRoots ??= [checkpoint!.workRoot];
       if (!checkpoint!.ownedWorkRoots.some((item) => path.resolve(item) === path.resolve(root))) {
@@ -3131,17 +3356,25 @@ export class ConcatRenderService {
       }
       return { ...selected, root };
     };
-    const estimatedBaseStageBytes = recoveryDiskEstimate?.baseMasterBytes ?? Math.max(
-      request.estimatedFinalOutputBytes ?? 0,
-      runtimePolicy.estimatedWorkingBytesPerJob ?? 0,
-    );
+    const estimatedBaseStageBytes =
+      recoveryDiskEstimate?.baseMasterBytes ??
+      Math.max(request.estimatedFinalOutputBytes ?? 0, runtimePolicy.estimatedWorkingBytesPerJob ?? 0);
     const persistentBase = await this.checkpoints.loadVideoBaseMaster(currentProject.id, pictureBaseSignature);
     if (pictureBaseStageRequired(persistentBase)) {
       const baseStageLocation = await allocateStageRoot("base-master", estimatedBaseStageBytes);
       partialPath = path.join(baseStageLocation.root, `.${parsed.name}.${renderId}.base.partial.mkv`);
       filterScriptPath = path.join(baseStageLocation.root, `.${parsed.name}.${renderId}.filtergraph.txt`);
-      await diskMonitor.reserveTempJob("base-master", baseStageLocation.locationId, partialPath, estimatedBaseStageBytes);
-      checkpoint.stagePaths = { ...checkpoint.stagePaths, basePartialPath: partialPath, baseFilterScriptPath: filterScriptPath };
+      await diskMonitor.reserveTempJob(
+        "base-master",
+        baseStageLocation.locationId,
+        partialPath,
+        estimatedBaseStageBytes,
+      );
+      checkpoint.stagePaths = {
+        ...checkpoint.stagePaths,
+        basePartialPath: partialPath,
+        baseFilterScriptPath: filterScriptPath,
+      };
     }
     await this.checkpoints.save(checkpoint);
     await this.checkpoints.appendDiagnostic(checkpoint, {
@@ -3367,22 +3600,46 @@ export class ConcatRenderService {
           videoOutputLabel = "vwatermark";
         }
         const args = [
-          "-hide_banner", "-loglevel", "error", "-y",
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-y",
           ...buildInputArguments(finalInputs, this.photoSoundPath, []),
-          "-filter_complex_threads", String(runtimePolicy.filterComplexThreads),
-          "-/filter_complex", filterScriptPath,
-          "-map", `[${videoOutputLabel}]`, "-map", `[${plan.audioOutputLabel}]`,
+          "-filter_complex_threads",
+          String(runtimePolicy.filterComplexThreads),
+          "-/filter_complex",
+          filterScriptPath,
+          "-map",
+          `[${videoOutputLabel}]`,
+          "-map",
+          `[${plan.audioOutputLabel}]`,
           // Preserve the v0.79 quality-mode picture encode. A bounded-rate
           // 30-second QSV trial reduced source-relative SSIM without a speed
           // benefit; disk safety is handled by peak estimates and monitoring.
           ...buildVideoCodecArgs(videoCodec),
-          "-threads", String(runtimePolicy.encoderThreads),
-          "-pix_fmt", "yuv420p", "-r", "30000/1001",
-          "-map_metadata", "-1", "-metadata:s:v:0", "rotate=0",
+          "-threads",
+          String(runtimePolicy.encoderThreads),
+          "-pix_fmt",
+          "yuv420p",
+          "-r",
+          "30000/1001",
+          "-map_metadata",
+          "-1",
+          "-metadata:s:v:0",
+          "rotate=0",
           // Lossless neutral base audio prevents an avoidable lossy generation;
           // insertion mix plus final DSP is encoded once in the post pass.
-          "-c:a", "flac", "-ar", "48000", "-ac", "2", "-shortest",
-          "-progress", "pipe:1", "-nostats", partialPath,
+          "-c:a",
+          "flac",
+          "-ar",
+          "48000",
+          "-ac",
+          "2",
+          "-shortest",
+          "-progress",
+          "pipe:1",
+          "-nostats",
+          partialPath,
         ];
         await writeFile(filterScriptPath, filterGraph, { encoding: "utf8", flag: "wx" });
         await this.checkpoints.appendDiagnostic(checkpoint, {
@@ -3400,12 +3657,13 @@ export class ConcatRenderService {
           plan.expectedDurationMs,
           signal,
           segmentedActive
-            ? (progress) => emitProgress({
-                ...progress,
-                percent: 70 + progress.percent * 0.25,
-                outTimeMs: Math.round(basePlan.expectedDurationMs * (0.7 + (progress.percent / 100) * 0.25)),
-                expectedDurationMs: basePlan.expectedDurationMs,
-              })
+            ? (progress) =>
+                emitProgress({
+                  ...progress,
+                  percent: 70 + progress.percent * 0.25,
+                  outTimeMs: Math.round(basePlan.expectedDurationMs * (0.7 + (progress.percent / 100) * 0.25)),
+                  expectedDurationMs: basePlan.expectedDurationMs,
+                })
             : emitProgress,
           {
             outputPath,
@@ -3413,7 +3671,10 @@ export class ConcatRenderService {
             workingPaths: [checkpoint.workRoot, partialPath],
             segmentIndex: checkpoint.totalSegmentCount + 1,
             segmentCount: checkpoint.totalSegmentCount + 2,
-            onProcessStarted: (pid) => { elapsedTracker.markFfmpegStarted(); activeFfmpegPids.add(pid); },
+            onProcessStarted: (pid) => {
+              elapsedTracker.markFfmpegStarted();
+              activeFfmpegPids.add(pid);
+            },
             onProcessFinished: (pid) => activeFfmpegPids.delete(pid),
             getActiveProcessIds: () => [...activeFfmpegPids],
             encoderName: encoderName(videoCodec),
@@ -3484,7 +3745,9 @@ export class ConcatRenderService {
           await this.checkpoints.save(checkpoint);
           const releasedBytes = await this.checkpoints.releaseConsumedSegments(
             checkpoint,
-            checkpoint.segments.filter((segment) => segment.status === "COMPLETED").map((segment) => segment.outputPath),
+            checkpoint.segments
+              .filter((segment) => segment.status === "COMPLETED")
+              .map((segment) => segment.outputPath),
           );
           await this.checkpoints.appendDiagnostic(checkpoint, {
             event: "VIDEO_BASE_MASTER_CHECKPOINTED",
@@ -3499,18 +3762,23 @@ export class ConcatRenderService {
 
       const cancelled = Boolean(runResult && runResult.cancelled);
       let completedDurationMs = basePlan.expectedDurationMs;
-      if (cancelled) completedDurationMs = (await new MediaProbe().probe(baseMasterPath!)).durationMs ?? completedDurationMs;
+      if (cancelled)
+        completedDurationMs = (await new MediaProbe().probe(baseMasterPath!)).durationMs ?? completedDurationMs;
       let audioRemuxedWithoutVideoEncode = true;
       let finalAudioInfo: BasicMediaInfo;
       diskMonitor.releaseTempJob("base-master");
-      const estimatedAudioStageBytes = recoveryDiskEstimate?.finalVideoBytes ?? Math.max(
-        request.estimatedFinalOutputBytes ?? 0,
-        checkpoint.audioMaster?.sizeBytes ?? 0,
-      );
+      const estimatedAudioStageBytes =
+        recoveryDiskEstimate?.finalVideoBytes ??
+        Math.max(request.estimatedFinalOutputBytes ?? 0, checkpoint.audioMaster?.sizeBytes ?? 0);
       const audioStageLocation = await allocateStageRoot("audio-temp", estimatedAudioStageBytes);
       audioPartialPath = path.join(audioStageLocation.root, `.${parsed.name}.${renderId}.final-audio.partial.mp4`);
       audioFilterScriptPath = path.join(audioStageLocation.root, `.${parsed.name}.${renderId}.audio.filtergraph.txt`);
-      await diskMonitor.reserveTempJob("audio-temp", audioStageLocation.locationId, audioPartialPath, estimatedAudioStageBytes);
+      await diskMonitor.reserveTempJob(
+        "audio-temp",
+        audioStageLocation.locationId,
+        audioPartialPath,
+        estimatedAudioStageBytes,
+      );
       checkpoint.stagePaths = {
         ...checkpoint.stagePaths,
         audioPartialPath,
@@ -3523,7 +3791,9 @@ export class ConcatRenderService {
       await this.renderCommands?.waitAtSafeBoundary(signal, "画面已完成，插入素材音讯后处理尚未启动，已安全暂停。");
       if (audioProcessing.mode === "PRESERVE_MULTICHANNEL" && preserveNativeAsset) {
         if (insertionAudioPlan.bgmRanges.length || insertionAudioPlan.sfxEvents.length)
-          throw new Error("保持原始多声道不可同时混入插入素材 BGM/SFX；请改用 Original Stereo 或 Virtual Surround 5.1。");
+          throw new Error(
+            "保持原始多声道不可同时混入插入素材 BGM/SFX；请改用 Original Stereo 或 Virtual Surround 5.1。",
+          );
         await this.renderCommands?.waitAtSafeBoundary(signal, "影片画面已完成，原始多声道封装尚未启动，已安全暂停。");
         const selection = request.clipSelections?.[0];
         const args = [
@@ -3554,38 +3824,49 @@ export class ConcatRenderService {
           "-shortest",
           audioPartialPath,
         ];
-        await this.ffmpegRunner(this.ffmpegExecutable, args, basePlan.expectedDurationMs, cancelled ? undefined : signal, () => undefined, {
-          outputPath,
-          currentSegment: "保持原始多聲道並重新封裝（影像／音訊不重編）",
-          workingPaths: [baseMasterPath!, audioPartialPath],
-          segmentIndex: 2,
-          segmentCount: 2,
-          onProcessStarted: (pid) => {
-            elapsedTracker.markFfmpegStarted();
-            activeFfmpegPids.add(pid);
+        await this.ffmpegRunner(
+          this.ffmpegExecutable,
+          args,
+          basePlan.expectedDurationMs,
+          cancelled ? undefined : signal,
+          () => undefined,
+          {
+            outputPath,
+            currentSegment: "保持原始多聲道並重新封裝（影像／音訊不重編）",
+            workingPaths: [baseMasterPath!, audioPartialPath],
+            segmentIndex: 2,
+            segmentCount: 2,
+            onProcessStarted: (pid) => {
+              elapsedTracker.markFfmpegStarted();
+              activeFfmpegPids.add(pid);
+            },
+            onProcessFinished: (pid) => activeFfmpegPids.delete(pid),
+            getActiveProcessIds: () => [...activeFfmpegPids],
+            encoderName: "video/audio stream copy",
+            decoderName: "not decoded",
+            onResourceSnapshot: async (snapshot) => {
+              checkpoint.latestResources = snapshot;
+              const disk = await diskMonitor.snapshot("AUDIO_TEMP_RUNNING", "保持原始多聲道封裝");
+              snapshot.diskUsage = disk;
+              checkpoint.diskState = {
+                status: "RUNNING",
+                lastSnapshot: disk,
+                requiredAdditionalBytes: disk.requiredAdditionalBytes,
+                completedSegmentCount: checkpoint.segments.filter((item) => item.status === "COMPLETED").length,
+                resumable: true,
+              };
+              await this.checkpoints.save(checkpoint);
+              if (disk.pressureLevel === "EMERGENCY") {
+                preserveAudioPartial = true;
+                throw new DiskSpacePauseError(
+                  "Audio TEMP 所在磁碟已低於安全需求，已停止並保留 partial。",
+                  disk,
+                  audioPartialPath,
+                );
+              }
+            },
           },
-          onProcessFinished: (pid) => activeFfmpegPids.delete(pid),
-          getActiveProcessIds: () => [...activeFfmpegPids],
-          encoderName: "video/audio stream copy",
-          decoderName: "not decoded",
-          onResourceSnapshot: async (snapshot) => {
-            checkpoint.latestResources = snapshot;
-            const disk = await diskMonitor.snapshot("AUDIO_TEMP_RUNNING", "保持原始多聲道封裝");
-            snapshot.diskUsage = disk;
-            checkpoint.diskState = {
-              status: "RUNNING",
-              lastSnapshot: disk,
-              requiredAdditionalBytes: disk.requiredAdditionalBytes,
-              completedSegmentCount: checkpoint.segments.filter((item) => item.status === "COMPLETED").length,
-              resumable: true,
-            };
-            await this.checkpoints.save(checkpoint);
-            if (disk.pressureLevel === "EMERGENCY") {
-              preserveAudioPartial = true;
-              throw new DiskSpacePauseError("Audio TEMP 所在磁碟已低於安全需求，已停止並保留 partial。", disk, audioPartialPath);
-            }
-          },
-        });
+        );
         finalAudioInfo = await new MediaProbe().probe(audioPartialPath);
         if (finalAudioInfo.audioChannels !== preserveNativeAsset.mediaInfo?.audioChannels)
           throw new Error("保持原始多聲道验证失败：输出声道数与来源不一致。");
@@ -3614,38 +3895,54 @@ export class ConcatRenderService {
           expectedDurationMs: completedDurationMs,
           currentSegment: "插入 BGM/SFX＋最终 Audio Processing（影像 stream copy）",
         });
-        await this.ffmpegRunner(this.ffmpegExecutable, post.args, completedDurationMs, cancelled ? undefined : signal, () => undefined, {
-          outputPath,
-          currentSegment: "独立音讯混音与无损影像重新封装",
-          workingPaths: [baseMasterPath!, audioPartialPath],
-          segmentIndex: checkpoint.totalSegmentCount + 2,
-          segmentCount: checkpoint.totalSegmentCount + 2,
-          onProcessStarted: (pid) => { elapsedTracker.markFfmpegStarted(); activeFfmpegPids.add(pid); },
-          onProcessFinished: (pid) => activeFfmpegPids.delete(pid),
-          getActiveProcessIds: () => [...activeFfmpegPids],
-          encoderName: `audio ${audioProcessing.codec.toLowerCase()} / video stream copy`,
-          decoderName: "audio software decode / video not decoded",
-          onResourceSnapshot: async (snapshot) => {
-            checkpoint.latestResources = snapshot;
-            const disk = await diskMonitor.snapshot("AUDIO_TEMP_RUNNING", "最終音訊混音／封裝");
-            snapshot.diskUsage = disk;
-            checkpoint.diskState = {
-              status: "RUNNING",
-              lastSnapshot: disk,
-              requiredAdditionalBytes: disk.requiredAdditionalBytes,
-              completedSegmentCount: checkpoint.segments.filter((item) => item.status === "COMPLETED").length,
-              resumable: true,
-            };
-            await this.checkpoints.save(checkpoint);
-            if (disk.pressureLevel === "EMERGENCY") {
-              preserveAudioPartial = true;
-              throw new DiskSpacePauseError("Audio TEMP 所在磁碟已低於安全需求，已停止並保留 partial。", disk, audioPartialPath);
-            }
+        await this.ffmpegRunner(
+          this.ffmpegExecutable,
+          post.args,
+          completedDurationMs,
+          cancelled ? undefined : signal,
+          () => undefined,
+          {
+            outputPath,
+            currentSegment: "独立音讯混音与无损影像重新封装",
+            workingPaths: [baseMasterPath!, audioPartialPath],
+            segmentIndex: checkpoint.totalSegmentCount + 2,
+            segmentCount: checkpoint.totalSegmentCount + 2,
+            onProcessStarted: (pid) => {
+              elapsedTracker.markFfmpegStarted();
+              activeFfmpegPids.add(pid);
+            },
+            onProcessFinished: (pid) => activeFfmpegPids.delete(pid),
+            getActiveProcessIds: () => [...activeFfmpegPids],
+            encoderName: `audio ${audioProcessing.codec.toLowerCase()} / video stream copy`,
+            decoderName: "audio software decode / video not decoded",
+            onResourceSnapshot: async (snapshot) => {
+              checkpoint.latestResources = snapshot;
+              const disk = await diskMonitor.snapshot("AUDIO_TEMP_RUNNING", "最終音訊混音／封裝");
+              snapshot.diskUsage = disk;
+              checkpoint.diskState = {
+                status: "RUNNING",
+                lastSnapshot: disk,
+                requiredAdditionalBytes: disk.requiredAdditionalBytes,
+                completedSegmentCount: checkpoint.segments.filter((item) => item.status === "COMPLETED").length,
+                resumable: true,
+              };
+              await this.checkpoints.save(checkpoint);
+              if (disk.pressureLevel === "EMERGENCY") {
+                preserveAudioPartial = true;
+                throw new DiskSpacePauseError(
+                  "Audio TEMP 所在磁碟已低於安全需求，已停止並保留 partial。",
+                  disk,
+                  audioPartialPath,
+                );
+              }
+            },
           },
-        });
+        );
         finalAudioInfo = await new MediaProbe().probe(audioPartialPath);
         if (finalAudioInfo.audioChannels !== post.channels)
-          throw new Error(`音讯输出验证失败：预期 ${post.channels} 声道，实际 ${finalAudioInfo.audioChannels ?? "未知"} 声道。`);
+          throw new Error(
+            `音讯输出验证失败：预期 ${post.channels} 声道，实际 ${finalAudioInfo.audioChannels ?? "未知"} 声道。`,
+          );
       }
       if (Math.abs((finalAudioInfo.durationMs ?? 0) - completedDurationMs) > 750)
         throw new Error("音讯后处理 A/V 时长差异超过安全范围，已停止且不会覆盖成品。");
@@ -3724,10 +4021,10 @@ export class ConcatRenderService {
         diskPause || enospc
           ? "PAUSED_DISK_SPACE"
           : error instanceof DOMException && error.name === "AbortError"
-          ? signal?.reason === "APP_CLOSED"
-            ? "INTERRUPTED"
-            : "CANCELLED"
-          : "FAILED";
+            ? signal?.reason === "APP_CLOSED"
+              ? "INTERRUPTED"
+              : "CANCELLED"
+            : "FAILED";
       const terminalTiming = await elapsedTracker.finish(timingStatus);
       if (terminalTiming) onProgress({ ...latestTimedProgress, ...terminalTiming });
       if (checkpoint) {
@@ -3781,11 +4078,12 @@ export class ConcatRenderService {
               : await diskMonitor.snapshot("RENDER_ENOSPC", checkpoint.diskState?.failedPath);
             const failedPath = diskPause
               ? error.failedPath
-              : checkpoint.diskState?.failedPath ?? (existsSync(audioPartialPath) ? audioPartialPath : partialPath);
+              : (checkpoint.diskState?.failedPath ?? (existsSync(audioPartialPath) ? audioPartialPath : partialPath));
             checkpoint.concatStatus = "PAUSED_DISK_SPACE";
-            const requiredAdditionalText = disk.requiredAdditionalBytes > 0
-              ? `建議至少再釋放：${(disk.requiredAdditionalBytes / 1024 ** 3).toFixed(1)} GB`
-              : "目前快照未顯示額外缺口；請重新檢查工作磁碟後再續轉。";
+            const requiredAdditionalText =
+              disk.requiredAdditionalBytes > 0
+                ? `建議至少再釋放：${(disk.requiredAdditionalBytes / 1024 ** 3).toFixed(1)} GB`
+                : "目前快照未顯示額外缺口；請重新檢查工作磁碟後再續轉。";
             checkpoint.lastError = [
               "轉檔因磁碟空間不足而中止，已完成 checkpoint 片段保留。",
               `發生磁碟：${disk.tempVolume === disk.outputVolume ? disk.tempVolume : `${disk.tempVolume} / ${disk.outputVolume}`}`,

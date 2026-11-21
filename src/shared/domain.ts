@@ -1123,7 +1123,11 @@ export interface SubtitleVisualCueRegenerateRequest {
   provider: MaterialAnalysisProvider;
   displayLanguage: SubtitleVisualAnalysisOptions["displayLanguage"];
 }
-export interface SubtitleVisualCueRegenerateResult { text: string; confidence: number; warning?: string }
+export interface SubtitleVisualCueRegenerateResult {
+  text: string;
+  confidence: number;
+  warning?: string;
+}
 
 /** Live counters surfaced while the background visual-analysis job runs. */
 export interface SubtitleVisualAnalysisProgress {
@@ -2463,7 +2467,12 @@ export interface AppApi {
   pauseSubtitleAiCheck?(): Promise<void>;
   resumeSubtitleAiCheck?(): Promise<SubtitleAiCheckJobSnapshot>;
   stopSubtitleAiCheck?(): Promise<SubtitleAiCheckJobSnapshot | undefined>;
-  applySubtitleAiCheckAction?(action: SubtitleAiCheckAction): Promise<{ workspace: StandaloneSubtitleWorkspace; project?: ProjectManifest; proposal: SubtitleAiCheckProposal; conflict: boolean }>;
+  applySubtitleAiCheckAction?(action: SubtitleAiCheckAction): Promise<{
+    workspace: StandaloneSubtitleWorkspace;
+    project?: ProjectManifest;
+    proposal: SubtitleAiCheckProposal;
+    conflict: boolean;
+  }>;
   prepareProjectSubtitleAiCheck?(): Promise<StandaloneSubtitleWorkspace>;
   importStandaloneSubtitleWorkspaceFromSrt?(): Promise<StandaloneSubtitleWorkspace | null>;
   onSubtitleAiCheckProgress?(callback: (progress: SubtitleAiCheckProgress) => void): void;

@@ -16,14 +16,14 @@
 
 ## 根因與修正
 
-| 問題 | v0.86 證據／原因 | v0.87 行為 |
-|---|---|---|
-| 字幕不能捲動 | modal `overflow:hidden`、固定高度；多組控制列放在唯一可捲動子面板之前，把子面板擠到接近 0 高度 | header/footer 不縮小；整個主內容包在 `min-height:0; flex:1; overflow-y:auto` 的捲動區；可見 scrollbar、鍵盤捲動；窄版單欄 |
-| 字幕／草稿看不到 | 專案仍有 63 筆資料，並非檔案清空；被高度／裁切問題遮住 | 真實 Electron DOM 顯示 63 rows，截圖可見最後一筆；AI error 與既有 cue state 分離 |
-| AI 停在 frame 0 | `runSubtitleVisualJob` 在 extraction 前呼叫固定 2 秒容差的 `assertSubtitleVideoTimelineMatch`；5.286 秒差異直接 throw | compatibility 決定分析模式，不再完全禁止分析 |
-| 帳號按鈕難以操作 | 按鈕已有 handler，沒有以 API key 缺少為條件 disabled；控制區被裁切 | 按鈕移入可捲動內容；無 key 的隔離 profile 實測能開設定 |
-| 手動選片被忽略 | 每次開工作又按歷史優先順序挑選來源 | 本次 native picker 的明確選擇優先；工作 checkpoint 保存來源路徑与選擇原因 |
-| 固定模型 | UI 原固定 `gpt-5.6-terra/sol/luna`，且 text-only OK probe 不能证明 vision | 動態列表＋最小 JPEG/JSON probe；新帳號 Auto；實際模型進度／log；舊 manual 模型不偷偷替換 |
+| 問題             | v0.86 證據／原因                                                                                                      | v0.87 行為                                                                                                                |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 字幕不能捲動     | modal `overflow:hidden`、固定高度；多組控制列放在唯一可捲動子面板之前，把子面板擠到接近 0 高度                        | header/footer 不縮小；整個主內容包在 `min-height:0; flex:1; overflow-y:auto` 的捲動區；可見 scrollbar、鍵盤捲動；窄版單欄 |
+| 字幕／草稿看不到 | 專案仍有 63 筆資料，並非檔案清空；被高度／裁切問題遮住                                                                | 真實 Electron DOM 顯示 63 rows，截圖可見最後一筆；AI error 與既有 cue state 分離                                          |
+| AI 停在 frame 0  | `runSubtitleVisualJob` 在 extraction 前呼叫固定 2 秒容差的 `assertSubtitleVideoTimelineMatch`；5.286 秒差異直接 throw | compatibility 決定分析模式，不再完全禁止分析                                                                              |
+| 帳號按鈕難以操作 | 按鈕已有 handler，沒有以 API key 缺少為條件 disabled；控制區被裁切                                                    | 按鈕移入可捲動內容；無 key 的隔離 profile 實測能開設定                                                                    |
+| 手動選片被忽略   | 每次開工作又按歷史優先順序挑選來源                                                                                    | 本次 native picker 的明確選擇優先；工作 checkpoint 保存來源路徑与選擇原因                                                 |
+| 固定模型         | UI 原固定 `gpt-5.6-terra/sol/luna`，且 text-only OK probe 不能证明 vision                                             | 動態列表＋最小 JPEG/JSON probe；新帳號 Auto；實際模型進度／log；舊 manual 模型不偷偷替換                                  |
 
 ## 分析模式、安全門檻與工作生命週期
 

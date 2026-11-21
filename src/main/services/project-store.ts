@@ -80,7 +80,11 @@ import { syncSubtitlesToTimeline } from "../../shared/subtitle-timeline-sync";
 import { isValidYoutubeChapterSet, youtubeTextLength } from "../../shared/publish-rules";
 import { DEFAULT_WATERMARK_SETTINGS, normalizeWatermarkSettings } from "../../shared/watermark";
 import { finalizePartialOutput } from "./atomic-output";
-import { defaultInsertionAudioSettings, normalizeAudioTrackGates, normalizeInsertionAudioSettings } from "../../shared/insertion-audio-plan";
+import {
+  defaultInsertionAudioSettings,
+  normalizeAudioTrackGates,
+  normalizeInsertionAudioSettings,
+} from "../../shared/insertion-audio-plan";
 
 function clone<T>(value: T): T {
   return structuredClone(value);
@@ -265,7 +269,7 @@ function migrateProject(raw: Record<string, unknown>): ProjectManifest {
   const sourceById = new Map(sources.map((asset) => [asset.id, asset]));
   const legacyBgmTrackIds = new Set(
     Array.isArray(raw.bgmTracks)
-      ? (raw.bgmTracks as Array<{ id?: unknown }>).flatMap((track) => typeof track?.id === "string" ? [track.id] : [])
+      ? (raw.bgmTracks as Array<{ id?: unknown }>).flatMap((track) => (typeof track?.id === "string" ? [track.id] : []))
       : [],
   );
   type LegacyInsertion = Partial<MediaInsertion> & { photoAssetId?: string };
@@ -1014,9 +1018,10 @@ export class ProjectStore {
         sequenceIndex: project.mediaInsertions.filter((item) => item.anchorVideoAssetId === anchorVideoAssetId).length,
         previousPlacement,
         previousTimelineIndex,
-        previousPendingIndex: previousPlacement === "PENDING"
-          ? (existingOccurrence?.previousPendingIndex ?? currentPendingIndex)
-          : undefined,
+        previousPendingIndex:
+          previousPlacement === "PENDING"
+            ? (existingOccurrence?.previousPendingIndex ?? currentPendingIndex)
+            : undefined,
         createdAt: new Date().toISOString(),
         insertionAudio: defaultInsertionAudioSettings(inserted.kind, inserted.photoSoundEnabled !== false),
       });

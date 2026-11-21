@@ -73,14 +73,25 @@ export interface SubtitleVisionCache {
   set(key: string, drafts: readonly SubtitleVisionDraft[]): Promise<void>;
 }
 
-function cacheKey(frame: SubtitleVisionFrame, provider: SubtitleVisionProvider, density: SubtitleDensity, language: SubtitleVisionLanguage): string {
-  const contextHash = createHash("sha256").update(JSON.stringify({
-    videoFingerprint: frame.videoFingerprint,
-    contextRevision: frame.contextRevision,
-    segmentType: frame.segmentType,
-    context: frame.context,
-  })).digest("hex");
-  return [frame.fingerprint, frame.timestampMs, contextHash, provider.kind, provider.version, density, language].join(":");
+function cacheKey(
+  frame: SubtitleVisionFrame,
+  provider: SubtitleVisionProvider,
+  density: SubtitleDensity,
+  language: SubtitleVisionLanguage,
+): string {
+  const contextHash = createHash("sha256")
+    .update(
+      JSON.stringify({
+        videoFingerprint: frame.videoFingerprint,
+        contextRevision: frame.contextRevision,
+        segmentType: frame.segmentType,
+        context: frame.context,
+      }),
+    )
+    .digest("hex");
+  return [frame.fingerprint, frame.timestampMs, contextHash, provider.kind, provider.version, density, language].join(
+    ":",
+  );
 }
 
 function validateDraft(draft: SubtitleVisionDraft, framesById: Map<string, SubtitleVisionFrame>): SubtitleVisionDraft {
@@ -89,7 +100,12 @@ function validateDraft(draft: SubtitleVisionDraft, framesById: Map<string, Subti
   const text = draft.text.replace(/\s+/g, " ").trim();
   if (!text) throw new Error("AI 回傳了空白字幕。");
   if (text.length > 120) throw new Error("AI 字幕超過安全長度，請縮短後再確認。");
-  if (!Number.isFinite(draft.startMs) || !Number.isFinite(draft.endMs) || draft.startMs < 0 || draft.endMs <= draft.startMs)
+  if (
+    !Number.isFinite(draft.startMs) ||
+    !Number.isFinite(draft.endMs) ||
+    draft.startMs < 0 ||
+    draft.endMs <= draft.startMs
+  )
     throw new Error("AI 回傳了無效字幕時間。");
   if (draft.endMs > frame.videoDurationMs) throw new Error("AI 回傳的字幕超出分析影片時長。");
   const provenance = draft.provenance.filter(
@@ -116,15 +132,27 @@ export async function runSubtitleVisionDrafts(
   const batchSize = clampSubtitleSamplingBatchSize(options.batchSize ?? 20);
   const density = options.density ?? "STANDARD";
   const language = options.language ?? "zh-TW";
-  const runSignature = createHash("sha256").update(JSON.stringify({
-    frames: frames.map((frame) => [frame.id, frame.videoFingerprint, frame.fingerprint, frame.timestampMs, frame.contextRevision]),
-    provider: provider.kind,
-    providerVersion: provider.version,
-    density, language,
-  })).digest("hex");
+  const runSignature = createHash("sha256")
+    .update(
+      JSON.stringify({
+        frames: frames.map((frame) => [
+          frame.id,
+          frame.videoFingerprint,
+          frame.fingerprint,
+          frame.timestampMs,
+          frame.contextRevision,
+        ]),
+        provider: provider.kind,
+        providerVersion: provider.version,
+        density,
+        language,
+      }),
+    )
+    .digest("hex");
   const startedAt = Date.now();
   const prior = options.resume;
-  if (prior && prior.runSignature !== runSignature) throw new Error("字幕分析 Resume 已過期；影片、內容或 Provider 設定已變更。");
+  if (prior && prior.runSignature !== runSignature)
+    throw new Error("字幕分析 Resume 已過期；影片、內容或 Provider 設定已變更。");
   let nextIndex = Math.max(0, Math.min(frames.length, Math.round(prior?.nextIndex ?? 0)));
   const drafts = [...(prior?.drafts ?? [])];
   const progress: SubtitleVisionRunProgress = {

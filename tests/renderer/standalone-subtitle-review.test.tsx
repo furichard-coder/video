@@ -3,15 +3,37 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StandaloneSubtitleReview } from "../../src/renderer/components/StandaloneSubtitleReview";
-import type { AppApi, StandaloneSubtitleWorkspace, SubtitleAiCheckJobSnapshot, SubtitleAiCheckProposal, SubtitleCue } from "../../src/shared/domain";
+import type {
+  AppApi,
+  StandaloneSubtitleWorkspace,
+  SubtitleAiCheckJobSnapshot,
+  SubtitleAiCheckProposal,
+  SubtitleCue,
+} from "../../src/shared/domain";
 
-const cue = (id: string, text: string, startMs = 1_000, endMs = 2_500): SubtitleCue => ({ id, startMs, endMs, text, aiConfidence: 91 });
+const cue = (id: string, text: string, startMs = 1_000, endMs = 2_500): SubtitleCue => ({
+  id,
+  startMs,
+  endMs,
+  text,
+  aiConfidence: 91,
+});
 const workspace: StandaloneSubtitleWorkspace = {
-  id: "standalone-1", videoPath: "C:\\video.mp4", videoFingerprint: "sha256:test", videoDurationMs: 10_000,
-  draftPath: "C:\\draft.json", cues: [cue("one", "第一句"), cue("two", "第二句", 2_500, 4_000)], updatedAt: "2026-10-02T00:00:00.000Z",
+  id: "standalone-1",
+  videoPath: "C:\\video.mp4",
+  videoFingerprint: "sha256:test",
+  videoDurationMs: 10_000,
+  draftPath: "C:\\draft.json",
+  cues: [cue("one", "第一句"), cue("two", "第二句", 2_500, 4_000)],
+  updatedAt: "2026-10-02T00:00:00.000Z",
 };
 
-function setup(subject: StandaloneSubtitleWorkspace = workspace, overrides: Partial<AppApi> = {}, operationLog?: string[], onSave?: (cues: SubtitleCue[]) => void) {
+function setup(
+  subject: StandaloneSubtitleWorkspace = workspace,
+  overrides: Partial<AppApi> = {},
+  operationLog?: string[],
+  onSave?: (cues: SubtitleCue[]) => void,
+) {
   const savedWorkspace = { ...subject, cues: subject.cues };
   const saveStandaloneSubtitleWorkspace = vi.fn(async (_id: string, cues: SubtitleCue[]) => {
     operationLog?.push("save");
@@ -20,22 +42,41 @@ function setup(subject: StandaloneSubtitleWorkspace = workspace, overrides: Part
   });
   const getSubtitleEvidenceFrame = vi.fn(async () => ({ url: "data:image/png;base64,frame" }));
   const setSubtitleCues = vi.fn();
-  Object.defineProperty(window, "sourceApp", { configurable: true, value: {
-    saveStandaloneSubtitleWorkspace, getSubtitleEvidenceFrame, setSubtitleCues, ...overrides,
-  } as unknown as AppApi });
+  Object.defineProperty(window, "sourceApp", {
+    configurable: true,
+    value: {
+      saveStandaloneSubtitleWorkspace,
+      getSubtitleEvidenceFrame,
+      setSubtitleCues,
+      ...overrides,
+    } as unknown as AppApi,
+  });
   const onUpdated = vi.fn();
-  render(<StandaloneSubtitleReview workspace={subject} videoUrl="source-media://subtitle/standalone-1" onUpdated={onUpdated} onError={vi.fn()} />);
+  render(
+    <StandaloneSubtitleReview
+      workspace={subject}
+      videoUrl="source-media://subtitle/standalone-1"
+      onUpdated={onUpdated}
+      onError={vi.fn()}
+    />,
+  );
   return { saveStandaloneSubtitleWorkspace, setSubtitleCues, onUpdated };
 }
 
-function videoElement() { return document.querySelector("video")!; }
+function videoElement() {
+  return document.querySelector("video")!;
+}
 function timeUpdate(ms: number) {
   Object.defineProperty(videoElement(), "currentTime", { configurable: true, value: ms / 1000 });
   fireEvent.timeUpdate(videoElement());
 }
 
 describe("StandaloneSubtitleReview", () => {
-  afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   it("shows cue timing and confidence, saves text edits to the standalone workspace only", async () => {
     const { saveStandaloneSubtitleWorkspace, setSubtitleCues, onUpdated } = setup();
@@ -45,9 +86,12 @@ describe("StandaloneSubtitleReview", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "字幕文字" }), { target: { value: "修正後的字幕" } });
     expect(screen.getByRole("status")).toHaveTextContent("尚未儲存");
     fireEvent.click(screen.getByRole("button", { name: "儲存草稿" }));
-    await waitFor(() => expect(saveStandaloneSubtitleWorkspace).toHaveBeenCalledWith("standalone-1", [
-      expect.objectContaining({ id: "one", text: "修正後的字幕", userEdited: true }), cue("two", "第二句", 2_500, 4_000),
-    ]));
+    await waitFor(() =>
+      expect(saveStandaloneSubtitleWorkspace).toHaveBeenCalledWith("standalone-1", [
+        expect.objectContaining({ id: "one", text: "修正後的字幕", userEdited: true }),
+        cue("two", "第二句", 2_500, 4_000),
+      ]),
+    );
     expect(onUpdated).toHaveBeenCalledOnce();
     expect(setSubtitleCues).not.toHaveBeenCalled();
   });
@@ -100,11 +144,14 @@ describe("StandaloneSubtitleReview", () => {
   });
 
   it("plays three runtime segments on one project clock", () => {
-    const segmented = { ...workspace, segments: [
-      { src: "media://one", inMs: 1_000, outMs: 3_000 },
-      { src: "media://two", inMs: 2_000, outMs: 4_000 },
-      { src: "media://three", inMs: 0, outMs: 2_000 },
-    ] } as StandaloneSubtitleWorkspace;
+    const segmented = {
+      ...workspace,
+      segments: [
+        { src: "media://one", inMs: 1_000, outMs: 3_000 },
+        { src: "media://two", inMs: 2_000, outMs: 4_000 },
+        { src: "media://three", inMs: 0, outMs: 2_000 },
+      ],
+    } as StandaloneSubtitleWorkspace;
     setup(segmented);
     const player = videoElement();
     expect(player.getAttribute("src")).toBe("media://one");
@@ -175,9 +222,23 @@ describe("StandaloneSubtitleReview", () => {
 
   it("keeps AI checking opt-in and interactive confirmation on, and never starts before opt-in", async () => {
     const startSubtitleAiCheck = vi.fn(async (request) => ({
-      schemaVersion: 1 as const, workspaceId: workspace.id, videoFingerprint: workspace.videoFingerprint,
-      options: request, proposals: [], updatedAt: "2026-10-03T00:00:00Z",
-      progress: { status: "COMPLETED" as const, processed: 2, total: 2, nextCueIndex: 2, requests: 2, cacheHits: 0, elapsedMs: 10, provider: "OPENAI" as const, modelId: "actual-model" },
+      schemaVersion: 1 as const,
+      workspaceId: workspace.id,
+      videoFingerprint: workspace.videoFingerprint,
+      options: request,
+      proposals: [],
+      updatedAt: "2026-10-03T00:00:00Z",
+      progress: {
+        status: "COMPLETED" as const,
+        processed: 2,
+        total: 2,
+        nextCueIndex: 2,
+        requests: 2,
+        cacheHits: 0,
+        elapsedMs: 10,
+        provider: "OPENAI" as const,
+        modelId: "actual-model",
+      },
     }));
     setup(workspace, { startSubtitleAiCheck, getSubtitleAiCheckJob: vi.fn(async () => undefined) });
     fireEvent.click(screen.getByText("AI 逐筆審核"));
@@ -187,7 +248,11 @@ describe("StandaloneSubtitleReview", () => {
     expect(screen.getByRole("button", { name: "開始" })).toBeDisabled();
     fireEvent.click(enabled);
     fireEvent.click(screen.getByRole("button", { name: "開始" }));
-    await waitFor(() => expect(startSubtitleAiCheck).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, interactiveConfirmation: true, workspaceId: workspace.id })));
+    await waitFor(() =>
+      expect(startSubtitleAiCheck).toHaveBeenCalledWith(
+        expect.objectContaining({ enabled: true, interactiveConfirmation: true, workspaceId: workspace.id }),
+      ),
+    );
     expect(await screen.findByText(/actual-model/)).toBeInTheDocument();
   });
 
@@ -196,25 +261,64 @@ describe("StandaloneSubtitleReview", () => {
     let latestSavedText = "";
     let backendSawText = "";
     const proposal: SubtitleAiCheckProposal = {
-      id: "proposal-conflict", cueId: "one", cueIndex: 0, decision: "EDIT", suggestedText: "過期 AI 文字",
-      reason: "人工修改較新", confidence: 0.8, timingConfidence: 0.9, provider: "OPENAI", modelId: "actual-model",
-      baseCueRevision: "stale-revision", baseContextRevision: "stale-context", evidenceTimesMs: [1_000, 1_500, 2_000], status: "PENDING", createdAt: "2026-10-03T00:00:00Z",
+      id: "proposal-conflict",
+      cueId: "one",
+      cueIndex: 0,
+      decision: "EDIT",
+      suggestedText: "過期 AI 文字",
+      reason: "人工修改較新",
+      confidence: 0.8,
+      timingConfidence: 0.9,
+      provider: "OPENAI",
+      modelId: "actual-model",
+      baseCueRevision: "stale-revision",
+      baseContextRevision: "stale-context",
+      evidenceTimesMs: [1_000, 1_500, 2_000],
+      status: "PENDING",
+      createdAt: "2026-10-03T00:00:00Z",
     };
     const snapshot: SubtitleAiCheckJobSnapshot = {
-      schemaVersion: 1, workspaceId: workspace.id, videoFingerprint: workspace.videoFingerprint,
-      options: { enabled: true, interactiveConfirmation: true, provider: "CHATGPT", displayLanguage: "zh-TW", title: "", description: "" },
-      progress: { status: "COMPLETED", processed: 1, total: 1, nextCueIndex: 1, requests: 1, cacheHits: 0, elapsedMs: 10 },
-      proposals: [proposal], updatedAt: "2026-10-03T00:00:00Z",
+      schemaVersion: 1,
+      workspaceId: workspace.id,
+      videoFingerprint: workspace.videoFingerprint,
+      options: {
+        enabled: true,
+        interactiveConfirmation: true,
+        provider: "CHATGPT",
+        displayLanguage: "zh-TW",
+        title: "",
+        description: "",
+      },
+      progress: {
+        status: "COMPLETED",
+        processed: 1,
+        total: 1,
+        nextCueIndex: 1,
+        requests: 1,
+        cacheHits: 0,
+        elapsedMs: 10,
+      },
+      proposals: [proposal],
+      updatedAt: "2026-10-03T00:00:00Z",
     };
     const applySubtitleAiCheckAction = vi.fn(async () => {
       operationLog.push("apply");
       backendSawText = latestSavedText;
       const cues = [cue("one", latestSavedText), cue("two", "第二句", 2_500, 4_000)];
-      return { workspace: { ...workspace, cues }, proposal: { ...proposal, status: "CONFLICT" as const }, conflict: true };
+      return {
+        workspace: { ...workspace, cues },
+        proposal: { ...proposal, status: "CONFLICT" as const },
+        conflict: true,
+      };
     });
-    setup(workspace, { getSubtitleAiCheckJob: vi.fn(async () => snapshot), applySubtitleAiCheckAction }, operationLog, (cues) => {
-      latestSavedText = cues.find((item) => item.id === "one")?.text ?? "";
-    });
+    setup(
+      workspace,
+      { getSubtitleAiCheckJob: vi.fn(async () => snapshot), applySubtitleAiCheckAction },
+      operationLog,
+      (cues) => {
+        latestSavedText = cues.find((item) => item.id === "one")?.text ?? "";
+      },
+    );
 
     await screen.findByText(/過期 AI 文字/);
     fireEvent.change(screen.getByRole("textbox", { name: "字幕文字" }), { target: { value: "最新人工文字" } });

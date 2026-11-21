@@ -79,8 +79,22 @@ describe("user preferences", () => {
         resolution: "4K",
         renderTemporaryFolder: path.join(dataRoot, "Render TEMP"),
         tempLocations: [
-          { id: "primary", path: path.join(dataRoot, "E temp"), role: "PRIMARY", enabled: true, allowFallback: true, reserveBytes: 30 * 1024 ** 3 },
-          { id: "fallback", path: path.join(dataRoot, "C temp"), role: "FALLBACK", enabled: true, allowFallback: true, reserveBytes: 30 * 1024 ** 3 },
+          {
+            id: "primary",
+            path: path.join(dataRoot, "E temp"),
+            role: "PRIMARY",
+            enabled: true,
+            allowFallback: true,
+            reserveBytes: 30 * 1024 ** 3,
+          },
+          {
+            id: "fallback",
+            path: path.join(dataRoot, "C temp"),
+            role: "FALLBACK",
+            enabled: true,
+            allowFallback: true,
+            reserveBytes: 30 * 1024 ** 3,
+          },
         ],
         tempLocationSelection: "AUTO",
         prependIntro: false,
@@ -119,8 +133,22 @@ describe("user preferences", () => {
         resolution: "4K",
         renderTemporaryFolder: path.join(dataRoot, "Render TEMP"),
         tempLocations: [
-          { id: "primary", path: path.join(dataRoot, "E temp"), role: "PRIMARY", enabled: true, allowFallback: true, reserveBytes: 30 * 1024 ** 3 },
-          { id: "fallback", path: path.join(dataRoot, "C temp"), role: "FALLBACK", enabled: true, allowFallback: true, reserveBytes: 30 * 1024 ** 3 },
+          {
+            id: "primary",
+            path: path.join(dataRoot, "E temp"),
+            role: "PRIMARY",
+            enabled: true,
+            allowFallback: true,
+            reserveBytes: 30 * 1024 ** 3,
+          },
+          {
+            id: "fallback",
+            path: path.join(dataRoot, "C temp"),
+            role: "FALLBACK",
+            enabled: true,
+            allowFallback: true,
+            reserveBytes: 30 * 1024 ** 3,
+          },
         ],
         tempLocationSelection: "AUTO",
         prependIntro: false,
@@ -177,7 +205,11 @@ describe("user preferences", () => {
     await expect(store.update({ renderDefaults: { renderTemporaryFolder: "relative-temp" } })).rejects.toThrow(
       /絕對路徑/,
     );
-    await expect(store.update({ renderDefaults: { tempLocations: [{ id: "bad", path: "relative", role: "PRIMARY", enabled: true }] } })).rejects.toThrow(/格式或路徑無效/);
+    await expect(
+      store.update({
+        renderDefaults: { tempLocations: [{ id: "bad", path: "relative", role: "PRIMARY", enabled: true }] },
+      }),
+    ).rejects.toThrow(/格式或路徑無效/);
     expect(store.snapshot().viewMode).toBe("LIST");
   });
 
@@ -200,8 +232,22 @@ describe("user preferences", () => {
     await first.initialize();
     const saved = JSON.parse(await readFile(first.settingsPath, "utf8"));
     saved.renderDefaults.tempLocations = [
-      { id: "primary", path: "E:\\temp", role: "PRIMARY", enabled: true, allowFallback: true, reserveBytes: 20 * 1024 ** 3 },
-      { id: "fallback", path: path.join(os.tmpdir(), "SceneryWalker"), role: "FALLBACK", enabled: true, allowFallback: true, reserveBytes: 30 * 1024 ** 3 },
+      {
+        id: "primary",
+        path: "E:\\temp",
+        role: "PRIMARY",
+        enabled: true,
+        allowFallback: true,
+        reserveBytes: 20 * 1024 ** 3,
+      },
+      {
+        id: "fallback",
+        path: path.join(os.tmpdir(), "SceneryWalker"),
+        role: "FALLBACK",
+        enabled: true,
+        allowFallback: true,
+        reserveBytes: 30 * 1024 ** 3,
+      },
     ];
     await writeFile(first.settingsPath, JSON.stringify(saved), "utf8");
     const reopened = new UserPreferencesStore(dataRoot);
@@ -211,10 +257,27 @@ describe("user preferences", () => {
       { path: path.join(os.tmpdir(), "SceneryWalker"), reserveBytes: 2 * 1024 ** 3 },
     ]);
     const custom = await reopened.setRenderTempLocations([
-      { id: "primary", path: "E:\\temp", role: "PRIMARY", enabled: true, allowFallback: true, reserveBytes: 5 * 1024 ** 3 },
-      { id: "fallback", path: path.join(os.tmpdir(), "SceneryWalker"), role: "FALLBACK", enabled: true, allowFallback: true, reserveBytes: 7 * 1024 ** 3 },
+      {
+        id: "primary",
+        path: "E:\\temp",
+        role: "PRIMARY",
+        enabled: true,
+        allowFallback: true,
+        reserveBytes: 5 * 1024 ** 3,
+      },
+      {
+        id: "fallback",
+        path: path.join(os.tmpdir(), "SceneryWalker"),
+        role: "FALLBACK",
+        enabled: true,
+        allowFallback: true,
+        reserveBytes: 7 * 1024 ** 3,
+      },
     ]);
-    expect(custom.renderDefaults.tempLocations?.map((item) => item.reserveBytes)).toEqual([5 * 1024 ** 3, 7 * 1024 ** 3]);
+    expect(custom.renderDefaults.tempLocations?.map((item) => item.reserveBytes)).toEqual([
+      5 * 1024 ** 3,
+      7 * 1024 ** 3,
+    ]);
   });
 
   it("keeps post-success power actions explicit opt-in and persists a deliberate choice", async () => {

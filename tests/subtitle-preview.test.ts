@@ -63,12 +63,17 @@ describe("subtitle Intro preview cache", () => {
     const firstRoot = path.join(root, "temp-e", "cache", "subtitle-preview");
     const secondRoot = path.join(root, "temp-c", "cache", "subtitle-preview");
     let nextRoot = firstRoot;
-    const service = new SubtitlePreviewService(path.join(root, "cache"), store, {
-      render,
-    } as unknown as ConcatRenderService, {
-      readRoots: () => [firstRoot, secondRoot],
-      chooseWriteRoot: async () => nextRoot,
-    });
+    const service = new SubtitlePreviewService(
+      path.join(root, "cache"),
+      store,
+      {
+        render,
+      } as unknown as ConcatRenderService,
+      {
+        readRoots: () => [firstRoot, secondRoot],
+        chooseWriteRoot: async () => nextRoot,
+      },
+    );
     await service.initialize();
     const progress: number[] = [];
     const first = await service.ensureIntro480p(false, undefined, (item) => progress.push(item.percent));

@@ -28,7 +28,15 @@ const request: ConcatRenderRequest = {
 describe("RenderCommandState", () => {
   it("starts only a PC-prepared render and never exposes its output path in the remote snapshot", async () => {
     const state = new RenderCommandState("Project");
-    const start = vi.fn(async () => ({ jobId: "job", outputPath: "C:\\secret.mp4", sizeBytes: 1, expectedDurationMs: 1, transitionSeconds: 0.3 as const, resolution: "1080P" as const, purpose: "CONCAT" as const }));
+    const start = vi.fn(async () => ({
+      jobId: "job",
+      outputPath: "C:\\secret.mp4",
+      sizeBytes: 1,
+      expectedDurationMs: 1,
+      transitionSeconds: 0.3 as const,
+      resolution: "1080P" as const,
+      purpose: "CONCAT" as const,
+    }));
     state.setHandlers({ startPrepared: start, resumeCheckpoint: start, cancel: async () => undefined });
     await expect(state.startPrepared()).rejects.toThrow("尚未准备");
     state.prepare(request, "C:\\private\\output.mp4");
@@ -43,7 +51,9 @@ describe("RenderCommandState", () => {
     state.requestPause();
     expect(state.snapshot().state).toBe("PAUSING");
     let passed = false;
-    const waiting = state.waitAtSafeBoundary(undefined, "boundary").then(() => { passed = true; });
+    const waiting = state.waitAtSafeBoundary(undefined, "boundary").then(() => {
+      passed = true;
+    });
     await vi.waitFor(() => expect(state.snapshot().state).toBe("PAUSED"));
     expect(passed).toBe(false);
     state.resumeFromPause();
@@ -58,7 +68,14 @@ describe("RenderCommandState", () => {
       const store = new RenderCheckpointStore(path.join(root, "state"));
       const outputPath = path.join(root, "output.mp4");
       const projectId = "aaaaaaaa-0001";
-      const checkpoint = await store.create(projectId, "2026-09-14T00:00:00.000Z", "signature", "NORMAL", outputPath, request);
+      const checkpoint = await store.create(
+        projectId,
+        "2026-09-14T00:00:00.000Z",
+        "signature",
+        "NORMAL",
+        outputPath,
+        request,
+      );
       const segmentPath = path.join(checkpoint.workRoot, "segment-001.mp4");
       await writeFile(segmentPath, "completed segment");
       checkpoint.segments.push({

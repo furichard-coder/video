@@ -15,18 +15,18 @@ Checkpoint：`033e4b53-b4fa-4418-95d2-5f7bc4b6df86.v082.render-state.json`
 Checkpoint SHA-256（驗證前）：`A9B5D8ABAB9F54C159F26539DF3F631ECB8E9D8CA071C0076D9ADFA1765E9A31`  
 狀態：10／10 `COMPLETED`，總時長 `02:29:36.508`，總大小 `67.547 GiB`，`concatStatus=PAUSED_DISK_SPACE`。
 
-| Segment | Artifact ID | 目前位置 | Bytes | Duration ms | size | ffprobe | SHA-256 |
-| --- | --- | --- | ---: | ---: | --- | --- | --- |
-| 001 | `2e026c2a2081bbdb9a3dca90` | C:\ TEMP root | 619,893,179 | 75,742 | MATCH | PASS | MATCH |
-| 002 | `1bf7cfb392a6696127026884` | C:\ TEMP root | 345,535,452 | 52,517 | MATCH | PASS | MATCH |
-| 003 | `641389e0fc8e6a065a8af08d` | E:\ original root | 2,547,753,259 | 347,590 | MATCH | PASS | MATCH |
-| 004 | `b2cdaaf9e49645e0d2da96d5` | C:\ TEMP root | 12,792,945,747 | 1,555,134 | MATCH | PASS | MATCH |
-| 005 | `bd68f77c7644d1e239bd3bb5` | E:\ original root | 28,388,814,878 | 3,454,890 | MATCH | PASS | MATCH |
-| 006 | `1a925452d422c5b2a238e329` | E:\ original root | 2,271,647,642 | 300,746 | MATCH | PASS | MATCH |
-| 007 | `035acf82f07b4774c27b9d0a` | E:\ original root | 18,172,428,006 | 2,221,424 | MATCH | PASS | MATCH |
-| 008 | `b61bd3635b469e369cafb777` | C:\ TEMP root | 7,224,745,963 | 897,286 | MATCH | PASS | MATCH |
-| 009 | `b7666e70ce8e44620058d1a5` | E:\ original root | 42,812,619 | 43,700 | MATCH | PASS | MATCH |
-| 010 | `8cd83335a2a6b49477988a7d` | C:\ TEMP root | 121,380,233 | 27,479 | MATCH | PASS | MATCH |
+| Segment | Artifact ID                | 目前位置          |          Bytes | Duration ms | size  | ffprobe | SHA-256 |
+| ------- | -------------------------- | ----------------- | -------------: | ----------: | ----- | ------- | ------- |
+| 001     | `2e026c2a2081bbdb9a3dca90` | C:\ TEMP root     |    619,893,179 |      75,742 | MATCH | PASS    | MATCH   |
+| 002     | `1bf7cfb392a6696127026884` | C:\ TEMP root     |    345,535,452 |      52,517 | MATCH | PASS    | MATCH   |
+| 003     | `641389e0fc8e6a065a8af08d` | E:\ original root |  2,547,753,259 |     347,590 | MATCH | PASS    | MATCH   |
+| 004     | `b2cdaaf9e49645e0d2da96d5` | C:\ TEMP root     | 12,792,945,747 |   1,555,134 | MATCH | PASS    | MATCH   |
+| 005     | `bd68f77c7644d1e239bd3bb5` | E:\ original root | 28,388,814,878 |   3,454,890 | MATCH | PASS    | MATCH   |
+| 006     | `1a925452d422c5b2a238e329` | E:\ original root |  2,271,647,642 |     300,746 | MATCH | PASS    | MATCH   |
+| 007     | `035acf82f07b4774c27b9d0a` | E:\ original root | 18,172,428,006 |   2,221,424 | MATCH | PASS    | MATCH   |
+| 008     | `b61bd3635b469e369cafb777` | C:\ TEMP root     |  7,224,745,963 |     897,286 | MATCH | PASS    | MATCH   |
+| 009     | `b7666e70ce8e44620058d1a5` | E:\ original root |     42,812,619 |      43,700 | MATCH | PASS    | MATCH   |
+| 010     | `8cd83335a2a6b49477988a7d` | C:\ TEMP root     |    121,380,233 |      27,479 | MATCH | PASS    | MATCH   |
 
 全部十個檔案均為 H.264、3840×2160、30000/1001 fps、AAC 48 kHz stereo。ffprobe container duration 比 checkpoint duration 多 0.02 秒，落在既有 250 ms 容許範圍；十個完整 SHA-256 均與 checkpoint 完全相同。
 

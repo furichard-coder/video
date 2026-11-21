@@ -20,17 +20,22 @@ describe("render hardware runtime capability probe", () => {
       if (args.includes("-version")) return { stdout: "ffmpeg version 8.1.2-full_build\n", stderr: "" };
       if (args.includes("-encoders"))
         return {
-          stdout: " V....D h264_nvenc NVIDIA\n V....D hevc_nvenc NVIDIA\n V..... h264_qsv Intel\n V..... hevc_qsv Intel\n V..... libx264 CPU\n V..... libx265 CPU\n",
+          stdout:
+            " V....D h264_nvenc NVIDIA\n V....D hevc_nvenc NVIDIA\n V..... h264_qsv Intel\n V..... hevc_qsv Intel\n V..... libx264 CPU\n V..... libx265 CPU\n",
           stderr: "",
         };
       if (args.includes("-decoders"))
         return {
-          stdout: " V..... h264_cuvid NVIDIA\n V..... hevc_cuvid NVIDIA\n V..... h264_qsv Intel\n V..... hevc_qsv Intel\n V..... h264 CPU\n V..... hevc CPU\n",
+          stdout:
+            " V..... h264_cuvid NVIDIA\n V..... hevc_cuvid NVIDIA\n V..... h264_qsv Intel\n V..... hevc_qsv Intel\n V..... h264 CPU\n V..... hevc CPU\n",
           stderr: "",
         };
       if (args.includes("-filters")) return { stdout: " ... scale_qsv\n ... overlay_qsv\n", stderr: "" };
       if (executable === "powershell.exe" && joined.includes("Win32_VideoController"))
-        return { stdout: '[{"Name":"Intel HD Graphics 530"},{"Name":"NVIDIA Quadro M2000M","DriverVersion":"32.0.15.7371"}]', stderr: "" };
+        return {
+          stdout: '[{"Name":"Intel HD Graphics 530"},{"Name":"NVIDIA Quadro M2000M","DriverVersion":"32.0.15.7371"}]',
+          stderr: "",
+        };
       if (executable === "powershell.exe") return { stdout: "NO\n", stderr: "" };
       if (joined.includes("h264_nvenc") || joined.includes("hevc_nvenc"))
         throw new ProcessFailure("probe failed", 1, "Driver does not support the required nvenc API version");

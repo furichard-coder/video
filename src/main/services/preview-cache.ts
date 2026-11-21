@@ -300,12 +300,18 @@ export class PreviewCache {
         marker.variant !== "VIDEO_CLIP_PROXY" ||
         marker.sourceStartMs !== startMs ||
         marker.sourceEndMs !== endMs
-      ) return false;
+      )
+        return false;
       const output = await stat(outputPath);
-      const fingerprintMatches = marker.outputSizeBytes === output.size && marker.outputModifiedAt === output.mtime.toISOString();
+      const fingerprintMatches =
+        marker.outputSizeBytes === output.size && marker.outputModifiedAt === output.mtime.toISOString();
       if (!fingerprintMatches && !(await this.isValidProxy(outputPath))) return false;
       if (!fingerprintMatches) {
-        await writeFile(markerPath, `${JSON.stringify({ ...marker, outputSizeBytes: output.size, outputModifiedAt: output.mtime.toISOString() }, null, 2)}\n`, "utf8");
+        await writeFile(
+          markerPath,
+          `${JSON.stringify({ ...marker, outputSizeBytes: output.size, outputModifiedAt: output.mtime.toISOString() }, null, 2)}\n`,
+          "utf8",
+        );
       }
       return true;
     } catch {
@@ -332,13 +338,22 @@ export class PreviewCache {
     if (!asset) throw new Error("找不到來源項目。");
     for (const directory of this.cacheDirectories(asset.previewCacheKey)) {
       const markerPath = assertWithinRoot(directory, path.join(directory, `clip-${clipKey}.json`));
-      const marker = await readFile(markerPath, "utf8").then((value) => JSON.parse(value) as CacheMarker & {
-        sourceStartMs?: number; sourceEndMs?: number;
-      }).catch(() => undefined);
+      const marker = await readFile(markerPath, "utf8")
+        .then(
+          (value) =>
+            JSON.parse(value) as CacheMarker & {
+              sourceStartMs?: number;
+              sourceEndMs?: number;
+            },
+        )
+        .catch(() => undefined);
       if (
-        marker && Number.isFinite(marker.sourceStartMs) && Number.isFinite(marker.sourceEndMs) &&
-        await this.clipCacheHit(directory, asset, clipKey, marker.sourceStartMs!, marker.sourceEndMs!)
-      ) return assertWithinRoot(directory, path.join(directory, `clip-${clipKey}.mp4`));
+        marker &&
+        Number.isFinite(marker.sourceStartMs) &&
+        Number.isFinite(marker.sourceEndMs) &&
+        (await this.clipCacheHit(directory, asset, clipKey, marker.sourceStartMs!, marker.sourceEndMs!))
+      )
+        return assertWithinRoot(directory, path.join(directory, `clip-${clipKey}.mp4`));
     }
     throw new Error("區段代理尚未建立或已失效。");
   }
@@ -356,7 +371,8 @@ export class PreviewCache {
       let asset = await this.sources.refreshAsset(assetId);
       if (asset.kind === "VIDEO") asset = await this.sources.ensureMetadata(assetId, signal);
       const durationMs = asset.mediaInfo?.durationMs;
-      if (durationMs && (startMs >= durationMs || endMs > durationMs + 50)) throw new Error("片頭縮圖時間超出來源範圍。");
+      if (durationMs && (startMs >= durationMs || endMs > durationMs + 50))
+        throw new Error("片頭縮圖時間超出來源範圍。");
       const thumbnailKey = createHash("sha256")
         .update(`${INTRO_THUMBNAIL_VERSION}\0${asset.previewCacheKey}\0${startMs}\0${endMs}`)
         .digest("hex");
@@ -406,10 +422,29 @@ export class PreviewCache {
             await runProcess(
               this.ffmpegExecutable,
               [
-                "-hide_banner", "-loglevel", "error", "-nostdin", "-ss", String(startMs / 1000), "-noautorotate",
-                "-i", asset.sourcePath, "-t", String(scanSeconds), "-frames:v", "1", "-vf",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-ss",
+                String(startMs / 1000),
+                "-noautorotate",
+                "-i",
+                asset.sourcePath,
+                "-t",
+                String(scanSeconds),
+                "-frames:v",
+                "1",
+                "-vf",
                 `${orientation.ffmpegFilter ? `${orientation.ffmpegFilter},` : ""}blackframe=amount=98:threshold=32,metadata=select:key=lavfi.blackframe.pblack:value=98:function=less,scale=480:480:force_original_aspect_ratio=decrease`,
-                "-map_metadata", "-1", "-metadata:s:v:0", "rotate=0", "-q:v", "4", "-y", partialPath,
+                "-map_metadata",
+                "-1",
+                "-metadata:s:v:0",
+                "rotate=0",
+                "-q:v",
+                "4",
+                "-y",
+                partialPath,
               ],
               signal,
             );
@@ -419,10 +454,27 @@ export class PreviewCache {
             await runProcess(
               this.ffmpegExecutable,
               [
-                "-hide_banner", "-loglevel", "error", "-nostdin", "-ss",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-ss",
                 String(Math.min(endMs - 1, startMs + Math.min(500, Math.max(0, endMs - startMs - 1))) / 1000),
-                "-noautorotate", "-i", asset.sourcePath, "-frames:v", "1", "-vf", scale,
-                "-map_metadata", "-1", "-metadata:s:v:0", "rotate=0", "-q:v", "4", "-y", partialPath,
+                "-noautorotate",
+                "-i",
+                asset.sourcePath,
+                "-frames:v",
+                "1",
+                "-vf",
+                scale,
+                "-map_metadata",
+                "-1",
+                "-metadata:s:v:0",
+                "rotate=0",
+                "-q:v",
+                "4",
+                "-y",
+                partialPath,
               ],
               signal,
             );
@@ -430,7 +482,22 @@ export class PreviewCache {
         } else {
           await runProcess(
             this.ffmpegExecutable,
-            ["-hide_banner", "-loglevel", "error", "-nostdin", "-i", asset.sourcePath, "-frames:v", "1", "-vf", scale, "-q:v", "4", "-y", partialPath],
+            [
+              "-hide_banner",
+              "-loglevel",
+              "error",
+              "-nostdin",
+              "-i",
+              asset.sourcePath,
+              "-frames:v",
+              "1",
+              "-vf",
+              scale,
+              "-q:v",
+              "4",
+              "-y",
+              partialPath,
+            ],
             signal,
           );
         }
@@ -461,7 +528,8 @@ export class PreviewCache {
       const outputPath = assertWithinRoot(directory, path.join(directory, `intro-${thumbnailKey}.jpg`));
       const markerPath = assertWithinRoot(directory, path.join(directory, `intro-${thumbnailKey}.json`));
       if (!(await isUsableCachedOutput(outputPath, "THUMBNAIL"))) continue;
-      const marker = await readFile(markerPath, "utf8").then((value) => JSON.parse(value) as CacheMarker)
+      const marker = await readFile(markerPath, "utf8")
+        .then((value) => JSON.parse(value) as CacheMarker)
         .catch(() => undefined);
       if (
         marker?.cacheKey === asset.previewCacheKey &&
@@ -469,7 +537,8 @@ export class PreviewCache {
         marker.sourcePath === asset.sourcePath &&
         marker.sourceSize === asset.sizeBytes &&
         marker.sourceModifiedAt === asset.fileModifiedAt
-      ) return outputPath;
+      )
+        return outputPath;
     }
     throw new Error("片頭縮圖尚未建立或已失效。");
   }
@@ -477,7 +546,9 @@ export class PreviewCache {
   private cacheDirectories(cacheKey: string): string[] {
     const safeKey = assertSafeHexId(cacheKey, "Cache key");
     const roots = [this.cacheRoot, ...(this.placement?.readRoots() ?? [])];
-    return [...new Set(roots.map((root) => path.resolve(root)))].map((root) => assertWithinRoot(root, path.join(root, safeKey)));
+    return [...new Set(roots.map((root) => path.resolve(root)))].map((root) =>
+      assertWithinRoot(root, path.join(root, safeKey)),
+    );
   }
 
   private async writeCacheDirectory(cacheKey: string, variant: PreviewVariant): Promise<string> {

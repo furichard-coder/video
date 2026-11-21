@@ -70,8 +70,20 @@ async function sha256(filePath: string): Promise<string> {
 
 async function packetHash(filePath: string, stream: "v:0" | "a:0"): Promise<string> {
   const result = await runProcess("ffmpeg", [
-    "-hide_banner", "-loglevel", "error", "-i", filePath, "-map", `0:${stream}`,
-    "-c", "copy", "-f", "hash", "-hash", "sha256", "-",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-i",
+    filePath,
+    "-map",
+    `0:${stream}`,
+    "-c",
+    "copy",
+    "-f",
+    "hash",
+    "-hash",
+    "sha256",
+    "-",
   ]);
   return result.stdout.trim();
 }
@@ -418,7 +430,9 @@ describe("concat preview filter plan", () => {
       purpose: "CONCAT" as const,
       lowMemorySegmented: false,
       renderTemporaryFolder: path.join(resumeRoot, "old-temp"),
-      tempLocations: [{ id: "primary", path: path.join(resumeRoot, "old-temp"), role: "PRIMARY" as const, enabled: true }],
+      tempLocations: [
+        { id: "primary", path: path.join(resumeRoot, "old-temp"), role: "PRIMARY" as const, enabled: true },
+      ],
       runtimePolicy: {
         mode: "NORMAL" as const,
         maxVisualInputsPerStage: 3,
@@ -466,9 +480,9 @@ describe("concat preview filter plan", () => {
     };
     const midOutput = path.join(resumeRoot, "resumed-from-middle.mp4");
     const midService = new ConcatRenderService(localStore, localSources, "ffmpeg", failMidStage);
-    await expect(midService.render({ ...request, outputToken: "mid-resume-test", resolution: "480P" }, midOutput)).rejects.toThrow(
-      /已保留並驗證 1 個完成片段/,
-    );
+    await expect(
+      midService.render({ ...request, outputToken: "mid-resume-test", resolution: "480P" }, midOutput),
+    ).rejects.toThrow(/已保留並驗證 1 個完成片段/);
     expect(midFailureCalls).toBe(2);
     const midOffer = await midService.getResumeOffer();
     expect(midOffer).toMatchObject({ concatStatus: "FAILED", completedSegmentCount: 1, totalSegmentCount: 3 });
@@ -484,12 +498,18 @@ describe("concat preview filter plan", () => {
       { id: "primary", path: path.join(resumeRoot, "old-temp"), role: "PRIMARY" as const, enabled: true },
       { id: "manual", path: manuallySelectedRoot, role: "FALLBACK" as const, enabled: true },
     ];
-    const compatibilityAfterMove = await midService.analyzeResumeCompatibility(midOffer!.checkpointId, registeredLocations);
+    const compatibilityAfterMove = await midService.analyzeResumeCompatibility(
+      midOffer!.checkpointId,
+      registeredLocations,
+    );
     expect(compatibilityAfterMove).toMatchObject({ reusableSegmentCount: 1, invalidSegmentCount: 1 });
     // Opening the report is read-only: it previews the remap but keeps the
     // checkpoint path unchanged until the user actually resumes.
-    expect((await midCheckpointStore.load(localStore.getProject().id))!.segments.find((segment) => segment.id === completedBeforeMove.id)?.outputPath)
-      .toBe(completedBeforeMove.outputPath);
+    expect(
+      (await midCheckpointStore.load(localStore.getProject().id))!.segments.find(
+        (segment) => segment.id === completedBeforeMove.id,
+      )?.outputPath,
+    ).toBe(completedBeforeMove.outputPath);
     let midResumeCalls = 0;
     const resumedStages: string[] = [];
     const midResumeRunner = async (...args: Parameters<typeof runFfmpegWithProgress>) => {
@@ -577,14 +597,21 @@ describe("concat preview filter plan", () => {
       sourcePreserved: true,
     };
     const legacyInputKeys = Array.from({ length: 93 }, (_, index) => `source-${index}`);
-    const legacySegmentIds = Array.from({ length: 10 }, (_, index) => createHash("sha256").update(JSON.stringify({
-      segmentPipelineVersion: 2,
-      level: 0,
-      inputs: legacyInputKeys.slice(index * 10, index * 10 + 10),
-      transitionSeconds: 0.3,
-      resolution: "360P",
-      portrait: false,
-    })).digest("hex").slice(0, 24));
+    const legacySegmentIds = Array.from({ length: 10 }, (_, index) =>
+      createHash("sha256")
+        .update(
+          JSON.stringify({
+            segmentPipelineVersion: 2,
+            level: 0,
+            inputs: legacyInputKeys.slice(index * 10, index * 10 + 10),
+            transitionSeconds: 0.3,
+            resolution: "360P",
+            portrait: false,
+          }),
+        )
+        .digest("hex")
+        .slice(0, 24),
+    );
     checkpoint.segments = Array.from({ length: 10 }, (_, index) => ({
       id: legacySegmentIds[index],
       level: 1,
@@ -619,9 +646,13 @@ describe("concat preview filter plan", () => {
       sourceStatMatchesManifest: true,
       sourceRenderIdentity: { sizeBytes: 1, modifiedAt: "2020-01-01T00:00:00.000Z" },
     }));
-    const result = await (service as unknown as {
-      buildResumableIntermediates: (...args: unknown[]) => Promise<{ inputs: Array<{ sourcePath: string }>; resumedSegmentCount: number }>;
-    }).buildResumableIntermediates(
+    const result = await (
+      service as unknown as {
+        buildResumableIntermediates: (
+          ...args: unknown[]
+        ) => Promise<{ inputs: Array<{ sourcePath: string }>; resumedSegmentCount: number }>;
+      }
+    ).buildResumableIntermediates(
       inputs,
       0.3,
       "360P",
@@ -1314,8 +1345,17 @@ describe("concat preview integration", () => {
     await introStore.setIntroSegments(introClips);
     const bgmPath = path.join(root, "scope-music.mp3");
     await runProcess("ffmpeg", [
-      "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
-      "sine=frequency=330:sample_rate=48000:duration=8", "-c:a", "libmp3lame", "-y", bgmPath,
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=330:sample_rate=48000:duration=8",
+      "-c:a",
+      "libmp3lame",
+      "-y",
+      bgmPath,
     ]);
     const track = {
       id: "scope-music",
@@ -1636,7 +1676,11 @@ describe("concat preview integration", () => {
       return runFfmpegWithProgress(...parameters);
     };
     const second = await new ConcatRenderService(
-      insertionStore, insertionSources, "ffmpeg", countedRunner, shutterPath,
+      insertionStore,
+      insertionSources,
+      "ffmpeg",
+      countedRunner,
+      shutterPath,
     ).render(
       {
         outputToken: "inside-audio-only",

@@ -36,51 +36,67 @@ export function evaluateRenderTempPreflight(
 ) {
   // A TEMP job and the final output can coexist on one volume. Do not admit
   // each independently when their combined peak would breach that reserve.
-  const sharedVolumeConflict = statuses.some((status) =>
-    status.volume === outputVolume &&
-    status.available &&
-    status.schedulableBytes >= estimatedNextJobBytes &&
-    status.freeBytes < estimatedNextJobBytes + estimatedOutputBytes + Math.max(status.reserveBytes ?? 0, outputReserveBytes),
-  );
-  const selectedTemp = selectRenderTempForNextJob(statuses.map((status) => ({
-    config: status,
-    freeBytes: status.freeBytes,
-    capacityBytes: status.capacityBytes,
-    committedBytes: status.committedBytes,
-    writable: status.unavailableReason !== "UNWRITABLE" && !(
+  const sharedVolumeConflict = statuses.some(
+    (status) =>
       status.volume === outputVolume &&
-      status.freeBytes < estimatedNextJobBytes + estimatedOutputBytes + Math.max(status.reserveBytes ?? 0, outputReserveBytes)
-    ),
-  })), estimatedNextJobBytes, selection);
+      status.available &&
+      status.schedulableBytes >= estimatedNextJobBytes &&
+      status.freeBytes <
+        estimatedNextJobBytes + estimatedOutputBytes + Math.max(status.reserveBytes ?? 0, outputReserveBytes),
+  );
+  const selectedTemp = selectRenderTempForNextJob(
+    statuses.map((status) => ({
+      config: status,
+      freeBytes: status.freeBytes,
+      capacityBytes: status.capacityBytes,
+      committedBytes: status.committedBytes,
+      writable:
+        status.unavailableReason !== "UNWRITABLE" &&
+        !(
+          status.volume === outputVolume &&
+          status.freeBytes <
+            estimatedNextJobBytes + estimatedOutputBytes + Math.max(status.reserveBytes ?? 0, outputReserveBytes)
+        ),
+    })),
+    estimatedNextJobBytes,
+    selection,
+  );
   const outputVolumeCanRender = Math.max(0, outputFreeBytes) >= Math.max(0, outputHardRequiredBytes);
-  return { selectedTemp, outputVolumeCanRender, sharedVolumeConflict, canRender: Boolean(selectedTemp) && outputVolumeCanRender };
+  return {
+    selectedTemp,
+    outputVolumeCanRender,
+    sharedVolumeConflict,
+    canRender: Boolean(selectedTemp) && outputVolumeCanRender,
+  };
 }
 
 export async function probeRenderTempLocations(
   configs: readonly RenderTempLocationConfig[],
   committedBytesByVolume: Readonly<Record<string, number>> = {},
 ): Promise<RenderTempLocationStatus[]> {
-  return Promise.all(configs.map(async (candidate) => {
-    const config = normalizeRenderTempLocation(candidate);
-    try {
-      const disk = await validateRenderTemporaryFolder(config.path);
-      return describeRenderTempLocation({
-        config,
-        freeBytes: disk.freeBytes,
-        capacityBytes: disk.capacityBytes,
-        committedBytes: committedBytesByVolume[disk.volume] ?? 0,
-        writable: true,
-      });
-    } catch {
-      return describeRenderTempLocation({
-        config,
-        freeBytes: 0,
-        capacityBytes: 0,
-        committedBytes: committedBytesByVolume[volumeRoot(config.path)] ?? 0,
-        writable: false,
-      });
-    }
-  }));
+  return Promise.all(
+    configs.map(async (candidate) => {
+      const config = normalizeRenderTempLocation(candidate);
+      try {
+        const disk = await validateRenderTemporaryFolder(config.path);
+        return describeRenderTempLocation({
+          config,
+          freeBytes: disk.freeBytes,
+          capacityBytes: disk.capacityBytes,
+          committedBytes: committedBytesByVolume[disk.volume] ?? 0,
+          writable: true,
+        });
+      } catch {
+        return describeRenderTempLocation({
+          config,
+          freeBytes: 0,
+          capacityBytes: 0,
+          committedBytes: committedBytesByVolume[volumeRoot(config.path)] ?? 0,
+          writable: false,
+        });
+      }
+    }),
+  );
 }
 
 function safeLocationId(value: string): string {
@@ -91,9 +107,8 @@ function safeLocationId(value: string): string {
 export function normalizeRenderTempLocation(config: RenderTempLocationConfig): RenderTempLocationConfig {
   if (!path.isAbsolute(config.path)) throw new Error("Render TEMP location 必須是絕對路徑。");
   const resolved = path.resolve(config.path);
-  const defaultReserve = volumeRoot(resolved) === "C:\\"
-    ? DEFAULT_SYSTEM_VOLUME_SOFT_RESERVE_BYTES
-    : DEFAULT_DATA_VOLUME_SOFT_RESERVE_BYTES;
+  const defaultReserve =
+    volumeRoot(resolved) === "C:\\" ? DEFAULT_SYSTEM_VOLUME_SOFT_RESERVE_BYTES : DEFAULT_DATA_VOLUME_SOFT_RESERVE_BYTES;
   return {
     id: safeLocationId(config.id),
     path: resolved,
@@ -116,8 +131,8 @@ export function describeRenderTempLocation(probe: RenderTempLocationProbe): Rend
       : !config.enabled
         ? "DISABLED"
         : schedulableBytes <= 0
-            ? "BELOW_RESERVE"
-            : undefined;
+          ? "BELOW_RESERVE"
+          : undefined;
   return {
     ...config,
     volume: volumeRoot(config.path),
@@ -143,12 +158,13 @@ export function selectRenderTempForNextJob(
   const required = Math.max(0, Math.ceil(estimatedJobBytes));
   const statuses = probes.map(describeRenderTempLocation);
   const eligible = statuses.filter((item) => item.available && item.schedulableBytes >= required);
-  const selected = selection === "PRIMARY"
-    ? eligible.find((item) => item.role === "PRIMARY")
-    : selection === "FALLBACK"
-      ? eligible.find((item) => item.role === "FALLBACK")
-      : eligible.find((item) => item.role === "PRIMARY") ??
-        eligible.find((item) => item.role === "FALLBACK" && item.allowFallback !== false);
+  const selected =
+    selection === "PRIMARY"
+      ? eligible.find((item) => item.role === "PRIMARY")
+      : selection === "FALLBACK"
+        ? eligible.find((item) => item.role === "FALLBACK")
+        : (eligible.find((item) => item.role === "PRIMARY") ??
+          eligible.find((item) => item.role === "FALLBACK" && item.allowFallback !== false));
   if (!selected) return undefined;
   return {
     locationId: selected.id,

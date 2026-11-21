@@ -114,7 +114,10 @@ function cueScope(cue: SubtitleCue): SubtitleTimelineScope {
 }
 
 function isTextEditingTarget(target: EventTarget | null): boolean {
-  return target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])"));
+  return (
+    target instanceof Element &&
+    Boolean(target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])"))
+  );
 }
 
 function scopeNeedsReview(project: ProjectManifest, scope: SubtitleTimelineScope): boolean {
@@ -236,7 +239,9 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   const programmaticFollowUntilRef = useRef(0);
   const continuePlaybackRef = useRef(false);
   const handoffSegmentIdRef = useRef<string | undefined>(undefined);
-  const imagePlaybackAnchorRef = useRef<{ segmentId: string; projectMs: number; wallMs: number } | undefined>(undefined);
+  const imagePlaybackAnchorRef = useRef<{ segmentId: string; projectMs: number; wallMs: number } | undefined>(
+    undefined,
+  );
   const skipNextProjectSyncRef = useRef(false);
   const selectedScopes = useMemo(
     () => [...(scope.intro ? ["INTRO" as const] : []), ...(scope.main ? ["MAIN" as const] : [])],
@@ -256,7 +261,12 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   );
   const overlappingIds = useMemo(() => overlappingCueIds(visibleCues), [visibleCues]);
   useEffect(() => {
-    console.info("[SUBTITLE_UI]", { projectId: project.id, loaded: project.subtitleCues.length, renderedRows: visibleCues.length, drafts: cues.filter((cue) => cue.reviewStatus === "DRAFT").length });
+    console.info("[SUBTITLE_UI]", {
+      projectId: project.id,
+      loaded: project.subtitleCues.length,
+      renderedRows: visibleCues.length,
+      drafts: cues.filter((cue) => cue.reviewStatus === "DRAFT").length,
+    });
   }, [project.id, project.subtitleCues.length, visibleCues.length]);
   const selected = cues.find((cue) => cue.id === selectedId && selectedScopes.includes(cueScope(cue)));
   const selectedTimelineDurationMs =
@@ -283,19 +293,24 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     reviewableVisibleCues.every((cue) => (cue.reviewStatus ?? "CONFIRMED") === "CONFIRMED");
 
   const playbackScope: SubtitleTimelineScope = useIntroTimelinePreview ? "INTRO" : sourcePlaybackScope;
-  const playbackSegments = useMemo(() => buildSubtitlePlaybackSegments(project, playbackScope), [project, playbackScope]);
+  const playbackSegments = useMemo(
+    () => buildSubtitlePlaybackSegments(project, playbackScope),
+    [project, playbackScope],
+  );
   const sourceSelection = useMemo(() => {
     if (useIntroTimelinePreview) return undefined;
     const segment = playbackSegmentAt(playbackSegments, cursor) ?? playbackSegments[0];
-    return segment ? {
-      asset: segment.asset,
-      sourceStartMs: segment.sourceStartMs,
-      sourceEndMs: segment.sourceEndMs,
-      projectStartMs: segment.projectStartMs,
-      projectEndMs: segment.projectEndMs,
-      ownershipEndMs: segment.ownershipEndMs,
-      segmentId: segment.id,
-    } : undefined;
+    return segment
+      ? {
+          asset: segment.asset,
+          sourceStartMs: segment.sourceStartMs,
+          sourceEndMs: segment.sourceEndMs,
+          projectStartMs: segment.projectStartMs,
+          projectEndMs: segment.projectEndMs,
+          ownershipEndMs: segment.ownershipEndMs,
+          segmentId: segment.id,
+        }
+      : undefined;
   }, [cursor, playbackSegments, useIntroTimelinePreview]);
   const activeSourcePreview = useMemo(() => {
     if (!preview || !sourceSelection || preview.assetId !== sourceSelection.asset.id) return undefined;
@@ -314,7 +329,10 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     const markManual = () => {
       manualFollowUntilRef.current = Date.now() + 4_000;
       if (manualFollowTimerRef.current !== undefined) window.clearTimeout(manualFollowTimerRef.current);
-      manualFollowTimerRef.current = window.setTimeout(() => setFollowResumeRevision((revision) => revision + 1), 4_000);
+      manualFollowTimerRef.current = window.setTimeout(
+        () => setFollowResumeRevision((revision) => revision + 1),
+        4_000,
+      );
     };
     const onScroll = () => {
       if (Date.now() < programmaticFollowUntilRef.current) return;
@@ -325,7 +343,9 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     list.addEventListener("wheel", onManualScroll, { passive: true });
     list.addEventListener("pointerdown", onManualScroll, { passive: true });
     return () => {
-      list.removeEventListener("scroll", onScroll); list.removeEventListener("wheel", onManualScroll); list.removeEventListener("pointerdown", onManualScroll);
+      list.removeEventListener("scroll", onScroll);
+      list.removeEventListener("wheel", onManualScroll);
+      list.removeEventListener("pointerdown", onManualScroll);
       if (manualFollowTimerRef.current !== undefined) window.clearTimeout(manualFollowTimerRef.current);
     };
   }, []);
@@ -339,13 +359,19 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     programmaticFollowUntilRef.current = Date.now() + 1_200;
     const listRect = list.getBoundingClientRect();
     const rowRect = row.getBoundingClientRect();
-    const relativeCenter = rowRect.height > 0
-      ? list.scrollTop + rowRect.top - listRect.top + rowRect.height / 2
-      : row.offsetTop + row.clientHeight / 2;
+    const relativeCenter =
+      rowRect.height > 0
+        ? list.scrollTop + rowRect.top - listRect.top + rowRect.height / 2
+        : row.offsetTop + row.clientHeight / 2;
     const top = Math.max(0, relativeCenter - list.clientHeight * 0.45);
     if (typeof list.scrollTo === "function") list.scrollTo({ top, behavior: "smooth" });
     else list.scrollTop = top;
-    console.info("[SUBTITLE] focus", { workspace: "project", cueId: activeOverlayCue.id, reason: followResumeRevision ? "manual-override-expired-or-active-change" : "active-change", top });
+    console.info("[SUBTITLE] focus", {
+      workspace: "project",
+      cueId: activeOverlayCue.id,
+      reason: followResumeRevision ? "manual-override-expired-or-active-change" : "active-change",
+      top,
+    });
   }, [activeOverlayCue?.id, followResumeRevision]);
 
   useEffect(() => {
@@ -377,7 +403,10 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
       .getSubtitleAnalysisVideo?.()
       .then(setAnalysisVideo)
       .catch(() => undefined);
-    void window.sourceApp.getStandaloneSubtitleWorkspace?.().then((workspace) => setStandaloneWorkspace(workspace ?? undefined)).catch(() => undefined);
+    void window.sourceApp
+      .getStandaloneSubtitleWorkspace?.()
+      .then((workspace) => setStandaloneWorkspace(workspace ?? undefined))
+      .catch(() => undefined);
   }, [project.id]);
 
   const chooseAnalysisVideo = async () => {
@@ -391,27 +420,35 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
 
   const prepareProjectAiCheck = async () => {
     if (!projectAiCheckEnabled || !window.sourceApp.prepareProjectSubtitleAiCheck) return;
-    if (localDirty && !await save()) return;
-    setBusy(true); setError(undefined);
+    if (localDirty && !(await save())) return;
+    setBusy(true);
+    setError(undefined);
     try {
       const workspace = await window.sourceApp.prepareProjectSubtitleAiCheck();
       setStandaloneWorkspace(workspace);
       setNotice("已用目前 projectId 的成功輸出建立 AI 逐筆檢查工作區；所有建議仍需人工保留、套用、編輯或略過。");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-    finally { setBusy(false); }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const importStandaloneSrtReview = async () => {
     if (!window.sourceApp.importStandaloneSubtitleWorkspaceFromSrt) return;
-    setBusy(true); setError(undefined);
+    setBusy(true);
+    setError(undefined);
     try {
       const workspace = await window.sourceApp.importStandaloneSubtitleWorkspaceFromSrt();
       if (workspace) {
         setStandaloneWorkspace(workspace);
         setNotice("已將既有 SRT 複製到所選影片的獨立 AI draft 工作區；來源 SRT 與目前專案字幕都不會被修改。");
       }
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-    finally { setBusy(false); }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
   };
 
   useEffect(() => {
@@ -493,7 +530,13 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   ]);
 
   useEffect(() => {
-    if (!activeSourcePreview?.url || sourceSelection?.asset.kind !== "VIDEO" || !continuePlaybackRef.current || useIntroTimelinePreview) return;
+    if (
+      !activeSourcePreview?.url ||
+      sourceSelection?.asset.kind !== "VIDEO" ||
+      !continuePlaybackRef.current ||
+      useIntroTimelinePreview
+    )
+      return;
     let cancelled = false;
     let attempts = 0;
     let timer: number | undefined;
@@ -504,12 +547,20 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
         if (attempts++ < 40) timer = window.setTimeout(resume, 50);
         return;
       }
-      player.play().then(() => { continuePlaybackRef.current = false; }).catch(() => {
-        if (attempts++ < 40) timer = window.setTimeout(resume, 100);
-      });
+      player
+        .play()
+        .then(() => {
+          continuePlaybackRef.current = false;
+        })
+        .catch(() => {
+          if (attempts++ < 40) timer = window.setTimeout(resume, 100);
+        });
     };
     timer = window.setTimeout(resume, 0);
-    return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer); };
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [activeSourcePreview?.url, sourceSelection?.segmentId, sourceSelection?.asset.kind, useIntroTimelinePreview]);
 
   useEffect(() => {
@@ -844,9 +895,15 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     try {
       setError(undefined);
       const options: SubtitleVisualAnalysisOptions = {
-        provider: visualProvider, intervalSeconds: Math.max(1, Math.min(60, Math.round(visualIntervalSeconds) || 2)),
-        density: visualDensity, displayLanguage: visualDraftLanguage as SubtitleVisualAnalysisOptions["displayLanguage"],
-        detectSceneChanges, deduplicateFrames, title: visualTitle.trim(), description: visualDescription.trim(), scopes: selectedScopes,
+        provider: visualProvider,
+        intervalSeconds: Math.max(1, Math.min(60, Math.round(visualIntervalSeconds) || 2)),
+        density: visualDensity,
+        displayLanguage: visualDraftLanguage as SubtitleVisualAnalysisOptions["displayLanguage"],
+        detectSceneChanges,
+        deduplicateFrames,
+        title: visualTitle.trim(),
+        description: visualDescription.trim(),
+        scopes: selectedScopes,
       };
       if (window.sourceApp.getSubtitleVisualPreflight && !confirmed) {
         setVisualPreflight(await window.sourceApp.getSubtitleVisualPreflight(options));
@@ -959,7 +1016,10 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     if (!window.confirm(message)) return;
     setBusy(true);
     try {
-      const promoted = await window.sourceApp.promoteSubtitleAiDraft(savedDraftToken.token, visualSrtPolicy === "OVERWRITE" ? "OVERWRITE" : "BACKUP");
+      const promoted = await window.sourceApp.promoteSubtitleAiDraft(
+        savedDraftToken.token,
+        visualSrtPolicy === "OVERWRITE" ? "OVERWRITE" : "BACKUP",
+      );
       setSavedDraftToken(undefined);
       setNotice(
         `已升級為正式 SRT：${promoted.outputPath}${promoted.backupPath ? `；舊檔備份：${promoted.backupPath}` : ""}`,
@@ -1157,9 +1217,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
       reviewStatus: "DRAFT",
       userEdited: true,
     };
-    const next = cues.flatMap((cue) =>
-      cue.id === first.id ? [merged] : cue.id === second.id ? [] : [cue],
-    );
+    const next = cues.flatMap((cue) => (cue.id === first.id ? [merged] : cue.id === second.id ? [] : [cue]));
     const updated = await persistCueList(next, "相鄰畫面情境草稿已合併並保存；合併結果仍待確認。");
     if (updated) {
       setSelectedId(merged.id);
@@ -1175,9 +1233,10 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     const target = Math.floor(text.length / 2);
     const whitespaceBreaks = [...text.matchAll(/\s+/g)].map((match) => match.index ?? 0);
     const splitAt = whitespaceBreaks.length
-      ? whitespaceBreaks.reduce((closest, position) =>
-          Math.abs(position - target) < Math.abs(closest - target) ? position : closest,
-        whitespaceBreaks[0])
+      ? whitespaceBreaks.reduce(
+          (closest, position) => (Math.abs(position - target) < Math.abs(closest - target) ? position : closest),
+          whitespaceBreaks[0],
+        )
       : target;
     const firstText = text.slice(0, splitAt).trim();
     const secondText = text.slice(splitAt).trim();
@@ -1198,9 +1257,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
       reviewStatus: "DRAFT",
       userEdited: true,
     };
-    const next = cues.flatMap((cue) =>
-      cue.id === selected.id ? [firstCue, secondCue] : [cue],
-    );
+    const next = cues.flatMap((cue) => (cue.id === selected.id ? [firstCue, secondCue] : [cue]));
     const updated = await persistCueList(next, "畫面情境草稿已在時間中點拆分並保存；兩筆仍待確認。");
     if (updated) {
       setSelectedId(firstCue.id);
@@ -1217,9 +1274,7 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
       return;
     }
     const next = cues.map((cue) =>
-      cue.id === selected.id
-        ? { ...cue, text: correctedText, reviewStatus: "DRAFT" as const, userEdited: true }
-        : cue,
+      cue.id === selected.id ? { ...cue, text: correctedText, reviewStatus: "DRAFT" as const, userEdited: true } : cue,
     );
     if (await persistCueList(next, "已將本機輸入的修正文案保存為待確認草稿。")) {
       setLocalCorrectionText("");
@@ -1232,15 +1287,38 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     const targets = cues.filter((cue) => selectedIds.has(cue.id) && isEditableVisualDraft(cue)).slice(0, 10);
     if (!regenerate || !targets.length || !instruction || busy) return;
     if (!window.confirm(`將為 ${targets.length} 筆草稿各取附近最多 3 張畫面並呼叫所選 AI 服務。繼續？`)) return;
-    setBusy(true); setError(undefined);
+    setBusy(true);
+    setError(undefined);
     try {
       const replacements = new Map<string, Awaited<ReturnType<typeof regenerate>>>();
-      for (const cue of targets) replacements.set(cue.id, await regenerate({ cueId: cue.id, instruction, provider: visualProvider, displayLanguage: visualDraftLanguage as SubtitleVisualAnalysisOptions["displayLanguage"] }));
-      const next = cues.map((cue) => replacements.has(cue.id) ? { ...cue, text: replacements.get(cue.id)!.text, reviewStatus: "DRAFT" as const, userEdited: true, aiConfidence: Math.round(replacements.get(cue.id)!.confidence * 100) } : cue);
+      for (const cue of targets)
+        replacements.set(
+          cue.id,
+          await regenerate({
+            cueId: cue.id,
+            instruction,
+            provider: visualProvider,
+            displayLanguage: visualDraftLanguage as SubtitleVisualAnalysisOptions["displayLanguage"],
+          }),
+        );
+      const next = cues.map((cue) =>
+        replacements.has(cue.id)
+          ? {
+              ...cue,
+              text: replacements.get(cue.id)!.text,
+              reviewStatus: "DRAFT" as const,
+              userEdited: true,
+              aiConfidence: Math.round(replacements.get(cue.id)!.confidence * 100),
+            }
+          : cue,
+      );
       await persistCueList(next, `已依指示重新產生 ${replacements.size} 筆畫面字幕草稿；仍需逐筆確認。`);
       setLocalCorrectionText("");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-    finally { setBusy(false); }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const deleteSelectedCues = async () => {
@@ -1268,9 +1346,8 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   const jumpToProjectTime = (timeMs: number, requestedScope = playbackScope, forceSourcePreview = false) => {
     const duration = requestedScope === "INTRO" ? introDurationMs : timelineDurationMs;
     const nextClock = Math.max(0, Math.min(duration, Math.round(timeMs)));
-    const requestedSegments = requestedScope === playbackScope
-      ? playbackSegments
-      : buildSubtitlePlaybackSegments(project, requestedScope);
+    const requestedSegments =
+      requestedScope === playbackScope ? playbackSegments : buildSubtitlePlaybackSegments(project, requestedScope);
     if (requestedScope !== sourcePlaybackScope) setSourcePlaybackScope(requestedScope);
     if (forceSourcePreview) setUseIntroTimelinePreview(false);
     setCursor(nextClock);
@@ -1285,7 +1362,10 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     setPreviewPlaying(false);
     if (player && useIntroTimelinePreview && !forceSourcePreview) player.currentTime = nextClock / 1000;
     else if (player && segment && sourceSelection?.segmentId === segment.id) {
-      const previewStartMs = activeSourcePreview?.variant === "VIDEO_CLIP_PROXY" ? (activeSourcePreview.sourceStartMs ?? segment.sourceStartMs) : 0;
+      const previewStartMs =
+        activeSourcePreview?.variant === "VIDEO_CLIP_PROXY"
+          ? (activeSourcePreview.sourceStartMs ?? segment.sourceStartMs)
+          : 0;
       player.currentTime = Math.max(0, (projectClockToSourceMs(segment, nextClock) - previewStartMs) / 1000);
     }
   };
@@ -1331,7 +1411,21 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [standaloneWorkspace, selected?.id, selectedId, navigationCueId, cues, cursor, playbackScope, playbackSegments, sourceSelection?.segmentId, activeSourcePreview?.url, busy, generating, buildingPreview]);
+  }, [
+    standaloneWorkspace,
+    selected?.id,
+    selectedId,
+    navigationCueId,
+    cues,
+    cursor,
+    playbackScope,
+    playbackSegments,
+    sourceSelection?.segmentId,
+    activeSourcePreview?.url,
+    busy,
+    generating,
+    buildingPreview,
+  ]);
 
   useEffect(() => {
     if (!standaloneWorkspace) return;
@@ -1358,7 +1452,9 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     }
     if (!sourceSelection) return;
     const previewSourceStartMs =
-      activeSourcePreview?.variant === "VIDEO_CLIP_PROXY" ? (activeSourcePreview.sourceStartMs ?? sourceSelection.sourceStartMs) : 0;
+      activeSourcePreview?.variant === "VIDEO_CLIP_PROXY"
+        ? (activeSourcePreview.sourceStartMs ?? sourceSelection.sourceStartMs)
+        : 0;
     const sourceTimeMs = previewSourceStartMs + player.currentTime * 1000;
     const segment = playbackSegments.find((item) => item.id === sourceSelection.segmentId);
     if (!segment) return;
@@ -1384,10 +1480,11 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
   const togglePlayback = () => {
     const player = videoRef.current;
     if (player) void (player.paused ? player.play() : Promise.resolve(player.pause()));
-    else if (sourceSelection?.asset.kind === "IMAGE") setPreviewPlaying((playing) => {
-      continuePlaybackRef.current = false;
-      return !playing;
-    });
+    else if (sourceSelection?.asset.kind === "IMAGE")
+      setPreviewPlaying((playing) => {
+        continuePlaybackRef.current = false;
+        return !playing;
+      });
   };
   useEffect(() => {
     if (!previewPlaying || useIntroTimelinePreview || sourceSelection?.asset.kind !== "IMAGE") return;
@@ -1415,12 +1512,23 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
     }, 50);
     return () => {
       window.clearInterval(timer);
-      if (imagePlaybackAnchorRef.current?.segmentId === sourceSelection.segmentId) imagePlaybackAnchorRef.current = undefined;
+      if (imagePlaybackAnchorRef.current?.segmentId === sourceSelection.segmentId)
+        imagePlaybackAnchorRef.current = undefined;
     };
-  }, [previewPlaying, useIntroTimelinePreview, sourceSelection?.segmentId, sourceSelection?.asset.kind, playbackRate, playbackSegments]);
-  const displayedDurationMs = useIntroTimelinePreview && introPreview
-    ? introPreview.durationMs
-    : playbackScope === "INTRO" ? introDurationMs : timelineDurationMs;
+  }, [
+    previewPlaying,
+    useIntroTimelinePreview,
+    sourceSelection?.segmentId,
+    sourceSelection?.asset.kind,
+    playbackRate,
+    playbackSegments,
+  ]);
+  const displayedDurationMs =
+    useIntroTimelinePreview && introPreview
+      ? introPreview.durationMs
+      : playbackScope === "INTRO"
+        ? introDurationMs
+        : timelineDurationMs;
   const scrubberMinimumMs = 0;
   const scrubberMaximumMs = displayedDurationMs;
   const previewCanvasUnit = 100 / 480;
@@ -1478,1113 +1586,1247 @@ export function SubtitleStudio({ project, timelineDurationMs, onProjectUpdated, 
           aria-label="字幕審核內容，可使用 Page Up、Page Down、Home 與 End 捲動"
           tabIndex={0}
           onKeyDown={(event) => {
-            if (!(event.key === "PageUp" || event.key === "PageDown" || event.key === "Home" || event.key === "End")) return;
+            if (!(event.key === "PageUp" || event.key === "PageDown" || event.key === "Home" || event.key === "End"))
+              return;
             const target = event.target;
-            if (target instanceof Element && target.matches("input, textarea, select, [contenteditable='true']")) return;
+            if (target instanceof Element && target.matches("input, textarea, select, [contenteditable='true']"))
+              return;
             event.preventDefault();
             const body = event.currentTarget;
-            const top = event.key === "Home" ? 0 : event.key === "End" ? body.scrollHeight :
-              body.scrollTop + (event.key === "PageUp" ? -1 : 1) * Math.max(120, body.clientHeight * 0.8);
+            const top =
+              event.key === "Home"
+                ? 0
+                : event.key === "End"
+                  ? body.scrollHeight
+                  : body.scrollTop + (event.key === "PageUp" ? -1 : 1) * Math.max(120, body.clientHeight * 0.8);
             body.scrollTo({ top, behavior: "smooth" });
           }}
         >
-        {needsReview && (
-          <div className="subtitle-global-warning" role="alert">
-            ⚠ 片頭、正片順序或 IN／OUT 已改變；全部字幕時間需要重新複核。
-          </div>
-        )}
-        {generating && (
-          <div className="ai-analysis-progress" aria-live="polite">
-            <span className="spinner" />
-            <div>
-              <strong>{phaseLabel(progress)}</strong>
-              <small>{progress?.currentName ?? ""}</small>
-              <progress max={Math.max(1, progress?.total ?? 1)} value={progress?.processed ?? 0} />
+          {needsReview && (
+            <div className="subtitle-global-warning" role="alert">
+              ⚠ 片頭、正片順序或 IN／OUT 已改變；全部字幕時間需要重新複核。
             </div>
-            <span>
-              {progress?.processed ?? 0} / {progress?.total ?? 0}
-            </span>
-            <button className="cancel-button" onClick={() => void window.sourceApp.cancelAiSubtitles()}>
-              取消
-            </button>
-          </div>
-        )}
-        {buildingPreview && (
-          <div className="subtitle-preview-progress" aria-live="polite">
-            <span className="spinner" />
-            <div>
-              <strong>{previewPhaseLabel(previewProgress)}</strong>
-              <progress max="100" value={previewProgress?.percent ?? 0} />
-            </div>
-            <span>{Math.round(previewProgress?.percent ?? 0)}%</span>
-            <button className="cancel-button" onClick={() => void window.sourceApp.cancelSubtitleIntroPreview()}>
-              取消代理
-            </button>
-          </div>
-        )}
-        {error && (
-          <section className="subtitle-ai-failure" role="alert">
-            <div>
-              <strong>AI 字幕沒有產出</strong>
-              <p>{error}</p>
-              {error.includes("credit_balance_exhausted") || error.includes("沒有可用 API 額度") ? (
-                <small>
-                  片頭代理成功只代表本機 MP4 已完成，不代表 OpenAI API 可用。新版會自動再試 Codex／ChatGPT
-                  登入；若此處仍顯示錯誤，請依後半段訊息確認 Codex 是否已登入，或取消勾選語音分析後重試。
-                </small>
-              ) : null}
-            </div>
-            <button className="settings-button" type="button" onClick={onOpenAiSettings}>
-              開啟 AI 帳號設定
-            </button>
-            <button className="secondary-button" type="button" onClick={() => setError(undefined)}>
-              收起錯誤
-            </button>
-          </section>
-        )}
-        <div className="subtitle-studio-toolbar">
-          <div>
-            <span>
-              <strong>{counts.draft}</strong> 待確認
-            </span>
-            <span>
-              <strong>{counts.confirmed}</strong> 已確認
-            </span>
-            <span>
-              <strong>{counts.rejected}</strong> 已排除
-            </span>
-          </div>
-          <div className="subtitle-ai-actions">
-            <div className="subtitle-analysis-video" aria-label="AI 字幕分析影片">
-              <strong>分析影片</strong>
-              <span>{analysisVideo?.fileName ?? "尚未找到可用的成功成品"}</span>
-              {analysisVideo?.durationMs ? (
-                <small>
-                  {formatDuration(analysisVideo.durationMs)} · {analysisVideo.width}×{analysisVideo.height} · {analysisVideo.frameRate ?? "FPS ?"} · {analysisVideo.videoCodec ?? "codec ?"}
-                </small>
-              ) : null}
-              {analysisVideo?.outputPath ? (
-                <details>
-                  <summary>完整檔案資訊</summary>
-                  <small>{analysisVideo.outputPath}</small>
-                  <small>{analysisVideo.sizeBytes ? `${(analysisVideo.sizeBytes / 1024 ** 3).toFixed(2)} GiB` : "大小未知"} · 建立 {analysisVideo.createdAt ?? "未知"} · 修改 {analysisVideo.modifiedAt ?? "未知"}</small>
-                </details>
-              ) : null}
-              <button className="secondary-button" type="button" onClick={() => void chooseAnalysisVideo()}>
-                選擇影片／重新分析
+          )}
+          {generating && (
+            <div className="ai-analysis-progress" aria-live="polite">
+              <span className="spinner" />
+              <div>
+                <strong>{phaseLabel(progress)}</strong>
+                <small>{progress?.currentName ?? ""}</small>
+                <progress max={Math.max(1, progress?.total ?? 1)} value={progress?.processed ?? 0} />
+              </div>
+              <span>
+                {progress?.processed ?? 0} / {progress?.total ?? 0}
+              </span>
+              <button className="cancel-button" onClick={() => void window.sourceApp.cancelAiSubtitles()}>
+                取消
               </button>
             </div>
-            <fieldset className="subtitle-scope">
-              <legend>產生／顯示範圍</legend>
-              <label>
-                <input
-                  aria-label="片頭字幕"
-                  type="checkbox"
-                  checked={scope.intro}
-                  disabled={!project.introSegments.length}
-                  onChange={(event) => updateScope("intro", event.target.checked)}
-                />{" "}
-                片頭
-              </label>
-              <label>
-                <input
-                  aria-label="正片字幕"
-                  type="checkbox"
-                  checked={scope.main}
-                  disabled={timelineDurationMs <= 0}
-                  onChange={(event) => updateScope("main", event.target.checked)}
-                />{" "}
-                正片
-              </label>
-            </fieldset>
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={generating || busy}
-              onClick={() => void importFile()}
-            >
-              ⇧ 匯入 SRT
-            </button>
-            <button
-              className="secondary-button force-subtitle-review-button"
-              type="button"
-              disabled={generating || buildingPreview || busy || !reviewableVisibleCues.length}
-              onClick={requestForceReReview}
-            >
-              ↻ 強制重新校對
-            </button>
-            <label>
-              <input
-                aria-label="同時分析素材語音"
-                type="checkbox"
-                checked={includeSpeechTranscription}
-                onChange={(event) => setIncludeSpeechTranscription(event.target.checked)}
-              />{" "}
-              同時分析素材語音（預設不勾）
-            </label>
-            <label className="ai-cue-count">
-              目標字幕數
-              <input
-                aria-label="AI 目標字幕數"
-                type="number"
-                min="1"
-                max="300"
-                value={targetCueCount}
-                disabled={generating || busy}
-                onChange={(event) =>
-                  setTargetCueCount(Math.max(1, Math.min(300, Math.round(Number(event.target.value) || 1))))
-                }
-              />
-              <small>1–300；較長片段會增加取樣點，實際數量仍受片長及既有字幕影響。</small>
-            </label>
-            <label className="ai-mode-select">
-              AI 重跑方式
-              <select
-                aria-label="AI 字幕重跑方式"
-                value={aiRegenerationMode}
-                disabled={generating || busy}
-                onChange={(event) => setAiRegenerationMode(event.target.value as typeof aiRegenerationMode)}
-              >
-                <option value="FILL_BLANKS">填補空白（保留現有 AI）</option>
-                <option value="PRESERVE_USER_EDITED">保留人工修改（重建未修改 AI）</option>
-                <option value="REPLACE_AI_SCOPE">替換所選範圍 AI 字幕</option>
-              </select>
-            </label>
-            <button className="settings-button" type="button" onClick={onOpenAiSettings}>
-              ✦ AI 帳號／故事設定
-            </button>
-            <button
-              className="ai-intro-button"
-              type="button"
-              disabled={generating || buildingPreview || busy || !canGenerate}
-              onClick={() => void generate()}
-            >
-              AI 知識型字幕草稿
-            </button>
-          </div>
-        </div>
-        <section className="subtitle-visual-job" aria-label="字幕畫面分析工作">
-          <div className="subtitle-visual-job-heading">
-            <div>
-              <strong>全片畫面字幕分析</strong>
-              <small>ChatGPT 視覺需另行設定 OpenAI API；ChatGPT/Codex 登入不等於 API 憑證。Gemini 僅在此處選用時啟用。</small>
+          )}
+          {buildingPreview && (
+            <div className="subtitle-preview-progress" aria-live="polite">
+              <span className="spinner" />
+              <div>
+                <strong>{previewPhaseLabel(previewProgress)}</strong>
+                <progress max="100" value={previewProgress?.percent ?? 0} />
+              </div>
+              <span>{Math.round(previewProgress?.percent ?? 0)}%</span>
+              <button className="cancel-button" onClick={() => void window.sourceApp.cancelSubtitleIntroPreview()}>
+                取消代理
+              </button>
             </div>
-            <span className={`subtitle-job-status is-${visualProgress.status.toLowerCase()}`} aria-live="polite">
-              {visualProgress.status === "RUNNING"
-                ? "分析中"
-                : visualProgress.status === "PAUSED"
-                  ? "已暫停"
-                  : visualProgress.status === "COMPLETED"
-                    ? "已完成"
-                    : visualProgress.status === "CANCELLED"
-                      ? "已取消"
-                      : visualProgress.status === "FAILED"
-                        ? "失敗"
-                        : "尚未開始"}
-            </span>
-          </div>
-          <div className="subtitle-visual-job-fields">
-            <label>
-              分析服務
-              <select
-                aria-label="字幕畫面分析服務"
-                value={visualProvider}
-                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
-                onChange={(event) => setVisualProvider(event.target.value as MaterialAnalysisProvider)}
+          )}
+          {error && (
+            <section className="subtitle-ai-failure" role="alert">
+              <div>
+                <strong>AI 字幕沒有產出</strong>
+                <p>{error}</p>
+                {error.includes("credit_balance_exhausted") || error.includes("沒有可用 API 額度") ? (
+                  <small>
+                    片頭代理成功只代表本機 MP4 已完成，不代表 OpenAI API 可用。新版會自動再試 Codex／ChatGPT
+                    登入；若此處仍顯示錯誤，請依後半段訊息確認 Codex 是否已登入，或取消勾選語音分析後重試。
+                  </small>
+                ) : null}
+              </div>
+              <button className="settings-button" type="button" onClick={onOpenAiSettings}>
+                開啟 AI 帳號設定
+              </button>
+              <button className="secondary-button" type="button" onClick={() => setError(undefined)}>
+                收起錯誤
+              </button>
+            </section>
+          )}
+          <div className="subtitle-studio-toolbar">
+            <div>
+              <span>
+                <strong>{counts.draft}</strong> 待確認
+              </span>
+              <span>
+                <strong>{counts.confirmed}</strong> 已確認
+              </span>
+              <span>
+                <strong>{counts.rejected}</strong> 已排除
+              </span>
+            </div>
+            <div className="subtitle-ai-actions">
+              <div className="subtitle-analysis-video" aria-label="AI 字幕分析影片">
+                <strong>分析影片</strong>
+                <span>{analysisVideo?.fileName ?? "尚未找到可用的成功成品"}</span>
+                {analysisVideo?.durationMs ? (
+                  <small>
+                    {formatDuration(analysisVideo.durationMs)} · {analysisVideo.width}×{analysisVideo.height} ·{" "}
+                    {analysisVideo.frameRate ?? "FPS ?"} · {analysisVideo.videoCodec ?? "codec ?"}
+                  </small>
+                ) : null}
+                {analysisVideo?.outputPath ? (
+                  <details>
+                    <summary>完整檔案資訊</summary>
+                    <small>{analysisVideo.outputPath}</small>
+                    <small>
+                      {analysisVideo.sizeBytes ? `${(analysisVideo.sizeBytes / 1024 ** 3).toFixed(2)} GiB` : "大小未知"}{" "}
+                      · 建立 {analysisVideo.createdAt ?? "未知"} · 修改 {analysisVideo.modifiedAt ?? "未知"}
+                    </small>
+                  </details>
+                ) : null}
+                <button className="secondary-button" type="button" onClick={() => void chooseAnalysisVideo()}>
+                  選擇影片／重新分析
+                </button>
+              </div>
+              <fieldset className="subtitle-scope">
+                <legend>產生／顯示範圍</legend>
+                <label>
+                  <input
+                    aria-label="片頭字幕"
+                    type="checkbox"
+                    checked={scope.intro}
+                    disabled={!project.introSegments.length}
+                    onChange={(event) => updateScope("intro", event.target.checked)}
+                  />{" "}
+                  片頭
+                </label>
+                <label>
+                  <input
+                    aria-label="正片字幕"
+                    type="checkbox"
+                    checked={scope.main}
+                    disabled={timelineDurationMs <= 0}
+                    onChange={(event) => updateScope("main", event.target.checked)}
+                  />{" "}
+                  正片
+                </label>
+              </fieldset>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={generating || busy}
+                onClick={() => void importFile()}
               >
-                <option value="CHATGPT">ChatGPT 視覺（預設，需 OpenAI API 設定）</option>
-                <option value="GEMINI">Gemini（選用）</option>
-              </select>
-            </label>
-            <label>
-              既有正式 SRT 保護
-              <select
-                aria-label="既有正式 SRT 保護方式"
-                value={visualSrtPolicy}
-                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
-                onChange={(event) => setVisualSrtPolicy(event.target.value as typeof visualSrtPolicy)}
+                ⇧ 匯入 SRT
+              </button>
+              <button
+                className="secondary-button force-subtitle-review-button"
+                type="button"
+                disabled={generating || buildingPreview || busy || !reviewableVisibleCues.length}
+                onClick={requestForceReReview}
               >
-                <option value="BACKUP">先備份再升級（預設）</option>
-                <option value="SAVE_AS">另存新檔</option>
-                <option value="OVERWRITE">確認後覆寫</option>
-                <option value="CANCEL">取消，不開始分析</option>
-              </select>
-            </label>
-            <label>
-              產生語言
-              <select aria-label="字幕畫面分析語言" value={visualDraftLanguage} onChange={(event) => setVisualDraftLanguage(event.target.value)}>
-                <option value="zh-TW">繁體中文（台灣，預設）</option><option value="zh-CN">簡體中文</option><option value="en">English</option><option value="ja">日本語</option><option value="ko">한국어</option>
-              </select>
-            </label>
-            <label>
-              取樣間隔（秒）
-              <input
-                aria-label="畫面取樣間隔"
-                type="number"
-                min="1"
-                max="60"
-                value={visualIntervalSeconds}
-                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
-                onChange={(event) =>
-                  setVisualIntervalSeconds(Math.max(1, Math.min(60, Math.round(Number(event.target.value) || 1))))
-                }
-              />
-            </label>
-            <label>
-              畫面密度
-              <select
-                aria-label="字幕分析畫面密度"
-                value={visualDensity}
-                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
-                onChange={(event) => setVisualDensity(event.target.value as SubtitleVisualDensity)}
-              >
-                <option value="LOW">低</option>
-                <option value="STANDARD">標準</option>
-                <option value="DETAILED">詳細</option>
-              </select>
-            </label>
-            <label className="subtitle-visual-context">
-              影片標題
-              <input
-                aria-label="字幕分析影片標題"
-                value={visualTitle}
-                maxLength={240}
-                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
-                onChange={(event) => setVisualTitle(event.target.value)}
-              />
-            </label>
-            <label className="subtitle-visual-context">
-              影片描述／故事背景
-              <textarea
-                aria-label="字幕分析影片描述"
-                value={visualDescription}
-                maxLength={4000}
-                rows={2}
-                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
-                onChange={(event) => setVisualDescription(event.target.value)}
-              />
-            </label>
-            <label className="subtitle-visual-toggle">
-              <input
-                aria-label="偵測場景變化"
-                type="checkbox"
-                checked={detectSceneChanges}
-                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
-                onChange={(event) => setDetectSceneChanges(event.target.checked)}
-              />{" "}
-              場景變化補點
-            </label>
-            <label className="subtitle-visual-toggle">
-              <input
-                aria-label="去除重複畫面"
-                type="checkbox"
-                checked={deduplicateFrames}
-                disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
-                onChange={(event) => setDeduplicateFrames(event.target.checked)}
-              />{" "}
-              感知去重
-            </label>
-            <label className="subtitle-visual-toggle">
-              <input
-                aria-label="AI 檢查現有字幕"
-                type="checkbox"
-                checked={projectAiCheckEnabled}
-                disabled={visualProgress.status === "RUNNING"}
-                onChange={(event) => setProjectAiCheckEnabled(event.target.checked)}
-              />{" "}
-              AI 檢查現有字幕（預設關閉）
-            </label>
-          </div>
-          <div className="subtitle-visual-job-controls">
-            <small>
-              分析先建立 AI 待確認草稿，不會覆寫正式 SRT。相容影片可更新專案草稿；外部或時間線不相容影片會建立獨立字幕工作區，供檢視、修改與另存 SRT。
-            </small>
-            {(visualProgress.status === "IDLE" ||
-              visualProgress.status === "COMPLETED" ||
-              visualProgress.status === "CANCELLED" ||
-              visualProgress.status === "FAILED") && (
+                ↻ 強制重新校對
+              </button>
+              <label>
+                <input
+                  aria-label="同時分析素材語音"
+                  type="checkbox"
+                  checked={includeSpeechTranscription}
+                  onChange={(event) => setIncludeSpeechTranscription(event.target.checked)}
+                />{" "}
+                同時分析素材語音（預設不勾）
+              </label>
+              <label className="ai-cue-count">
+                目標字幕數
+                <input
+                  aria-label="AI 目標字幕數"
+                  type="number"
+                  min="1"
+                  max="300"
+                  value={targetCueCount}
+                  disabled={generating || busy}
+                  onChange={(event) =>
+                    setTargetCueCount(Math.max(1, Math.min(300, Math.round(Number(event.target.value) || 1))))
+                  }
+                />
+                <small>1–300；較長片段會增加取樣點，實際數量仍受片長及既有字幕影響。</small>
+              </label>
+              <label className="ai-mode-select">
+                AI 重跑方式
+                <select
+                  aria-label="AI 字幕重跑方式"
+                  value={aiRegenerationMode}
+                  disabled={generating || busy}
+                  onChange={(event) => setAiRegenerationMode(event.target.value as typeof aiRegenerationMode)}
+                >
+                  <option value="FILL_BLANKS">填補空白（保留現有 AI）</option>
+                  <option value="PRESERVE_USER_EDITED">保留人工修改（重建未修改 AI）</option>
+                  <option value="REPLACE_AI_SCOPE">替換所選範圍 AI 字幕</option>
+                </select>
+              </label>
+              <button className="settings-button" type="button" onClick={onOpenAiSettings}>
+                ✦ AI 帳號／故事設定
+              </button>
               <button
                 className="ai-intro-button"
                 type="button"
-                disabled={(!analysisVideo?.outputPath && !canGenerate) || generating || busy}
-                onClick={() => void startVisualAnalysis()}
+                disabled={generating || buildingPreview || busy || !canGenerate}
+                onClick={() => void generate()}
               >
-                開始畫面分析
+                AI 知識型字幕草稿
               </button>
-            )}
-            {visualProgress.status === "RUNNING" && (
-              <button className="secondary-button" type="button" onClick={() => void controlVisualAnalysis("pause")}>
-                暫停
-              </button>
-            )}
-            {(visualProgress.status === "PAUSED" || visualProgress.status === "FAILED") && (
-              <button className="secondary-button" type="button" onClick={() => void controlVisualAnalysis("resume")}>
-                繼續
-              </button>
-            )}
-            {(visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED") && (
-              <button className="cancel-button" type="button" onClick={() => void controlVisualAnalysis("cancel")}>
-                取消分析
-              </button>
-            )}
-            <span>
-              原始 {visualProgress.rawFrames} · 場景 {visualProgress.sceneFrames} · 去重{" "}
-              {visualProgress.deduplicatedFrames} · 已送出 {visualProgress.sentFrames} 張
-            </span>
-            <span>
-              請求 {visualProgress.requests} · 經過 {formatDuration(visualProgress.elapsedMs)} · Token{" "}
-              {visualProgress.tokens} · 快取命中 {visualProgress.cacheHits}
-            </span>
-            <span>暫存 {visualProgress.temporaryBytes.toLocaleString()} bytes</span>
-            <span>{visualProgress.phase} {visualProgress.mode} {visualProgress.modelId ? `模型 ${visualProgress.modelId}` : ""}</span>
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={!projectAiCheckEnabled || busy || analysisVideo?.reason !== "PROJECT_CONCAT"}
-              onClick={() => void prepareProjectAiCheck()}
-            >
-              建立現有字幕 AI 檢查工作區
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={busy || !analysisVideo?.outputPath}
-              onClick={() => void importStandaloneSrtReview()}
-            >
-              所選影片＋匯入既有 SRT（獨立草稿）
-            </button>
-            {projectAiCheckEnabled && analysisVideo?.reason !== "PROJECT_CONCAT" && <small>
-              目前只有 legacy／外部影片，沒有帶目前 projectId 的成功輸出；為避免錯誤時間軸套回，請先建立新的專案輸出，或在獨立影片工作區檢查而不修改專案。
-            </small>}
-          </div>
-          {visualProgress.error && (
-            <small className="subtitle-visual-job-error" role="alert">
-              {visualProgress.error}
-            </small>
-          )}
-        </section>
-        {visualPreflight && <section className="subtitle-visual-job" aria-label="字幕分析確認">
-          <h3>開始前確認</h3>
-          <p>{visualPreflight.videoPath}</p>
-          <p>影片 {formatDuration(visualPreflight.videoDurationMs)}｜專案 {formatDuration(visualPreflight.projectDurationMs)}｜差 {(visualPreflight.differenceMs / 1000).toFixed(3)} 秒｜容差 {(visualPreflight.toleranceMs / 1000).toFixed(1)} 秒</p>
-          <p>{visualPreflight.warning ?? "專案輸出與時間線相容，可使用片段脈絡。"}</p>
-          <label>分析模式 <select aria-label="字幕分析模式" value={visualPreflight.recommendedMode} onChange={(event) => setVisualPreflight({ ...visualPreflight, recommendedMode: event.target.value as SubtitleVisualPreflight["recommendedMode"] })}>
-            <option value="VIDEO_FIRST">影片時間軸：獨立草稿，不修改專案</option>
-            {visualPreflight.recommendedMode === "PROJECT_AWARE" && <option value="PROJECT_AWARE">專案時間軸：更新待確認草稿</option>}
-          </select></label>
-          <p>每 {visualIntervalSeconds} 秒｜預估 {visualPreflight.rawFrameEstimate} 張（去重前）｜{visualPreflight.provider}｜模型 {visualPreflight.modelId ?? "開始時解析"}</p>
-          <p>既有 SRT {visualPreflight.existingSrtCount} 筆｜專案字幕 {visualPreflight.projectSubtitleCount} 筆｜僅建立草稿；正式 SRT 不覆寫</p>
-          <button type="button" onClick={() => void startVisualAnalysis(true)}>確認並開始分析</button>
-          <button type="button" onClick={() => setVisualPreflight(undefined)}>取消</button>
-        </section>}
-        {standaloneWorkspace && <StandaloneSubtitleReview workspace={standaloneWorkspace} videoUrl={standaloneWorkspace.previewUrl} onUpdated={setStandaloneWorkspace} onProjectUpdated={onProjectUpdated} onError={setError} />}
-        {overlappingIds.size > 0 && (
-          <div className="subtitle-overlap-warning" role="alert">
-            ⚠ 有 {overlappingIds.size}{" "}
-            筆新舊字幕時間重疊，兩筆都會顯示紅色外框。請調整開始／結束時間，紅框消失後再確認。
-          </div>
-        )}
-        {reviewQueueIds.length > 0 && selected && reviewQueueIds.includes(selected.id) && (
-          <section className="subtitle-guided-review" aria-label="逐筆 Proxy 字幕校對" aria-live="polite">
-            <div>
-              <span className="eyebrow">FORCED TIMELINE REVIEW</span>
-              <strong>
-                第 {reviewQueueIds.indexOf(selected.id) + 1}／{reviewQueueIds.length} 筆：這個 Proxy
-                畫面、字幕文字與頭尾時間是否一致？
-              </strong>
-              <p>已先依目前片頭／正片主軸與疊化時間重新對位；按下確認後會立即保存，再進到下一筆。</p>
             </div>
-            <nav>
-              <button
-                className="confirm-cue"
-                type="button"
-                disabled={!activeSourcePreview || busy}
-                onClick={() => void confirmReviewAndAdvance()}
-              >
-                ✓ 一致，確認、保存並下一筆
-              </button>
-              <button type="button" disabled={busy} onClick={editReviewCue}>
-                不一致，修改文字／時間
-              </button>
-              <button type="button" disabled={busy} onClick={advanceReview}>
-                暫時略過
-              </button>
-              <button className="secondary-button" type="button" onClick={() => setReviewQueueIds([])}>
-                結束逐筆校對
-              </button>
-            </nav>
-          </section>
-        )}
-        {scope.intro && project.introSegments.length > 0 && (
-          <div
-            className={`subtitle-intro-ai-state ${introOpenAiCount ? "has-cloud-analysis" : "is-local-only"}`}
-            role="status"
-          >
-            片頭共 {project.introSegments.length} 段，其中 {introOpenAiCount} 段曾完成 OpenAI 人物／事件／故事比對。
-            {introOpenAiCount === 0
-              ? "目前片頭挑選是本機畫面統計備援，不能視為 AI 連線成功。"
-              : "字幕仍會重新依畫面與故事背景建立草稿。"}
           </div>
-        )}
-        <div className="subtitle-review-layout">
-          <aside className="subtitle-cue-list" ref={cueListRef} data-testid="project-subtitle-cue-list">
-            {!visibleCues.length && (
-              <div className="empty-mini">
-                <strong>所選範圍還沒有字幕</strong>
-                <p>可匯入 UTF-8 SRT、設定故事背景後建立 AI 草稿，或人工新增。</p>
+          <section className="subtitle-visual-job" aria-label="字幕畫面分析工作">
+            <div className="subtitle-visual-job-heading">
+              <div>
+                <strong>全片畫面字幕分析</strong>
+                <small>
+                  ChatGPT 視覺需另行設定 OpenAI API；ChatGPT/Codex 登入不等於 API 憑證。Gemini 僅在此處選用時啟用。
+                </small>
               </div>
-            )}
-            {reviewableVisibleCues.length > 0 && (
-              <div
-                className="subtitle-selection-actions subtitle-global-actions"
-                role="toolbar"
-                aria-label="字幕全部操作"
-              >
-                <span>目前範圍 {reviewableVisibleCues.length} 筆</span>
-                <button
-                  type="button"
-                  disabled={busy || generating || buildingPreview}
-                  onClick={() => void toggleAllConfirmation()}
-                >
-                  {allVisibleConfirmed ? "全部取消確認並保存" : "全部確認並保存"}
-                </button>
-              </div>
-            )}
-            {selectedIds.size > 0 && (
-              <div className="subtitle-selection-actions" role="toolbar" aria-label="字幕批次操作">
-                <span>已選 {selectedIds.size} 筆</span>
-                <button
-                  type="button"
-                  disabled={busy || generating || buildingPreview}
-                  onClick={() => void confirmSelected()}
-                >
-                  確認選取並保存
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || generating || buildingPreview}
-                  onClick={() => void cancelConfirmation()}
-                >
-                  取消確認並保存
-                </button>
-                <button
-                  type="button"
-                  className="danger-text"
-                  disabled={busy || generating || buildingPreview}
-                  onClick={() => void deleteSelectedCues()}
-                >
-                  刪除選取
-                </button>
-              </div>
-            )}
-            {visibleCues.map((cue, index) => {
-              const movable = cue.reviewStatus !== "REJECTED";
-              const scoped = visibleCues.filter(
-                (item) => cueScope(item) === cueScope(cue) && item.reviewStatus !== "REJECTED",
-              );
-              const scopedIndex = scoped.findIndex((item) => item.id === cue.id);
-              const disabled = busy || generating || buildingPreview;
-              return (
-                <div
-                  className={`subtitle-cue-row ${cue.id === activeOverlayCue?.id ? "is-active" : ""} ${overlappingIds.has(cue.id) ? "has-time-overlap" : ""}`}
-                  key={cue.id}
-                  ref={(node) => { if (node) cueRowRefs.current.set(cue.id, node); else cueRowRefs.current.delete(cue.id); }}
-                  data-cue-id={cue.id}
-                  onDoubleClick={() => jumpToCue(cue)}
-                >
-                  <div
-                    className={`subtitle-cue-card ${selectedIds.has(cue.id) ? "is-selected" : ""} status-${cue.reviewStatus ?? "CONFIRMED"}`}
-                  >
-                    <button
-                      type="button"
-                      className="subtitle-cue-select"
-                      aria-label={`選取字幕 ${cue.text}`}
-                      aria-pressed={selectedIds.has(cue.id)}
-                      title="點一下選取；按住 Shift 可連續複選"
-                      onClick={(event) => selectCue(cue, event)}
-                      onDoubleClick={(event) => { event.stopPropagation(); jumpToCue(cue); }}
-                    >
-                      <span>{String(index + 1).padStart(2, "0")}</span>
-                    </button>
-                    <textarea
-                      className="subtitle-cue-inline-editor"
-                      aria-label={`直接編輯第 ${index + 1} 筆字幕`}
-                      value={cue.text}
-                      disabled={disabled}
-                      spellCheck
-                      title="點入後可直接定位文字游標並修改；按右側確認才會立即保存這筆內容。"
-                      onFocus={() => {
-                        if (selectedId !== cue.id) selectCue(cue);
-                      }}
-                      onChange={(event) => patchCue(cue.id, "text", event.target.value)}
-                    />
-                    <em>{overlappingIds.has(cue.id) ? "時間重疊" : statusLabel(cue.reviewStatus)}</em>
-                    <small>
-                      {cueScope(cue) === "INTRO" ? "片頭" : "正片"} · {formatExactCueTime(cue.startMs)} →{" "}
-                      {formatExactCueTime(cue.endMs)} · 時長 {formatCueDuration(cue.startMs, cue.endMs)} · <span>{cueOrigin(cue)}</span> · 每行{" "}
-                      {cue.lineWidthChars ?? defaultSubtitleLineWidth(cue.text)} 字
-                      {cue.lineWidthChars === undefined ? "（自動）" : "（單筆）"} · 位置 X{" "}
-                      {cue.position?.xPercent ?? 50}%／Y{" "}
-                      {cue.position?.yPercent ?? subtitleStyle.verticalPositionPercent}%
-                    </small>
-                  </div>
-                  <div className="subtitle-cue-row-actions" role="group" aria-label={`第 ${index + 1} 筆字幕操作`}>
-                    <button
-                      type="button"
-                      aria-label={`跳到第 ${index + 1} 筆字幕`}
-                      title="明確跳到這筆字幕的開始時間"
-                      disabled={disabled}
-                      onClick={() => jumpToCue(cue)}
-                    >
-                      ▶ 跳到
-                    </button>
-                    <button
-                      type="button"
-                      className="subtitle-cue-row-confirm"
-                      aria-label={`確認並保存第 ${index + 1} 筆字幕`}
-                      disabled={disabled || overlappingIds.has(cue.id)}
-                      onClick={() => void setStatus(cue.id, "CONFIRMED")}
-                    >
-                      ✓ 確認
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`上移第 ${index + 1} 筆字幕`}
-                      title="交換到上一筆的時間位置；兩筆會改回待確認並立即保存。"
-                      disabled={disabled || !movable || scopedIndex <= 0}
-                      onClick={() => void moveCueAndSave(cue.id, -1)}
-                    >
-                      ↑ 上移
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`下移第 ${index + 1} 筆字幕`}
-                      title="交換到下一筆的時間位置；兩筆會改回待確認並立即保存。"
-                      disabled={disabled || !movable || scopedIndex >= scoped.length - 1}
-                      onClick={() => void moveCueAndSave(cue.id, 1)}
-                    >
-                      ↓ 下移
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`調整第 ${index + 1} 筆字幕每行字數`}
-                      title={`可用鍵盤上下鍵或直接輸入 ${SUBTITLE_WRAP_MANUAL_MIN}–${SUBTITLE_WRAP_MANUAL_MAX}；只改這一筆。`}
-                      disabled={disabled}
-                      onClick={() => openLineWidthEditor(cue)}
-                    >
-                      ↔ 行寬
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`調整第 ${index + 1} 筆字幕畫面位置`}
-                      title="用方向鍵微調 1%；Shift＋方向鍵調整 5%。"
-                      disabled={disabled}
-                      onClick={() => openPositionEditor(cue)}
-                    >
-                      ✥ 位置
-                    </button>
-                    <button
-                      type="button"
-                      className="subtitle-cue-row-delete danger-text"
-                      aria-label="刪除這筆字幕"
-                      title={`刪除字幕：${cue.text}`}
-                      disabled={disabled}
-                      onClick={() =>
-                        void deleteCueIds(new Set([cue.id]), `這筆${cueScope(cue) === "INTRO" ? "片頭" : "正片"}字幕`)
-                      }
-                    >
-                      刪除
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-            <button className="add-cue-button" type="button" disabled={selectedTimelineDurationMs <= 0} onClick={add}>
-              ＋ 在 {formatDuration(cursor)} 新增人工字幕
-            </button>
-          </aside>
-          <main className="subtitle-review-main">
-            <section className="subtitle-video-stage">
-              {useIntroTimelinePreview && introPreview && (
-                <video
-                  key={introPreview.url}
-                  ref={videoRef}
-                  src={introPreview.url}
-                  preload="auto"
-                  aria-label="480P 片頭字幕同步預覽"
-                  onClick={togglePlayback}
-                  onPlay={() => setPreviewPlaying(true)}
-                  onPause={() => setPreviewPlaying(false)}
-                  onTimeUpdate={() => handleTimeUpdate(false)}
-                />
-              )}
-              {!useIntroTimelinePreview && !selected && (
-                <div className="large-loading">
-                  <p>從左側選取一筆字幕，或產生 480P 片頭預覽。</p>
-                </div>
-              )}
-              {!useIntroTimelinePreview && selected && sourceSelection && !activeSourcePreview && !previewError && (
-                <div className="large-loading">
-                  <span className="spinner" />
-                  <p>正在準備唯讀 proxy 預覽…</p>
-                </div>
-              )}
-              {previewError && (
-                <div className="preview-error">
-                  <strong>影像預覽提示</strong>
-                  <p>{previewError}</p>
-                </div>
-              )}
-              {!useIntroTimelinePreview && selected && !sourceSelection && (
-                <div className="large-loading">
-                  <p>這筆字幕尚無可直接播放的影片來源；片頭可先建立整體 480P 代理。</p>
-                </div>
-              )}
-              {!useIntroTimelinePreview && selected && sourceSelection?.asset.kind === "IMAGE" && activeSourcePreview && (
-                <img
-                  className="subtitle-source-image"
-                  src={activeSourcePreview.url}
-                  alt={`字幕對應畫面 ${sourceSelection.asset.fileName}`}
-                />
-              )}
-              {!useIntroTimelinePreview && selected && sourceSelection?.asset.kind === "VIDEO" && activeSourcePreview && (
-                <video
-                  key={`${activeSourcePreview.url}:${sourceSelection.segmentId}`}
-                  ref={videoRef}
-                  src={activeSourcePreview.url}
-                  preload="auto"
-                  aria-label="字幕快速區段 Proxy 預覽"
-                  onClick={togglePlayback}
-                  onLoadedMetadata={(event) => {
-                    const previewStartMs =
-                      activeSourcePreview.variant === "VIDEO_CLIP_PROXY"
-                        ? (activeSourcePreview.sourceStartMs ?? sourceSelection.sourceStartMs)
-                        : 0;
-                    const segment = playbackSegments.find((item) => item.id === sourceSelection.segmentId);
-                    const sourceTimeMs = segment ? projectClockToSourceMs(segment, cursor) : sourceSelection.sourceStartMs;
-                    event.currentTarget.playbackRate = playbackRate;
-                    event.currentTarget.currentTime = Math.max(0, (sourceTimeMs - previewStartMs) / 1000);
-                    if (continuePlaybackRef.current) {
-                      void event.currentTarget.play().catch(() => undefined);
-                    }
-                  }}
-                  onPlay={(event) => {
-                    continuePlaybackRef.current = false;
-                    handoffSegmentIdRef.current = undefined;
-                    setPreviewPlaying(true);
-                    const previewStartMs =
-                      activeSourcePreview.variant === "VIDEO_CLIP_PROXY"
-                        ? (activeSourcePreview.sourceStartMs ?? sourceSelection.sourceStartMs)
-                        : 0;
-                    const sourceTimeMs = previewStartMs + event.currentTarget.currentTime * 1000;
-                    if (sourceTimeMs < sourceSelection.sourceStartMs || sourceTimeMs >= sourceSelection.sourceEndMs)
-                      event.currentTarget.currentTime = Math.max(
-                        0,
-                        (sourceSelection.sourceStartMs - previewStartMs) / 1000,
-                      );
-                  }}
-                  onPause={() => setPreviewPlaying(false)}
-                  onCanPlay={(event) => { if (continuePlaybackRef.current) void event.currentTarget.play().catch(() => undefined); }}
-                  onTimeUpdate={() => handleTimeUpdate(false)}
-                  onEnded={() => handleTimeUpdate(true)}
-                />
-              )}
-              {activeOverlayCue && (
-                <div className="subtitle-overlay-preview" style={overlayStyle}>
-                  {wrapSubtitleText(
-                    activeOverlayCue.text,
-                    resolveCueSubtitleWrapLimit(
-                      activeOverlayCue.lineWidthChars,
-                      subtitleStyle.maxCharactersPerLine,
-                      activeOverlayCue.text,
-                    ),
-                  ).map((line, index, lines) => (
-                    <span key={index}>
-                      {line}
-                      {index < lines.length - 1 && <br />}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </section>
-            <div className="subtitle-time-scrubber">
-              <button
-                type="button"
-                disabled={!activeSourcePreview && !introPreview}
-                onClick={togglePlayback}
-              >
-                {previewPlaying ? "❚❚ 暫停" : "▶ 播放"}
-              </button>
-              <span>
-                {useIntroTimelinePreview ? "片頭" : playbackScope === "INTRO" ? "片頭片段" : "正片"}{" "}
-                {formatDuration(cursor)} / {formatDuration(displayedDurationMs)}
+              <span className={`subtitle-job-status is-${visualProgress.status.toLowerCase()}`} aria-live="polite">
+                {visualProgress.status === "RUNNING"
+                  ? "分析中"
+                  : visualProgress.status === "PAUSED"
+                    ? "已暫停"
+                    : visualProgress.status === "COMPLETED"
+                      ? "已完成"
+                      : visualProgress.status === "CANCELLED"
+                        ? "已取消"
+                        : visualProgress.status === "FAILED"
+                          ? "失敗"
+                          : "尚未開始"}
               </span>
+            </div>
+            <div className="subtitle-visual-job-fields">
               <label>
-                速度
+                分析服務
                 <select
-                  aria-label="字幕預覽播放速度"
-                  value={playbackRate}
-                  onChange={(event) => { const rate = Number(event.target.value); setPlaybackRate(rate); if (videoRef.current) videoRef.current.playbackRate = rate; }}
+                  aria-label="字幕畫面分析服務"
+                  value={visualProvider}
+                  disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                  onChange={(event) => setVisualProvider(event.target.value as MaterialAnalysisProvider)}
                 >
-                  <option value="0.5">0.5×</option>
-                  <option value="0.75">0.75×</option>
-                  <option value="1">1×</option>
-                  <option value="1.25">1.25×</option>
-                  <option value="1.5">1.5×</option>
-                  <option value="2">2×</option>
+                  <option value="CHATGPT">ChatGPT 視覺（預設，需 OpenAI API 設定）</option>
+                  <option value="GEMINI">Gemini（選用）</option>
                 </select>
               </label>
-              <input
-                aria-label="字幕預覽時間"
-                type="range"
-                min={scrubberMinimumMs}
-                max={Math.max(scrubberMinimumMs + 1, scrubberMaximumMs)}
-                step="50"
-                value={Math.max(scrubberMinimumMs, Math.min(cursor, scrubberMaximumMs))}
-                onChange={(event) => {
-                  const value = Number(event.target.value);
-                  jumpToProjectTime(value);
-                }}
-              />
-              <div className="subtitle-review-playback-buttons" role="group" aria-label="字幕預覽定位">
-                <button type="button" aria-label="上一筆字幕" disabled={(!activeSourcePreview && !introPreview) || !adjacentCue(cues, playbackScope, navigationCueId, -1)} onClick={() => {
-                  const target = adjacentCue(cues, playbackScope, navigationCueId, -1);
-                  if (target) jumpToCue(target);
-                }}>上一筆字幕</button>
-                <button type="button" aria-label="下一筆字幕" disabled={(!activeSourcePreview && !introPreview) || !adjacentCue(cues, playbackScope, navigationCueId, 1)} onClick={() => {
-                  const target = adjacentCue(cues, playbackScope, navigationCueId, 1);
-                  if (target) jumpToCue(target);
-                }}>下一筆字幕</button>
-                <button type="button" aria-label="倒退兩秒" disabled={!activeSourcePreview && !introPreview} onClick={() => jumpToProjectTime(cursor - 2_000)}>−2 秒</button>
-                <button type="button" aria-label="前進兩秒" disabled={!activeSourcePreview && !introPreview} onClick={() => jumpToProjectTime(cursor + 2_000)}>+2 秒</button>
-                <button type="button" aria-label="回到目前字幕" disabled={!activeOverlayCue} onClick={returnToCurrentCue}>回到目前字幕</button>
-              </div>
-              <div className="subtitle-preview-mode">
-                {project.introSegments.length > 0 && (
-                  <button
-                    type="button"
-                    disabled={buildingPreview || generating}
-                    onClick={() =>
-                      introPreview
-                        ? setUseIntroTimelinePreview((current) => !current)
-                        : void buildIntroPreview().catch((reason: unknown) =>
-                            setPreviewError(reason instanceof Error ? reason.message : String(reason)),
-                          )
-                    }
-                  >
-                    {useIntroTimelinePreview ? "改看單筆來源" : introPreview ? "播放片頭 480P" : "建立片頭 480P"}
-                  </button>
-                )}
-              </div>
-            </div>
-            <section className="subtitle-style-panel" aria-label="字幕顯示格式">
               <label>
-                高低位置{" "}
-                <input
-                  aria-label="字幕高低位置"
-                  type="range"
-                  min="10"
-                  max="92"
-                  value={subtitleStyle.verticalPositionPercent}
-                  onChange={(event) =>
-                    setSubtitleStyle((current) => ({ ...current, verticalPositionPercent: Number(event.target.value) }))
-                  }
-                />
-                <span>{subtitleStyle.verticalPositionPercent}%</span>
+                既有正式 SRT 保護
+                <select
+                  aria-label="既有正式 SRT 保護方式"
+                  value={visualSrtPolicy}
+                  disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                  onChange={(event) => setVisualSrtPolicy(event.target.value as typeof visualSrtPolicy)}
+                >
+                  <option value="BACKUP">先備份再升級（預設）</option>
+                  <option value="SAVE_AS">另存新檔</option>
+                  <option value="OVERWRITE">確認後覆寫</option>
+                  <option value="CANCEL">取消，不開始分析</option>
+                </select>
               </label>
               <label>
-                文字大小{" "}
+                產生語言
+                <select
+                  aria-label="字幕畫面分析語言"
+                  value={visualDraftLanguage}
+                  onChange={(event) => setVisualDraftLanguage(event.target.value)}
+                >
+                  <option value="zh-TW">繁體中文（台灣，預設）</option>
+                  <option value="zh-CN">簡體中文</option>
+                  <option value="en">English</option>
+                  <option value="ja">日本語</option>
+                  <option value="ko">한국어</option>
+                </select>
+              </label>
+              <label>
+                取樣間隔（秒）
                 <input
-                  aria-label="字幕文字大小"
+                  aria-label="畫面取樣間隔"
                   type="number"
-                  min="16"
-                  max="72"
-                  value={subtitleStyle.fontSizePx}
+                  min="1"
+                  max="60"
+                  value={visualIntervalSeconds}
+                  disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
                   onChange={(event) =>
-                    setSubtitleStyle((current) => ({ ...current, fontSizePx: Number(event.target.value) }))
-                  }
-                />
-                <span>px</span>
-              </label>
-              <label>
-                顏色{" "}
-                <input
-                  aria-label="字幕文字顏色"
-                  type="color"
-                  value={subtitleStyle.textColor}
-                  onChange={(event) =>
-                    setSubtitleStyle((current) => ({ ...current, textColor: event.target.value.toUpperCase() }))
+                    setVisualIntervalSeconds(Math.max(1, Math.min(60, Math.round(Number(event.target.value) || 1))))
                   }
                 />
               </label>
               <label>
+                畫面密度
+                <select
+                  aria-label="字幕分析畫面密度"
+                  value={visualDensity}
+                  disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                  onChange={(event) => setVisualDensity(event.target.value as SubtitleVisualDensity)}
+                >
+                  <option value="LOW">低</option>
+                  <option value="STANDARD">標準</option>
+                  <option value="DETAILED">詳細</option>
+                </select>
+              </label>
+              <label className="subtitle-visual-context">
+                影片標題
                 <input
-                  aria-label="字幕陰影"
+                  aria-label="字幕分析影片標題"
+                  value={visualTitle}
+                  maxLength={240}
+                  disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                  onChange={(event) => setVisualTitle(event.target.value)}
+                />
+              </label>
+              <label className="subtitle-visual-context">
+                影片描述／故事背景
+                <textarea
+                  aria-label="字幕分析影片描述"
+                  value={visualDescription}
+                  maxLength={4000}
+                  rows={2}
+                  disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                  onChange={(event) => setVisualDescription(event.target.value)}
+                />
+              </label>
+              <label className="subtitle-visual-toggle">
+                <input
+                  aria-label="偵測場景變化"
                   type="checkbox"
-                  checked={subtitleStyle.shadowEnabled}
-                  onChange={(event) =>
-                    setSubtitleStyle((current) => ({ ...current, shadowEnabled: event.target.checked }))
-                  }
+                  checked={detectSceneChanges}
+                  disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                  onChange={(event) => setDetectSceneChanges(event.target.checked)}
                 />{" "}
-                陰影
+                場景變化補點
               </label>
-              <label>
-                外框{" "}
+              <label className="subtitle-visual-toggle">
                 <input
-                  aria-label="字幕外框寬度"
-                  type="number"
-                  min="0"
-                  max="8"
-                  value={subtitleStyle.outlineWidthPx}
+                  aria-label="去除重複畫面"
+                  type="checkbox"
+                  checked={deduplicateFrames}
+                  disabled={visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED"}
+                  onChange={(event) => setDeduplicateFrames(event.target.checked)}
+                />{" "}
+                感知去重
+              </label>
+              <label className="subtitle-visual-toggle">
+                <input
+                  aria-label="AI 檢查現有字幕"
+                  type="checkbox"
+                  checked={projectAiCheckEnabled}
+                  disabled={visualProgress.status === "RUNNING"}
+                  onChange={(event) => setProjectAiCheckEnabled(event.target.checked)}
+                />{" "}
+                AI 檢查現有字幕（預設關閉）
+              </label>
+            </div>
+            <div className="subtitle-visual-job-controls">
+              <small>
+                分析先建立 AI 待確認草稿，不會覆寫正式
+                SRT。相容影片可更新專案草稿；外部或時間線不相容影片會建立獨立字幕工作區，供檢視、修改與另存 SRT。
+              </small>
+              {(visualProgress.status === "IDLE" ||
+                visualProgress.status === "COMPLETED" ||
+                visualProgress.status === "CANCELLED" ||
+                visualProgress.status === "FAILED") && (
+                <button
+                  className="ai-intro-button"
+                  type="button"
+                  disabled={(!analysisVideo?.outputPath && !canGenerate) || generating || busy}
+                  onClick={() => void startVisualAnalysis()}
+                >
+                  開始畫面分析
+                </button>
+              )}
+              {visualProgress.status === "RUNNING" && (
+                <button className="secondary-button" type="button" onClick={() => void controlVisualAnalysis("pause")}>
+                  暫停
+                </button>
+              )}
+              {(visualProgress.status === "PAUSED" || visualProgress.status === "FAILED") && (
+                <button className="secondary-button" type="button" onClick={() => void controlVisualAnalysis("resume")}>
+                  繼續
+                </button>
+              )}
+              {(visualProgress.status === "RUNNING" || visualProgress.status === "PAUSED") && (
+                <button className="cancel-button" type="button" onClick={() => void controlVisualAnalysis("cancel")}>
+                  取消分析
+                </button>
+              )}
+              <span>
+                原始 {visualProgress.rawFrames} · 場景 {visualProgress.sceneFrames} · 去重{" "}
+                {visualProgress.deduplicatedFrames} · 已送出 {visualProgress.sentFrames} 張
+              </span>
+              <span>
+                請求 {visualProgress.requests} · 經過 {formatDuration(visualProgress.elapsedMs)} · Token{" "}
+                {visualProgress.tokens} · 快取命中 {visualProgress.cacheHits}
+              </span>
+              <span>暫存 {visualProgress.temporaryBytes.toLocaleString()} bytes</span>
+              <span>
+                {visualProgress.phase} {visualProgress.mode}{" "}
+                {visualProgress.modelId ? `模型 ${visualProgress.modelId}` : ""}
+              </span>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={!projectAiCheckEnabled || busy || analysisVideo?.reason !== "PROJECT_CONCAT"}
+                onClick={() => void prepareProjectAiCheck()}
+              >
+                建立現有字幕 AI 檢查工作區
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={busy || !analysisVideo?.outputPath}
+                onClick={() => void importStandaloneSrtReview()}
+              >
+                所選影片＋匯入既有 SRT（獨立草稿）
+              </button>
+              {projectAiCheckEnabled && analysisVideo?.reason !== "PROJECT_CONCAT" && (
+                <small>
+                  目前只有 legacy／外部影片，沒有帶目前 projectId
+                  的成功輸出；為避免錯誤時間軸套回，請先建立新的專案輸出，或在獨立影片工作區檢查而不修改專案。
+                </small>
+              )}
+            </div>
+            {visualProgress.error && (
+              <small className="subtitle-visual-job-error" role="alert">
+                {visualProgress.error}
+              </small>
+            )}
+          </section>
+          {visualPreflight && (
+            <section className="subtitle-visual-job" aria-label="字幕分析確認">
+              <h3>開始前確認</h3>
+              <p>{visualPreflight.videoPath}</p>
+              <p>
+                影片 {formatDuration(visualPreflight.videoDurationMs)}｜專案{" "}
+                {formatDuration(visualPreflight.projectDurationMs)}｜差{" "}
+                {(visualPreflight.differenceMs / 1000).toFixed(3)} 秒｜容差{" "}
+                {(visualPreflight.toleranceMs / 1000).toFixed(1)} 秒
+              </p>
+              <p>{visualPreflight.warning ?? "專案輸出與時間線相容，可使用片段脈絡。"}</p>
+              <label>
+                分析模式{" "}
+                <select
+                  aria-label="字幕分析模式"
+                  value={visualPreflight.recommendedMode}
                   onChange={(event) =>
-                    setSubtitleStyle((current) => ({ ...current, outlineWidthPx: Number(event.target.value) }))
+                    setVisualPreflight({
+                      ...visualPreflight,
+                      recommendedMode: event.target.value as SubtitleVisualPreflight["recommendedMode"],
+                    })
                   }
-                />
-                <span>px</span>
+                >
+                  <option value="VIDEO_FIRST">影片時間軸：獨立草稿，不修改專案</option>
+                  {visualPreflight.recommendedMode === "PROJECT_AWARE" && (
+                    <option value="PROJECT_AWARE">專案時間軸：更新待確認草稿</option>
+                  )}
+                </select>
               </label>
-              <label>
-                批次行寬{" "}
-                <input
-                  aria-label="字幕批次每行最多字數"
-                  type="number"
-                  min={SUBTITLE_WRAP_MANUAL_MIN}
-                  max={SUBTITLE_WRAP_MANUAL_MAX}
-                  placeholder="自動 12/20"
-                  value={subtitleStyle.maxCharactersPerLine ?? ""}
-                  onChange={(event) => {
-                    const raw = event.target.value.trim();
-                    setSubtitleStyle((current) => ({
-                      ...current,
-                      // Commit the raw integer while typing; Main clamps to
-                      // The Main process clamps 6–60 on save, so partial input never snaps around.
-                      maxCharactersPerLine: raw === "" ? undefined : Math.floor(Number(raw) || 0),
-                    }));
-                  }}
-                />
-                <span>字{subtitleStyle.maxCharactersPerLine === undefined ? "（中文 12／英文或混合 20）" : ""}</span>
-              </label>
-              <button type="button" className="secondary-button" disabled={busy} onClick={() => void saveStyle()}>
-                儲存顯示格式
+              <p>
+                每 {visualIntervalSeconds} 秒｜預估 {visualPreflight.rawFrameEstimate} 張（去重前）｜
+                {visualPreflight.provider}｜模型 {visualPreflight.modelId ?? "開始時解析"}
+              </p>
+              <p>
+                既有 SRT {visualPreflight.existingSrtCount} 筆｜專案字幕 {visualPreflight.projectSubtitleCount}{" "}
+                筆｜僅建立草稿；正式 SRT 不覆寫
+              </p>
+              <button type="button" onClick={() => void startVisualAnalysis(true)}>
+                確認並開始分析
+              </button>
+              <button type="button" onClick={() => setVisualPreflight(undefined)}>
+                取消
               </button>
             </section>
-            {selected && (
-              <section className={`cue-review-editor ${overlappingIds.has(selected.id) ? "has-time-overlap" : ""}`}>
-                <header>
-                  <div>
-                    <span className={`review-status status-${selected.reviewStatus ?? "CONFIRMED"}`}>
-                      {statusLabel(selected.reviewStatus)}
-                    </span>
-                    <strong>
-                      {cueScope(selected) === "INTRO" ? "片頭" : "正片"} · {cueOrigin(selected)}
-                    </strong>
-                    {selected.speaker && <small>說話者：{selected.speaker}</small>}
-                  </div>
+          )}
+          {standaloneWorkspace && (
+            <StandaloneSubtitleReview
+              workspace={standaloneWorkspace}
+              videoUrl={standaloneWorkspace.previewUrl}
+              onUpdated={setStandaloneWorkspace}
+              onProjectUpdated={onProjectUpdated}
+              onError={setError}
+            />
+          )}
+          {overlappingIds.size > 0 && (
+            <div className="subtitle-overlap-warning" role="alert">
+              ⚠ 有 {overlappingIds.size}{" "}
+              筆新舊字幕時間重疊，兩筆都會顯示紅色外框。請調整開始／結束時間，紅框消失後再確認。
+            </div>
+          )}
+          {reviewQueueIds.length > 0 && selected && reviewQueueIds.includes(selected.id) && (
+            <section className="subtitle-guided-review" aria-label="逐筆 Proxy 字幕校對" aria-live="polite">
+              <div>
+                <span className="eyebrow">FORCED TIMELINE REVIEW</span>
+                <strong>
+                  第 {reviewQueueIds.indexOf(selected.id) + 1}／{reviewQueueIds.length} 筆：這個 Proxy
+                  畫面、字幕文字與頭尾時間是否一致？
+                </strong>
+                <p>已先依目前片頭／正片主軸與疊化時間重新對位；按下確認後會立即保存，再進到下一筆。</p>
+              </div>
+              <nav>
+                <button
+                  className="confirm-cue"
+                  type="button"
+                  disabled={!activeSourcePreview || busy}
+                  onClick={() => void confirmReviewAndAdvance()}
+                >
+                  ✓ 一致，確認、保存並下一筆
+                </button>
+                <button type="button" disabled={busy} onClick={editReviewCue}>
+                  不一致，修改文字／時間
+                </button>
+                <button type="button" disabled={busy} onClick={advanceReview}>
+                  暫時略過
+                </button>
+                <button className="secondary-button" type="button" onClick={() => setReviewQueueIds([])}>
+                  結束逐筆校對
+                </button>
+              </nav>
+            </section>
+          )}
+          {scope.intro && project.introSegments.length > 0 && (
+            <div
+              className={`subtitle-intro-ai-state ${introOpenAiCount ? "has-cloud-analysis" : "is-local-only"}`}
+              role="status"
+            >
+              片頭共 {project.introSegments.length} 段，其中 {introOpenAiCount} 段曾完成 OpenAI 人物／事件／故事比對。
+              {introOpenAiCount === 0
+                ? "目前片頭挑選是本機畫面統計備援，不能視為 AI 連線成功。"
+                : "字幕仍會重新依畫面與故事背景建立草稿。"}
+            </div>
+          )}
+          <div className="subtitle-review-layout">
+            <aside className="subtitle-cue-list" ref={cueListRef} data-testid="project-subtitle-cue-list">
+              {!visibleCues.length && (
+                <div className="empty-mini">
+                  <strong>所選範圍還沒有字幕</strong>
+                  <p>可匯入 UTF-8 SRT、設定故事背景後建立 AI 草稿，或人工新增。</p>
+                </div>
+              )}
+              {reviewableVisibleCues.length > 0 && (
+                <div
+                  className="subtitle-selection-actions subtitle-global-actions"
+                  role="toolbar"
+                  aria-label="字幕全部操作"
+                >
+                  <span>目前範圍 {reviewableVisibleCues.length} 筆</span>
+                  <button
+                    type="button"
+                    disabled={busy || generating || buildingPreview}
+                    onClick={() => void toggleAllConfirmation()}
+                  >
+                    {allVisibleConfirmed ? "全部取消確認並保存" : "全部確認並保存"}
+                  </button>
+                </div>
+              )}
+              {selectedIds.size > 0 && (
+                <div className="subtitle-selection-actions" role="toolbar" aria-label="字幕批次操作">
+                  <span>已選 {selectedIds.size} 筆</span>
+                  <button
+                    type="button"
+                    disabled={busy || generating || buildingPreview}
+                    onClick={() => void confirmSelected()}
+                  >
+                    確認選取並保存
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || generating || buildingPreview}
+                    onClick={() => void cancelConfirmation()}
+                  >
+                    取消確認並保存
+                  </button>
                   <button
                     type="button"
                     className="danger-text"
                     disabled={busy || generating || buildingPreview}
-                    onClick={() => void deleteSelectedCue()}
+                    onClick={() => void deleteSelectedCues()}
                   >
-                    刪除這筆（Delete）
+                    刪除選取
                   </button>
-                </header>
-                <div className="cue-fields">
-                  <label>
-                    開始（分:秒.毫秒）
-                    <TimecodeInput
-                      label="字幕開始"
-                      valueMs={selected.startMs}
-                      maxMs={selectedTimelineDurationMs}
-                      onChange={(value) => patchCue(selected.id, "startMs", value / 1000)}
-                    />
-                  </label>
-                  <label>
-                    結束（分:秒.毫秒）
-                    <TimecodeInput
-                      label="字幕結束"
-                      valueMs={selected.endMs}
-                      maxMs={selectedTimelineDurationMs}
-                      onChange={(value) => patchCue(selected.id, "endMs", value / 1000)}
-                    />
-                  </label>
-                  <label className="cue-text-field">
-                    字幕文字
-                    <textarea
-                      ref={selectedTextEditorRef}
-                      value={selected.text}
-                      onChange={(event) => patchCue(selected.id, "text", event.target.value)}
-                    />
-                  </label>
                 </div>
-                {isEditableVisualDraft(selected) && (
-                  <section className="cue-visual-draft-tools" aria-label="AI 畫面情境草稿工具">
-                    <h3>畫面情境草稿調整</h3>
-                    <label>
-                      字幕語言（也用於下一次畫面分析）
-                      <select
-                        aria-label="修正文案語言"
-                        value={visualDraftLanguage}
-                        onChange={(event) => setVisualDraftLanguage(event.target.value)}
+              )}
+              {visibleCues.map((cue, index) => {
+                const movable = cue.reviewStatus !== "REJECTED";
+                const scoped = visibleCues.filter(
+                  (item) => cueScope(item) === cueScope(cue) && item.reviewStatus !== "REJECTED",
+                );
+                const scopedIndex = scoped.findIndex((item) => item.id === cue.id);
+                const disabled = busy || generating || buildingPreview;
+                return (
+                  <div
+                    className={`subtitle-cue-row ${cue.id === activeOverlayCue?.id ? "is-active" : ""} ${overlappingIds.has(cue.id) ? "has-time-overlap" : ""}`}
+                    key={cue.id}
+                    ref={(node) => {
+                      if (node) cueRowRefs.current.set(cue.id, node);
+                      else cueRowRefs.current.delete(cue.id);
+                    }}
+                    data-cue-id={cue.id}
+                    onDoubleClick={() => jumpToCue(cue)}
+                  >
+                    <div
+                      className={`subtitle-cue-card ${selectedIds.has(cue.id) ? "is-selected" : ""} status-${cue.reviewStatus ?? "CONFIRMED"}`}
+                    >
+                      <button
+                        type="button"
+                        className="subtitle-cue-select"
+                        aria-label={`選取字幕 ${cue.text}`}
+                        aria-pressed={selectedIds.has(cue.id)}
+                        title="點一下選取；按住 Shift 可連續複選"
+                        onClick={(event) => selectCue(cue, event)}
+                        onDoubleClick={(event) => {
+                          event.stopPropagation();
+                          jumpToCue(cue);
+                        }}
                       >
-                        <option value="zh-TW">繁體中文</option>
-                        <option value="zh-CN">簡體中文</option>
-                        <option value="en">English</option>
-                        <option value="ja">日本語</option>
-                        <option value="ko">한국어</option>
-                      </select>
-                    </label>
-                    <label>
-                      修正內容／AI 指示（「套用本機」不呼叫 AI；「重新產生」才會呼叫）
+                        <span>{String(index + 1).padStart(2, "0")}</span>
+                      </button>
                       <textarea
-                        aria-label="本機修正指示"
-                        value={localCorrectionText}
-                        onChange={(event) => setLocalCorrectionText(event.target.value)}
-                        placeholder="輸入這筆字幕的最終文案"
+                        className="subtitle-cue-inline-editor"
+                        aria-label={`直接編輯第 ${index + 1} 筆字幕`}
+                        value={cue.text}
+                        disabled={disabled}
+                        spellCheck
+                        title="點入後可直接定位文字游標並修改；按右側確認才會立即保存這筆內容。"
+                        onFocus={() => {
+                          if (selectedId !== cue.id) selectCue(cue);
+                        }}
+                        onChange={(event) => patchCue(cue.id, "text", event.target.value)}
                       />
-                    </label>
-                    <div className="cue-review-actions">
+                      <em>{overlappingIds.has(cue.id) ? "時間重疊" : statusLabel(cue.reviewStatus)}</em>
+                      <small>
+                        {cueScope(cue) === "INTRO" ? "片頭" : "正片"} · {formatExactCueTime(cue.startMs)} →{" "}
+                        {formatExactCueTime(cue.endMs)} · 時長 {formatCueDuration(cue.startMs, cue.endMs)} ·{" "}
+                        <span>{cueOrigin(cue)}</span> · 每行 {cue.lineWidthChars ?? defaultSubtitleLineWidth(cue.text)}{" "}
+                        字{cue.lineWidthChars === undefined ? "（自動）" : "（單筆）"} · 位置 X{" "}
+                        {cue.position?.xPercent ?? 50}%／Y{" "}
+                        {cue.position?.yPercent ?? subtitleStyle.verticalPositionPercent}%
+                      </small>
+                    </div>
+                    <div className="subtitle-cue-row-actions" role="group" aria-label={`第 ${index + 1} 筆字幕操作`}>
                       <button
                         type="button"
-                        disabled={busy || !localCorrectionText.trim()}
-                        onClick={() => void applyLocalVisualCorrection()}
+                        aria-label={`跳到第 ${index + 1} 筆字幕`}
+                        title="明確跳到這筆字幕的開始時間"
+                        disabled={disabled}
+                        onClick={() => jumpToCue(cue)}
                       >
-                        套用本機修正文案
+                        ▶ 跳到
                       </button>
                       <button
                         type="button"
-                        disabled={busy || !localCorrectionText.trim() || !window.sourceApp.regenerateSubtitleVisualCue}
-                        onClick={() => void regenerateSelectedVisualDrafts()}
+                        className="subtitle-cue-row-confirm"
+                        aria-label={`確認並保存第 ${index + 1} 筆字幕`}
+                        disabled={disabled || overlappingIds.has(cue.id)}
+                        onClick={() => void setStatus(cue.id, "CONFIRMED")}
                       >
-                        依指示用附近畫面重新產生（最多 10 筆）
-                      </button>
-                      <button type="button" disabled={busy || !canMergePrevious} onClick={() => void mergeVisualDraft(previousVisualDraft)}>
-                        與前一筆畫面草稿合併
-                      </button>
-                      <button type="button" disabled={busy || !canMergeNext} onClick={() => void mergeVisualDraft(nextVisualDraft)}>
-                        與下一筆畫面草稿合併
+                        ✓ 確認
                       </button>
                       <button
                         type="button"
-                        disabled={busy || selected.text.trim().length < 2 || selected.endMs - selected.startMs < 2}
-                        onClick={() => void splitVisualDraft()}
+                        aria-label={`上移第 ${index + 1} 筆字幕`}
+                        title="交換到上一筆的時間位置；兩筆會改回待確認並立即保存。"
+                        disabled={disabled || !movable || scopedIndex <= 0}
+                        onClick={() => void moveCueAndSave(cue.id, -1)}
                       >
-                        在時間中點拆分
+                        ↑ 上移
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`下移第 ${index + 1} 筆字幕`}
+                        title="交換到下一筆的時間位置；兩筆會改回待確認並立即保存。"
+                        disabled={disabled || !movable || scopedIndex >= scoped.length - 1}
+                        onClick={() => void moveCueAndSave(cue.id, 1)}
+                      >
+                        ↓ 下移
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`調整第 ${index + 1} 筆字幕每行字數`}
+                        title={`可用鍵盤上下鍵或直接輸入 ${SUBTITLE_WRAP_MANUAL_MIN}–${SUBTITLE_WRAP_MANUAL_MAX}；只改這一筆。`}
+                        disabled={disabled}
+                        onClick={() => openLineWidthEditor(cue)}
+                      >
+                        ↔ 行寬
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`調整第 ${index + 1} 筆字幕畫面位置`}
+                        title="用方向鍵微調 1%；Shift＋方向鍵調整 5%。"
+                        disabled={disabled}
+                        onClick={() => openPositionEditor(cue)}
+                      >
+                        ✥ 位置
+                      </button>
+                      <button
+                        type="button"
+                        className="subtitle-cue-row-delete danger-text"
+                        aria-label="刪除這筆字幕"
+                        title={`刪除字幕：${cue.text}`}
+                        disabled={disabled}
+                        onClick={() =>
+                          void deleteCueIds(new Set([cue.id]), `這筆${cueScope(cue) === "INTRO" ? "片頭" : "正片"}字幕`)
+                        }
+                      >
+                        刪除
                       </button>
                     </div>
-                  </section>
+                  </div>
+                );
+              })}
+              <button className="add-cue-button" type="button" disabled={selectedTimelineDurationMs <= 0} onClick={add}>
+                ＋ 在 {formatDuration(cursor)} 新增人工字幕
+              </button>
+            </aside>
+            <main className="subtitle-review-main">
+              <section className="subtitle-video-stage">
+                {useIntroTimelinePreview && introPreview && (
+                  <video
+                    key={introPreview.url}
+                    ref={videoRef}
+                    src={introPreview.url}
+                    preload="auto"
+                    aria-label="480P 片頭字幕同步預覽"
+                    onClick={togglePlayback}
+                    onPlay={() => setPreviewPlaying(true)}
+                    onPause={() => setPreviewPlaying(false)}
+                    onTimeUpdate={() => handleTimeUpdate(false)}
+                  />
                 )}
-                {(selected.visualSummary ||
-                  selected.eventSummary ||
-                  selected.peopleSummary?.length ||
-                  selected.locationSummary?.length ||
-                  selected.animalSpecies?.length) && (
-                  <div className="ai-evidence">
-                    <h3>AI 判斷依據（請人工核對）</h3>
-                    <dl>
-                      {selected.visualSummary && (
-                        <>
-                          <dt>畫面</dt>
-                          <dd>{selected.visualSummary}</dd>
-                        </>
-                      )}
-                      {selected.eventSummary && (
-                        <>
-                          <dt>事件</dt>
-                          <dd>{selected.eventSummary}</dd>
-                        </>
-                      )}
-                      {selected.peopleSummary?.length ? (
-                        <>
-                          <dt>人物</dt>
-                          <dd>{selected.peopleSummary.join("、")}</dd>
-                        </>
-                      ) : null}
-                      {selected.locationSummary?.length ? (
-                        <>
-                          <dt>地點</dt>
-                          <dd>{selected.locationSummary.join("、")}</dd>
-                        </>
-                      ) : null}
-                      {selected.animalSpecies?.length ? (
-                        <>
-                          <dt>物種</dt>
-                          <dd>{selected.animalSpecies.join("、")}</dd>
-                        </>
-                      ) : null}
-                      {selected.speciesExplanation ? (
-                        <>
-                          <dt>物種說明</dt>
-                          <dd>{selected.speciesExplanation}</dd>
-                        </>
-                      ) : null}
-                    </dl>
-                    <div className="ai-score-row">
-                      <span>
-                        主題相關 <strong>{selected.topicRelevanceScore ?? "–"}</strong>
-                      </span>
-                      <span>
-                        聲畫符合 <strong>{selected.transcriptVisualMatchScore ?? "–"}</strong>
-                      </span>
-                      <span>
-                        AI 信心 <strong>{selected.aiConfidence ?? "–"}</strong>
-                      </span>
-                    </div>
-                    {selected.aiWarnings?.length ? (
-                      <ul>
-                        {selected.aiWarnings.map((warning) => (
-                          <li key={warning}>{warning}</li>
-                        ))}
-                      </ul>
-                    ) : null}
+                {!useIntroTimelinePreview && !selected && (
+                  <div className="large-loading">
+                    <p>從左側選取一筆字幕，或產生 480P 片頭預覽。</p>
                   </div>
                 )}
-                <div className="cue-review-actions">
+                {!useIntroTimelinePreview && selected && sourceSelection && !activeSourcePreview && !previewError && (
+                  <div className="large-loading">
+                    <span className="spinner" />
+                    <p>正在準備唯讀 proxy 預覽…</p>
+                  </div>
+                )}
+                {previewError && (
+                  <div className="preview-error">
+                    <strong>影像預覽提示</strong>
+                    <p>{previewError}</p>
+                  </div>
+                )}
+                {!useIntroTimelinePreview && selected && !sourceSelection && (
+                  <div className="large-loading">
+                    <p>這筆字幕尚無可直接播放的影片來源；片頭可先建立整體 480P 代理。</p>
+                  </div>
+                )}
+                {!useIntroTimelinePreview &&
+                  selected &&
+                  sourceSelection?.asset.kind === "IMAGE" &&
+                  activeSourcePreview && (
+                    <img
+                      className="subtitle-source-image"
+                      src={activeSourcePreview.url}
+                      alt={`字幕對應畫面 ${sourceSelection.asset.fileName}`}
+                    />
+                  )}
+                {!useIntroTimelinePreview &&
+                  selected &&
+                  sourceSelection?.asset.kind === "VIDEO" &&
+                  activeSourcePreview && (
+                    <video
+                      key={`${activeSourcePreview.url}:${sourceSelection.segmentId}`}
+                      ref={videoRef}
+                      src={activeSourcePreview.url}
+                      preload="auto"
+                      aria-label="字幕快速區段 Proxy 預覽"
+                      onClick={togglePlayback}
+                      onLoadedMetadata={(event) => {
+                        const previewStartMs =
+                          activeSourcePreview.variant === "VIDEO_CLIP_PROXY"
+                            ? (activeSourcePreview.sourceStartMs ?? sourceSelection.sourceStartMs)
+                            : 0;
+                        const segment = playbackSegments.find((item) => item.id === sourceSelection.segmentId);
+                        const sourceTimeMs = segment
+                          ? projectClockToSourceMs(segment, cursor)
+                          : sourceSelection.sourceStartMs;
+                        event.currentTarget.playbackRate = playbackRate;
+                        event.currentTarget.currentTime = Math.max(0, (sourceTimeMs - previewStartMs) / 1000);
+                        if (continuePlaybackRef.current) {
+                          void event.currentTarget.play().catch(() => undefined);
+                        }
+                      }}
+                      onPlay={(event) => {
+                        continuePlaybackRef.current = false;
+                        handoffSegmentIdRef.current = undefined;
+                        setPreviewPlaying(true);
+                        const previewStartMs =
+                          activeSourcePreview.variant === "VIDEO_CLIP_PROXY"
+                            ? (activeSourcePreview.sourceStartMs ?? sourceSelection.sourceStartMs)
+                            : 0;
+                        const sourceTimeMs = previewStartMs + event.currentTarget.currentTime * 1000;
+                        if (sourceTimeMs < sourceSelection.sourceStartMs || sourceTimeMs >= sourceSelection.sourceEndMs)
+                          event.currentTarget.currentTime = Math.max(
+                            0,
+                            (sourceSelection.sourceStartMs - previewStartMs) / 1000,
+                          );
+                      }}
+                      onPause={() => setPreviewPlaying(false)}
+                      onCanPlay={(event) => {
+                        if (continuePlaybackRef.current) void event.currentTarget.play().catch(() => undefined);
+                      }}
+                      onTimeUpdate={() => handleTimeUpdate(false)}
+                      onEnded={() => handleTimeUpdate(true)}
+                    />
+                  )}
+                {activeOverlayCue && (
+                  <div className="subtitle-overlay-preview" style={overlayStyle}>
+                    {wrapSubtitleText(
+                      activeOverlayCue.text,
+                      resolveCueSubtitleWrapLimit(
+                        activeOverlayCue.lineWidthChars,
+                        subtitleStyle.maxCharactersPerLine,
+                        activeOverlayCue.text,
+                      ),
+                    ).map((line, index, lines) => (
+                      <span key={index}>
+                        {line}
+                        {index < lines.length - 1 && <br />}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </section>
+              <div className="subtitle-time-scrubber">
+                <button type="button" disabled={!activeSourcePreview && !introPreview} onClick={togglePlayback}>
+                  {previewPlaying ? "❚❚ 暫停" : "▶ 播放"}
+                </button>
+                <span>
+                  {useIntroTimelinePreview ? "片頭" : playbackScope === "INTRO" ? "片頭片段" : "正片"}{" "}
+                  {formatDuration(cursor)} / {formatDuration(displayedDurationMs)}
+                </span>
+                <label>
+                  速度
+                  <select
+                    aria-label="字幕預覽播放速度"
+                    value={playbackRate}
+                    onChange={(event) => {
+                      const rate = Number(event.target.value);
+                      setPlaybackRate(rate);
+                      if (videoRef.current) videoRef.current.playbackRate = rate;
+                    }}
+                  >
+                    <option value="0.5">0.5×</option>
+                    <option value="0.75">0.75×</option>
+                    <option value="1">1×</option>
+                    <option value="1.25">1.25×</option>
+                    <option value="1.5">1.5×</option>
+                    <option value="2">2×</option>
+                  </select>
+                </label>
+                <input
+                  aria-label="字幕預覽時間"
+                  type="range"
+                  min={scrubberMinimumMs}
+                  max={Math.max(scrubberMinimumMs + 1, scrubberMaximumMs)}
+                  step="50"
+                  value={Math.max(scrubberMinimumMs, Math.min(cursor, scrubberMaximumMs))}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    jumpToProjectTime(value);
+                  }}
+                />
+                <div className="subtitle-review-playback-buttons" role="group" aria-label="字幕預覽定位">
                   <button
                     type="button"
-                    className="reject-cue"
-                    disabled={busy}
-                    onClick={() => void setStatus(selected.id, "REJECTED")}
+                    aria-label="上一筆字幕"
+                    disabled={
+                      (!activeSourcePreview && !introPreview) || !adjacentCue(cues, playbackScope, navigationCueId, -1)
+                    }
+                    onClick={() => {
+                      const target = adjacentCue(cues, playbackScope, navigationCueId, -1);
+                      if (target) jumpToCue(target);
+                    }}
                   >
-                    排除並保存
+                    上一筆字幕
                   </button>
-                  <button type="button" disabled={busy} onClick={() => void setStatus(selected.id, "DRAFT")}>
-                    改回待確認並保存
+                  <button
+                    type="button"
+                    aria-label="下一筆字幕"
+                    disabled={
+                      (!activeSourcePreview && !introPreview) || !adjacentCue(cues, playbackScope, navigationCueId, 1)
+                    }
+                    onClick={() => {
+                      const target = adjacentCue(cues, playbackScope, navigationCueId, 1);
+                      if (target) jumpToCue(target);
+                    }}
+                  >
+                    下一筆字幕
                   </button>
-                  {reviewQueueIds.includes(selected.id) ? (
+                  <button
+                    type="button"
+                    aria-label="倒退兩秒"
+                    disabled={!activeSourcePreview && !introPreview}
+                    onClick={() => jumpToProjectTime(cursor - 2_000)}
+                  >
+                    −2 秒
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="前進兩秒"
+                    disabled={!activeSourcePreview && !introPreview}
+                    onClick={() => jumpToProjectTime(cursor + 2_000)}
+                  >
+                    +2 秒
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="回到目前字幕"
+                    disabled={!activeOverlayCue}
+                    onClick={returnToCurrentCue}
+                  >
+                    回到目前字幕
+                  </button>
+                </div>
+                <div className="subtitle-preview-mode">
+                  {project.introSegments.length > 0 && (
                     <button
                       type="button"
-                      className="confirm-cue"
-                      disabled={busy}
-                      onClick={() => void confirmReviewAndAdvance()}
+                      disabled={buildingPreview || generating}
+                      onClick={() =>
+                        introPreview
+                          ? setUseIntroTimelinePreview((current) => !current)
+                          : void buildIntroPreview().catch((reason: unknown) =>
+                              setPreviewError(reason instanceof Error ? reason.message : String(reason)),
+                            )
+                      }
                     >
-                      ✓ 修改完成、保存並下一筆
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="confirm-cue"
-                      disabled={busy}
-                      onClick={() => void setStatus(selected.id, "CONFIRMED")}
-                    >
-                      ✓ 確認並立即保存
+                      {useIntroTimelinePreview ? "改看單筆來源" : introPreview ? "播放片頭 480P" : "建立片頭 480P"}
                     </button>
                   )}
                 </div>
+              </div>
+              <section className="subtitle-style-panel" aria-label="字幕顯示格式">
+                <label>
+                  高低位置{" "}
+                  <input
+                    aria-label="字幕高低位置"
+                    type="range"
+                    min="10"
+                    max="92"
+                    value={subtitleStyle.verticalPositionPercent}
+                    onChange={(event) =>
+                      setSubtitleStyle((current) => ({
+                        ...current,
+                        verticalPositionPercent: Number(event.target.value),
+                      }))
+                    }
+                  />
+                  <span>{subtitleStyle.verticalPositionPercent}%</span>
+                </label>
+                <label>
+                  文字大小{" "}
+                  <input
+                    aria-label="字幕文字大小"
+                    type="number"
+                    min="16"
+                    max="72"
+                    value={subtitleStyle.fontSizePx}
+                    onChange={(event) =>
+                      setSubtitleStyle((current) => ({ ...current, fontSizePx: Number(event.target.value) }))
+                    }
+                  />
+                  <span>px</span>
+                </label>
+                <label>
+                  顏色{" "}
+                  <input
+                    aria-label="字幕文字顏色"
+                    type="color"
+                    value={subtitleStyle.textColor}
+                    onChange={(event) =>
+                      setSubtitleStyle((current) => ({ ...current, textColor: event.target.value.toUpperCase() }))
+                    }
+                  />
+                </label>
+                <label>
+                  <input
+                    aria-label="字幕陰影"
+                    type="checkbox"
+                    checked={subtitleStyle.shadowEnabled}
+                    onChange={(event) =>
+                      setSubtitleStyle((current) => ({ ...current, shadowEnabled: event.target.checked }))
+                    }
+                  />{" "}
+                  陰影
+                </label>
+                <label>
+                  外框{" "}
+                  <input
+                    aria-label="字幕外框寬度"
+                    type="number"
+                    min="0"
+                    max="8"
+                    value={subtitleStyle.outlineWidthPx}
+                    onChange={(event) =>
+                      setSubtitleStyle((current) => ({ ...current, outlineWidthPx: Number(event.target.value) }))
+                    }
+                  />
+                  <span>px</span>
+                </label>
+                <label>
+                  批次行寬{" "}
+                  <input
+                    aria-label="字幕批次每行最多字數"
+                    type="number"
+                    min={SUBTITLE_WRAP_MANUAL_MIN}
+                    max={SUBTITLE_WRAP_MANUAL_MAX}
+                    placeholder="自動 12/20"
+                    value={subtitleStyle.maxCharactersPerLine ?? ""}
+                    onChange={(event) => {
+                      const raw = event.target.value.trim();
+                      setSubtitleStyle((current) => ({
+                        ...current,
+                        // Commit the raw integer while typing; Main clamps to
+                        // The Main process clamps 6–60 on save, so partial input never snaps around.
+                        maxCharactersPerLine: raw === "" ? undefined : Math.floor(Number(raw) || 0),
+                      }));
+                    }}
+                  />
+                  <span>字{subtitleStyle.maxCharactersPerLine === undefined ? "（中文 12／英文或混合 20）" : ""}</span>
+                </label>
+                <button type="button" className="secondary-button" disabled={busy} onClick={() => void saveStyle()}>
+                  儲存顯示格式
+                </button>
               </section>
-            )}
-          </main>
-        </div>
-        <SharedIntroPreviewHistory
-          refreshKey={previewHistoryRevision}
-          title="片頭頁／字幕頁共用預覽"
-          collapsible
-          defaultCollapsed
-        />
-        {notice && (
-          <div className="subtitle-result-notice" role="status">
-            {notice}
+              {selected && (
+                <section className={`cue-review-editor ${overlappingIds.has(selected.id) ? "has-time-overlap" : ""}`}>
+                  <header>
+                    <div>
+                      <span className={`review-status status-${selected.reviewStatus ?? "CONFIRMED"}`}>
+                        {statusLabel(selected.reviewStatus)}
+                      </span>
+                      <strong>
+                        {cueScope(selected) === "INTRO" ? "片頭" : "正片"} · {cueOrigin(selected)}
+                      </strong>
+                      {selected.speaker && <small>說話者：{selected.speaker}</small>}
+                    </div>
+                    <button
+                      type="button"
+                      className="danger-text"
+                      disabled={busy || generating || buildingPreview}
+                      onClick={() => void deleteSelectedCue()}
+                    >
+                      刪除這筆（Delete）
+                    </button>
+                  </header>
+                  <div className="cue-fields">
+                    <label>
+                      開始（分:秒.毫秒）
+                      <TimecodeInput
+                        label="字幕開始"
+                        valueMs={selected.startMs}
+                        maxMs={selectedTimelineDurationMs}
+                        onChange={(value) => patchCue(selected.id, "startMs", value / 1000)}
+                      />
+                    </label>
+                    <label>
+                      結束（分:秒.毫秒）
+                      <TimecodeInput
+                        label="字幕結束"
+                        valueMs={selected.endMs}
+                        maxMs={selectedTimelineDurationMs}
+                        onChange={(value) => patchCue(selected.id, "endMs", value / 1000)}
+                      />
+                    </label>
+                    <label className="cue-text-field">
+                      字幕文字
+                      <textarea
+                        ref={selectedTextEditorRef}
+                        value={selected.text}
+                        onChange={(event) => patchCue(selected.id, "text", event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  {isEditableVisualDraft(selected) && (
+                    <section className="cue-visual-draft-tools" aria-label="AI 畫面情境草稿工具">
+                      <h3>畫面情境草稿調整</h3>
+                      <label>
+                        字幕語言（也用於下一次畫面分析）
+                        <select
+                          aria-label="修正文案語言"
+                          value={visualDraftLanguage}
+                          onChange={(event) => setVisualDraftLanguage(event.target.value)}
+                        >
+                          <option value="zh-TW">繁體中文</option>
+                          <option value="zh-CN">簡體中文</option>
+                          <option value="en">English</option>
+                          <option value="ja">日本語</option>
+                          <option value="ko">한국어</option>
+                        </select>
+                      </label>
+                      <label>
+                        修正內容／AI 指示（「套用本機」不呼叫 AI；「重新產生」才會呼叫）
+                        <textarea
+                          aria-label="本機修正指示"
+                          value={localCorrectionText}
+                          onChange={(event) => setLocalCorrectionText(event.target.value)}
+                          placeholder="輸入這筆字幕的最終文案"
+                        />
+                      </label>
+                      <div className="cue-review-actions">
+                        <button
+                          type="button"
+                          disabled={busy || !localCorrectionText.trim()}
+                          onClick={() => void applyLocalVisualCorrection()}
+                        >
+                          套用本機修正文案
+                        </button>
+                        <button
+                          type="button"
+                          disabled={
+                            busy || !localCorrectionText.trim() || !window.sourceApp.regenerateSubtitleVisualCue
+                          }
+                          onClick={() => void regenerateSelectedVisualDrafts()}
+                        >
+                          依指示用附近畫面重新產生（最多 10 筆）
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy || !canMergePrevious}
+                          onClick={() => void mergeVisualDraft(previousVisualDraft)}
+                        >
+                          與前一筆畫面草稿合併
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy || !canMergeNext}
+                          onClick={() => void mergeVisualDraft(nextVisualDraft)}
+                        >
+                          與下一筆畫面草稿合併
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy || selected.text.trim().length < 2 || selected.endMs - selected.startMs < 2}
+                          onClick={() => void splitVisualDraft()}
+                        >
+                          在時間中點拆分
+                        </button>
+                      </div>
+                    </section>
+                  )}
+                  {(selected.visualSummary ||
+                    selected.eventSummary ||
+                    selected.peopleSummary?.length ||
+                    selected.locationSummary?.length ||
+                    selected.animalSpecies?.length) && (
+                    <div className="ai-evidence">
+                      <h3>AI 判斷依據（請人工核對）</h3>
+                      <dl>
+                        {selected.visualSummary && (
+                          <>
+                            <dt>畫面</dt>
+                            <dd>{selected.visualSummary}</dd>
+                          </>
+                        )}
+                        {selected.eventSummary && (
+                          <>
+                            <dt>事件</dt>
+                            <dd>{selected.eventSummary}</dd>
+                          </>
+                        )}
+                        {selected.peopleSummary?.length ? (
+                          <>
+                            <dt>人物</dt>
+                            <dd>{selected.peopleSummary.join("、")}</dd>
+                          </>
+                        ) : null}
+                        {selected.locationSummary?.length ? (
+                          <>
+                            <dt>地點</dt>
+                            <dd>{selected.locationSummary.join("、")}</dd>
+                          </>
+                        ) : null}
+                        {selected.animalSpecies?.length ? (
+                          <>
+                            <dt>物種</dt>
+                            <dd>{selected.animalSpecies.join("、")}</dd>
+                          </>
+                        ) : null}
+                        {selected.speciesExplanation ? (
+                          <>
+                            <dt>物種說明</dt>
+                            <dd>{selected.speciesExplanation}</dd>
+                          </>
+                        ) : null}
+                      </dl>
+                      <div className="ai-score-row">
+                        <span>
+                          主題相關 <strong>{selected.topicRelevanceScore ?? "–"}</strong>
+                        </span>
+                        <span>
+                          聲畫符合 <strong>{selected.transcriptVisualMatchScore ?? "–"}</strong>
+                        </span>
+                        <span>
+                          AI 信心 <strong>{selected.aiConfidence ?? "–"}</strong>
+                        </span>
+                      </div>
+                      {selected.aiWarnings?.length ? (
+                        <ul>
+                          {selected.aiWarnings.map((warning) => (
+                            <li key={warning}>{warning}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  )}
+                  <div className="cue-review-actions">
+                    <button
+                      type="button"
+                      className="reject-cue"
+                      disabled={busy}
+                      onClick={() => void setStatus(selected.id, "REJECTED")}
+                    >
+                      排除並保存
+                    </button>
+                    <button type="button" disabled={busy} onClick={() => void setStatus(selected.id, "DRAFT")}>
+                      改回待確認並保存
+                    </button>
+                    {reviewQueueIds.includes(selected.id) ? (
+                      <button
+                        type="button"
+                        className="confirm-cue"
+                        disabled={busy}
+                        onClick={() => void confirmReviewAndAdvance()}
+                      >
+                        ✓ 修改完成、保存並下一筆
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="confirm-cue"
+                        disabled={busy}
+                        onClick={() => void setStatus(selected.id, "CONFIRMED")}
+                      >
+                        ✓ 確認並立即保存
+                      </button>
+                    )}
+                  </div>
+                </section>
+              )}
+            </main>
           </div>
-        )}
+          <SharedIntroPreviewHistory
+            refreshKey={previewHistoryRevision}
+            title="片頭頁／字幕頁共用預覽"
+            collapsible
+            defaultCollapsed
+          />
+          {notice && (
+            <div className="subtitle-result-notice" role="status">
+              {notice}
+            </div>
+          )}
         </div>
         <footer className="settings-footer">
           <p>

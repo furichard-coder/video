@@ -127,15 +127,32 @@ export function PlaylistModal({ assets, clips, project, onClose, onAssetUpdated 
     }
     const sameContinuous =
       previousBgmTrackRef.current === currentBgmTrack.id && currentAudioItem.continuousWithPrevious;
-    player.volume = Math.max(0, Math.min(1, (project.mediaInsertions.find((item) => item.id === currentAudioItem.instanceId)?.insertionAudio?.bgmVolumePercent ?? 28) / 100));
+    player.volume = Math.max(
+      0,
+      Math.min(
+        1,
+        (project.mediaInsertions.find((item) => item.id === currentAudioItem.instanceId)?.insertionAudio
+          ?.bgmVolumePercent ?? 28) / 100,
+      ),
+    );
     if (!sameContinuous) {
       const sourcePosition = currentAudioItem.bgmSourcePositionMs ?? currentBgmTrack.sourceInMs;
-      try { player.currentTime = sourcePosition / 1000; } catch { /* metadata not ready yet */ }
+      try {
+        player.currentTime = sourcePosition / 1000;
+      } catch {
+        /* metadata not ready yet */
+      }
     }
     previousBgmTrackRef.current = currentBgmTrack.id;
     if (playing) void player.play().catch(() => undefined);
     else player.pause();
-  }, [currentAudioItem?.instanceId, currentAudioItem?.bgmEnabled, currentAudioItem?.continuousWithPrevious, currentBgmTrack?.id, playing]);
+  }, [
+    currentAudioItem?.instanceId,
+    currentAudioItem?.bgmEnabled,
+    currentAudioItem?.continuousWithPrevious,
+    currentBgmTrack?.id,
+    playing,
+  ]);
 
   useEffect(() => {
     const player = videoRef.current;

@@ -68,7 +68,15 @@ const responseSchema = {
     confidence: { type: "number", minimum: 0, maximum: 1 },
     timingConfidence: { type: "number", minimum: 0, maximum: 1 },
   },
-  required: ["decision", "suggestedText", "suggestedStartMs", "suggestedEndMs", "reason", "confidence", "timingConfidence"],
+  required: [
+    "decision",
+    "suggestedText",
+    "suggestedStartMs",
+    "suggestedEndMs",
+    "reason",
+    "confidence",
+    "timingConfidence",
+  ],
 } as const;
 
 function finiteNumber(value: unknown): number | undefined {
@@ -77,11 +85,23 @@ function finiteNumber(value: unknown): number | undefined {
 
 export function parseSubtitleAiCheckResult(text: string, videoDurationMs: number): SubtitleAiCheckProviderResult {
   let value: unknown;
-  try { value = JSON.parse(text); }
-  catch { throw new SubtitleAiCheckError("JSON_PARSE", "AI 字幕檢查回傳的 JSON 無法解析。"); }
-  if (!value || typeof value !== "object") throw new SubtitleAiCheckError("BAD_RESPONSE", "AI 字幕檢查回傳格式不完整。");
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new SubtitleAiCheckError("JSON_PARSE", "AI 字幕檢查回傳的 JSON 無法解析。");
+  }
+  if (!value || typeof value !== "object")
+    throw new SubtitleAiCheckError("BAD_RESPONSE", "AI 字幕檢查回傳格式不完整。");
   const item = value as Record<string, unknown>;
-  const allowedKeys = new Set(["decision", "suggestedText", "suggestedStartMs", "suggestedEndMs", "reason", "confidence", "timingConfidence"]);
+  const allowedKeys = new Set([
+    "decision",
+    "suggestedText",
+    "suggestedStartMs",
+    "suggestedEndMs",
+    "reason",
+    "confidence",
+    "timingConfidence",
+  ]);
   if (Object.keys(item).some((key) => !allowedKeys.has(key)) || [...allowedKeys].some((key) => !(key in item)))
     throw new SubtitleAiCheckError("BAD_RESPONSE", "AI 字幕檢查回傳包含未知欄位或缺少必要欄位。");
   if (item.decision !== "KEEP" && item.decision !== "EDIT")
@@ -89,17 +109,34 @@ export function parseSubtitleAiCheckResult(text: string, videoDurationMs: number
   const reason = typeof item.reason === "string" ? item.reason.trim() : "";
   const confidence = finiteNumber(item.confidence);
   const timingConfidence = finiteNumber(item.timingConfidence);
-  if (!reason || confidence === undefined || timingConfidence === undefined || confidence < 0 || confidence > 1 || timingConfidence < 0 || timingConfidence > 1)
+  if (
+    !reason ||
+    confidence === undefined ||
+    timingConfidence === undefined ||
+    confidence < 0 ||
+    confidence > 1 ||
+    timingConfidence < 0 ||
+    timingConfidence > 1
+  )
     throw new SubtitleAiCheckError("BAD_RESPONSE", "AI 字幕檢查缺少有效原因或信心值。");
-  if (typeof item.suggestedText !== "string" || !Number.isInteger(item.suggestedStartMs) || !Number.isInteger(item.suggestedEndMs))
+  if (
+    typeof item.suggestedText !== "string" ||
+    !Number.isInteger(item.suggestedStartMs) ||
+    !Number.isInteger(item.suggestedEndMs)
+  )
     throw new SubtitleAiCheckError("BAD_RESPONSE", "AI 字幕檢查文字與時間欄位型別無效。");
-  if (item.decision === "KEEP")
-    return { decision: "KEEP", reason, confidence, timingConfidence };
+  if (item.decision === "KEEP") return { decision: "KEEP", reason, confidence, timingConfidence };
   const suggestedText = typeof item.suggestedText === "string" ? item.suggestedText.replace(/\s+/g, " ").trim() : "";
   const suggestedStartMs = finiteNumber(item.suggestedStartMs);
   const suggestedEndMs = finiteNumber(item.suggestedEndMs);
-  if (!suggestedText || suggestedText.length > 120 || suggestedStartMs === undefined || suggestedEndMs === undefined
-    || !Number.isInteger(suggestedStartMs) || !Number.isInteger(suggestedEndMs))
+  if (
+    !suggestedText ||
+    suggestedText.length > 120 ||
+    suggestedStartMs === undefined ||
+    suggestedEndMs === undefined ||
+    !Number.isInteger(suggestedStartMs) ||
+    !Number.isInteger(suggestedEndMs)
+  )
     throw new SubtitleAiCheckError("BAD_RESPONSE", "AI EDIT 建議缺少有效文字或時間。");
   if (suggestedStartMs < 0 || suggestedEndMs <= suggestedStartMs || suggestedEndMs > videoDurationMs)
     throw new SubtitleAiCheckError("SUBTITLE_TIMELINE", "AI EDIT 建議超出影片時間或起訖無效。");
@@ -142,7 +179,10 @@ function prompt(input: SubtitleAiCheckProviderInput): string {
 
 function outputText(value: unknown): string {
   if (!value || typeof value !== "object") return "";
-  const response = value as { output_text?: unknown; output?: Array<{ content?: Array<{ type?: string; text?: unknown }> }> };
+  const response = value as {
+    output_text?: unknown;
+    output?: Array<{ content?: Array<{ type?: string; text?: unknown }> }>;
+  };
   if (typeof response.output_text === "string") return response.output_text;
   for (const output of response.output ?? [])
     for (const content of output.content ?? [])
@@ -152,7 +192,11 @@ function outputText(value: unknown): string {
 
 function assertOpenAiCompleted(value: unknown): void {
   if (!value || typeof value !== "object") throw new SubtitleAiCheckError("BAD_RESPONSE", "OpenAI 回傳格式不完整。");
-  const response = value as { status?: unknown; incomplete_details?: unknown; output?: Array<{ content?: Array<{ type?: string }> }> };
+  const response = value as {
+    status?: unknown;
+    incomplete_details?: unknown;
+    output?: Array<{ content?: Array<{ type?: string }> }>;
+  };
   if (response.status === "incomplete" || response.incomplete_details)
     throw new SubtitleAiCheckError("BAD_RESPONSE", "OpenAI 字幕檢查回傳不完整；不會建立建議。");
   if (response.output?.some((item) => item.content?.some((content) => content.type === "refusal")))
@@ -161,14 +205,19 @@ function assertOpenAiCompleted(value: unknown): void {
 
 export function classifySubtitleAiCheckError(error: unknown): SubtitleAiCheckError {
   if (error instanceof SubtitleAiCheckError) return error;
-  if (error instanceof DOMException && error.name === "AbortError") return new SubtitleAiCheckError("PROVIDER", "AI 字幕檢查已停止。", true);
-  if (error instanceof DOMException && error.name === "TimeoutError") return new SubtitleAiCheckError("TIMEOUT", "AI 字幕檢查逾時。", true);
+  if (error instanceof DOMException && error.name === "AbortError")
+    return new SubtitleAiCheckError("PROVIDER", "AI 字幕檢查已停止。", true);
+  if (error instanceof DOMException && error.name === "TimeoutError")
+    return new SubtitleAiCheckError("TIMEOUT", "AI 字幕檢查逾時。", true);
   const message = error instanceof Error ? error.message : String(error);
   if (/timeout|timed out/i.test(message)) return new SubtitleAiCheckError("TIMEOUT", "AI 字幕檢查逾時。", true);
-  if (/api\s*key|credential|unauthorized|forbidden|驗證|未設定.*key/i.test(message)) return new SubtitleAiCheckError("AUTH", "AI 字幕檢查驗證失敗，請檢查 Provider 帳號與 API Key。");
-  if (/model|模型/i.test(message)) return new SubtitleAiCheckError("MODEL", "AI 字幕檢查模型不可用，請檢查目前模型設定。");
+  if (/api\s*key|credential|unauthorized|forbidden|驗證|未設定.*key/i.test(message))
+    return new SubtitleAiCheckError("AUTH", "AI 字幕檢查驗證失敗，請檢查 Provider 帳號與 API Key。");
+  if (/model|模型/i.test(message))
+    return new SubtitleAiCheckError("MODEL", "AI 字幕檢查模型不可用，請檢查目前模型設定。");
   if (/明確啟用.*gemini/i.test(message)) return new SubtitleAiCheckError("PROVIDER", "Gemini 尚未明確啟用。");
-  if (/ENOENT|not found|找不到.*影片/i.test(message)) return new SubtitleAiCheckError("VIDEO_NOT_FOUND", "找不到字幕檢查影片。");
+  if (/ENOENT|not found|找不到.*影片/i.test(message))
+    return new SubtitleAiCheckError("VIDEO_NOT_FOUND", "找不到字幕檢查影片。");
   return new SubtitleAiCheckError("UNKNOWN", message || "AI 字幕檢查發生未知錯誤。");
 }
 
@@ -177,23 +226,40 @@ async function responseJson(response: Response, provider: "OpenAI" | "Gemini"): 
     let code = "";
     let detail = "";
     try {
-      const body = await response.clone().json() as { error?: { code?: unknown; status?: unknown; message?: unknown } };
+      const body = (await response.clone().json()) as {
+        error?: { code?: unknown; status?: unknown; message?: unknown };
+      };
       code = String(body.error?.code ?? body.error?.status ?? "").slice(0, 80);
       detail = String(body.error?.message ?? "").slice(0, 240);
-    } catch { /* safe category below */ }
+    } catch {
+      /* safe category below */
+    }
     const joined = `${code} ${detail}`;
-    if (response.status === 401 || response.status === 403) throw new SubtitleAiCheckError("AUTH", `${provider} 驗證失敗。`);
-    if (response.status === 404 || /model_not_found|model.*unavailable/i.test(joined)) throw new SubtitleAiCheckError("MODEL", `${provider} 模型不可用。`);
+    if (response.status === 401 || response.status === 403)
+      throw new SubtitleAiCheckError("AUTH", `${provider} 驗證失敗。`);
+    if (response.status === 404 || /model_not_found|model.*unavailable/i.test(joined))
+      throw new SubtitleAiCheckError("MODEL", `${provider} 模型不可用。`);
     if (/image|vision/i.test(joined)) throw new SubtitleAiCheckError("VISION", `${provider} 模型未接受畫面輸入。`);
     if (/model/i.test(joined)) throw new SubtitleAiCheckError("MODEL", `${provider} 模型不可用。`);
     if (response.status === 429) {
       const exhausted = /credit_balance_exhausted|insufficient_quota|billing/i.test(joined);
-      throw new SubtitleAiCheckError("RATE_LIMIT", exhausted ? `${provider} 額度不足；這不是可自動重試的短暫限速。` : `${provider} 請求受到限速。`, !exhausted);
+      throw new SubtitleAiCheckError(
+        "RATE_LIMIT",
+        exhausted ? `${provider} 額度不足；這不是可自動重試的短暫限速。` : `${provider} 請求受到限速。`,
+        !exhausted,
+      );
     }
-    throw new SubtitleAiCheckError("PROVIDER", `${provider} 字幕檢查失敗（HTTP ${response.status}）。`, response.status >= 500);
+    throw new SubtitleAiCheckError(
+      "PROVIDER",
+      `${provider} 字幕檢查失敗（HTTP ${response.status}）。`,
+      response.status >= 500,
+    );
   }
-  try { return await response.json(); }
-  catch { throw new SubtitleAiCheckError("JSON_PARSE", `${provider} 回傳不是有效 JSON。`); }
+  try {
+    return await response.json();
+  } catch {
+    throw new SubtitleAiCheckError("JSON_PARSE", `${provider} 回傳不是有效 JSON。`);
+  }
 }
 
 function requestSignal(signal?: AbortSignal): AbortSignal {
@@ -203,7 +269,11 @@ function requestSignal(signal?: AbortSignal): AbortSignal {
 
 export class OpenAiSubtitleAiCheckProvider implements SubtitleAiCheckProvider {
   readonly kind = "OPENAI" as const;
-  constructor(readonly modelId: string, private readonly apiKey: string, private readonly fetcher: typeof fetch = fetch) {}
+  constructor(
+    readonly modelId: string,
+    private readonly apiKey: string,
+    private readonly fetcher: typeof fetch = fetch,
+  ) {}
   async checkCue(input: SubtitleAiCheckProviderInput, signal?: AbortSignal): Promise<SubtitleAiCheckProviderResult> {
     try {
       const content: Array<Record<string, unknown>> = [{ type: "input_text", text: prompt(input) }];
@@ -214,7 +284,12 @@ export class OpenAiSubtitleAiCheckProvider implements SubtitleAiCheckProvider {
       const response = await this.fetcher("https://api.openai.com/v1/responses", {
         method: "POST",
         headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model: this.modelId, store: false, input: [{ role: "user", content }], text: { format: { type: "json_schema", name: "subtitle_cue_check", strict: true, schema: responseSchema } } }),
+        body: JSON.stringify({
+          model: this.modelId,
+          store: false,
+          input: [{ role: "user", content }],
+          text: { format: { type: "json_schema", name: "subtitle_cue_check", strict: true, schema: responseSchema } },
+        }),
         signal: requestSignal(signal),
       });
       const payload = await responseJson(response, "OpenAI");
@@ -222,13 +297,19 @@ export class OpenAiSubtitleAiCheckProvider implements SubtitleAiCheckProvider {
       const text = outputText(payload);
       if (!text) throw new SubtitleAiCheckError("BAD_RESPONSE", "OpenAI 未回傳可讀的字幕檢查結果。");
       return parseSubtitleAiCheckResult(text, input.videoDurationMs);
-    } catch (error) { throw classifySubtitleAiCheckError(error); }
+    } catch (error) {
+      throw classifySubtitleAiCheckError(error);
+    }
   }
 }
 
 export class GeminiSubtitleAiCheckProvider implements SubtitleAiCheckProvider {
   readonly kind = "GEMINI" as const;
-  constructor(readonly modelId: string, private readonly apiKey: string, private readonly fetcher: typeof fetch = fetch) {}
+  constructor(
+    readonly modelId: string,
+    private readonly apiKey: string,
+    private readonly fetcher: typeof fetch = fetch,
+  ) {}
   async checkCue(input: SubtitleAiCheckProviderInput, signal?: AbortSignal): Promise<SubtitleAiCheckProviderResult> {
     try {
       const parts: Array<Record<string, unknown>> = [{ text: prompt(input) }];
@@ -236,24 +317,52 @@ export class GeminiSubtitleAiCheckProvider implements SubtitleAiCheckProvider {
         const frame = image(evidence.imageDataUrl);
         parts.push({ inlineData: { mimeType: frame.mimeType, data: frame.data } });
       }
-      const response = await this.fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.modelId)}:generateContent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": this.apiKey },
-        body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: 0.1, responseMimeType: "application/json", responseSchema } }),
-        signal: requestSignal(signal),
-      });
-      const payload = await responseJson(response, "Gemini") as { candidates?: Array<{ finishReason?: unknown; content?: { parts?: Array<{ text?: unknown }> } }> };
+      const response = await this.fetcher(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.modelId)}:generateContent`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": this.apiKey },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts }],
+            generationConfig: { temperature: 0.1, responseMimeType: "application/json", responseSchema },
+          }),
+          signal: requestSignal(signal),
+        },
+      );
+      const payload = (await responseJson(response, "Gemini")) as {
+        candidates?: Array<{ finishReason?: unknown; content?: { parts?: Array<{ text?: unknown }> } }>;
+      };
       const finishReason = payload.candidates?.[0]?.finishReason;
-      if (finishReason && finishReason !== "STOP") throw new SubtitleAiCheckError("BAD_RESPONSE", `Gemini 字幕檢查未正常完成（${String(finishReason).slice(0, 40)}）。`);
-      const text = payload.candidates?.[0]?.content?.parts?.map((part) => typeof part.text === "string" ? part.text : "").join("").trim() ?? "";
+      if (finishReason && finishReason !== "STOP")
+        throw new SubtitleAiCheckError(
+          "BAD_RESPONSE",
+          `Gemini 字幕檢查未正常完成（${String(finishReason).slice(0, 40)}）。`,
+        );
+      const text =
+        payload.candidates?.[0]?.content?.parts
+          ?.map((part) => (typeof part.text === "string" ? part.text : ""))
+          .join("")
+          .trim() ?? "";
       if (!text) throw new SubtitleAiCheckError("BAD_RESPONSE", "Gemini 未回傳可讀的字幕檢查結果。");
       return parseSubtitleAiCheckResult(text, input.videoDurationMs);
-    } catch (error) { throw classifySubtitleAiCheckError(error); }
+    } catch (error) {
+      throw classifySubtitleAiCheckError(error);
+    }
   }
 }
 
 export function subtitleCueRevision(cue: SubtitleCue): string {
-  return createHash("sha256").update(JSON.stringify({ id: cue.id, startMs: cue.startMs, endMs: cue.endMs, text: cue.text, userEdited: cue.userEdited === true })).digest("hex");
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        id: cue.id,
+        startMs: cue.startMs,
+        endMs: cue.endMs,
+        text: cue.text,
+        userEdited: cue.userEdited === true,
+      }),
+    )
+    .digest("hex");
 }
 
 export function subtitleAiCheckContextRevision(
@@ -263,13 +372,17 @@ export function subtitleAiCheckContextRevision(
   title: string,
   description: string,
 ): string {
-  return createHash("sha256").update(JSON.stringify({
-    cue: subtitleCueRevision(cue),
-    previous: previousCue ? subtitleCueRevision(previousCue) : null,
-    next: nextCue ? subtitleCueRevision(nextCue) : null,
-    title,
-    description,
-  })).digest("hex");
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        cue: subtitleCueRevision(cue),
+        previous: previousCue ? subtitleCueRevision(previousCue) : null,
+        next: nextCue ? subtitleCueRevision(nextCue) : null,
+        title,
+        description,
+      }),
+    )
+    .digest("hex");
 }
 
 export function buildSubtitleAiCheckProposal(
@@ -281,9 +394,17 @@ export function buildSubtitleAiCheckProposal(
   baseContextRevision = subtitleCueRevision(cue),
 ): SubtitleAiCheckProposal {
   return {
-    id: randomUUID(), cueId: cue.id, cueIndex, ...result,
-    provider: provider.kind, modelId: provider.modelId, baseCueRevision: subtitleCueRevision(cue), baseContextRevision,
-    evidenceTimesMs, status: "PENDING", createdAt: new Date().toISOString(),
+    id: randomUUID(),
+    cueId: cue.id,
+    cueIndex,
+    ...result,
+    provider: provider.kind,
+    modelId: provider.modelId,
+    baseCueRevision: subtitleCueRevision(cue),
+    baseContextRevision,
+    evidenceTimesMs,
+    status: "PENDING",
+    createdAt: new Date().toISOString(),
   };
 }
 
@@ -297,16 +418,31 @@ export function resolveSubtitleAiCheckAction(
   if (index < 0) return { cues: [...cues], proposal: { ...proposal, status: "CONFLICT" }, conflict: true };
   const current = cues[index];
   if (action.action === "KEEP") return { cues: [...cues], proposal: { ...proposal, status: "KEPT" }, conflict: false };
-  if (action.action === "SKIP") return { cues: [...cues], proposal: { ...proposal, status: "SKIPPED" }, conflict: false };
+  if (action.action === "SKIP")
+    return { cues: [...cues], proposal: { ...proposal, status: "SKIPPED" }, conflict: false };
   if (action.action === "APPLY" && subtitleCueRevision(current) !== proposal.baseCueRevision)
     return { cues: [...cues], proposal: { ...proposal, status: "CONFLICT" }, conflict: true };
   const text = action.action === "EDIT" ? action.editedText?.trim() : proposal.suggestedText;
   const startMs = action.action === "EDIT" ? action.editedStartMs : proposal.suggestedStartMs;
   const endMs = action.action === "EDIT" ? action.editedEndMs : proposal.suggestedEndMs;
-  if (!text || !Number.isInteger(startMs) || !Number.isInteger(endMs) || startMs! < 0 || endMs! <= startMs! || endMs! > videoDurationMs)
+  if (
+    !text ||
+    !Number.isInteger(startMs) ||
+    !Number.isInteger(endMs) ||
+    startMs! < 0 ||
+    endMs! <= startMs! ||
+    endMs! > videoDurationMs
+  )
     throw new SubtitleAiCheckError("SUBTITLE_TIMELINE", "套用字幕建議前需要有效文字與起訖時間。");
   const updated = [...cues];
-  updated[index] = { ...current, text, startMs: Math.round(startMs!), endMs: Math.round(endMs!), userEdited: true, reviewStatus: "DRAFT" };
+  updated[index] = {
+    ...current,
+    text,
+    startMs: Math.round(startMs!),
+    endMs: Math.round(endMs!),
+    userEdited: true,
+    reviewStatus: "DRAFT",
+  };
   return { cues: updated, proposal: { ...proposal, status: "APPLIED" }, conflict: false };
 }
 
@@ -317,7 +453,11 @@ export function createSubtitleAiCheckSnapshot(
   total: number,
 ): SubtitleAiCheckJobSnapshot {
   return {
-    schemaVersion: 1, workspaceId, videoFingerprint, options, proposals: [],
+    schemaVersion: 1,
+    workspaceId,
+    videoFingerprint,
+    options,
+    proposals: [],
     progress: { status: "IDLE", processed: 0, total, nextCueIndex: 0, requests: 0, cacheHits: 0, elapsedMs: 0 },
     updatedAt: new Date().toISOString(),
   };
@@ -348,12 +488,17 @@ export class SubtitleAiCheckJobStore {
       const value = JSON.parse(await readFile(this.filePath, "utf8")) as SubtitleAiCheckJobSnapshot;
       if (value.schemaVersion !== 1 || !value.workspaceId || !Array.isArray(value.proposals)) return undefined;
       return value;
-    } catch { return undefined; }
+    } catch {
+      return undefined;
+    }
   }
   async save(snapshot: SubtitleAiCheckJobSnapshot): Promise<void> {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     const partial = `${this.filePath}.${process.pid}.${randomUUID()}.partial`;
-    await writeFile(partial, JSON.stringify({ ...snapshot, updatedAt: new Date().toISOString() }, null, 2), { encoding: "utf8", flag: "wx" });
+    await writeFile(partial, JSON.stringify({ ...snapshot, updatedAt: new Date().toISOString() }, null, 2), {
+      encoding: "utf8",
+      flag: "wx",
+    });
     await rename(partial, this.filePath);
   }
 }

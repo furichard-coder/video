@@ -317,10 +317,22 @@ export function ShortsStudio({ project, onClose }: Props) {
                         {selected && <span>目前選擇</span>}
                       </header>
                       <dl>
-                        <div><dt>SSD 工作空間</dt><dd>約 {formatBytes(mode.estimatedTemporaryBytes)}</dd></div>
-                        <div><dt>RAM 峰值</dt><dd>約 {formatBytes(mode.estimatedPeakRamBytes)}</dd></div>
-                        <div><dt>處理時間</dt><dd>約 {formatDuration(mode.estimatedRenderTimeMs)}</dd></div>
-                        <div><dt>處理差異</dt><dd>{key === "lowMemory" ? "較省 RAM／較慢" : "較快／較吃 RAM"}</dd></div>
+                        <div>
+                          <dt>SSD 工作空間</dt>
+                          <dd>約 {formatBytes(mode.estimatedTemporaryBytes)}</dd>
+                        </div>
+                        <div>
+                          <dt>RAM 峰值</dt>
+                          <dd>約 {formatBytes(mode.estimatedPeakRamBytes)}</dd>
+                        </div>
+                        <div>
+                          <dt>處理時間</dt>
+                          <dd>約 {formatDuration(mode.estimatedRenderTimeMs)}</dd>
+                        </div>
+                        <div>
+                          <dt>處理差異</dt>
+                          <dd>{key === "lowMemory" ? "較省 RAM／較慢" : "較快／較吃 RAM"}</dd>
+                        </div>
                       </dl>
                     </article>
                   );

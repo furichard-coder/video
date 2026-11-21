@@ -4,7 +4,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AudioProcessingSettings } from "../../src/renderer/components/AudioProcessingSettings";
-import { DEFAULT_AUDIO_PROCESSING_OPTIONS, type AudioProcessingOptions, type SourceAsset } from "../../src/shared/domain";
+import {
+  DEFAULT_AUDIO_PROCESSING_OPTIONS,
+  type AudioProcessingOptions,
+  type SourceAsset,
+} from "../../src/shared/domain";
 
 const asset = {
   id: "a".repeat(64),
@@ -14,9 +18,17 @@ const asset = {
   mediaInfo: { audioCodec: "aac", durationMs: 60_000 },
 } as unknown as SourceAsset;
 
-function Harness({ api, initial = DEFAULT_AUDIO_PROCESSING_OPTIONS }: { api: Record<string, unknown>; initial?: AudioProcessingOptions }) {
+function Harness({
+  api,
+  initial = DEFAULT_AUDIO_PROCESSING_OPTIONS,
+}: {
+  api: Record<string, unknown>;
+  initial?: AudioProcessingOptions;
+}) {
   const [value, setValue] = useState(initial);
-  return <AudioProcessingSettings value={value} assets={[asset]} timelineRevision={17} stepLabel="A" onChange={setValue} />;
+  return (
+    <AudioProcessingSettings value={value} assets={[asset]} timelineRevision={17} stepLabel="A" onChange={setValue} />
+  );
 }
 
 function result(mode: AudioProcessingOptions["mode"], startMs = 5_000) {
@@ -54,8 +66,20 @@ describe("AudioProcessingSettings live preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "依目前播放位置重建 20 秒试听" }));
     await waitFor(() => expect(api.createAudioPreview).toHaveBeenCalledTimes(4));
     expect(api.ensurePreview).toHaveBeenCalledOnce();
-    expect(api.createAudioPreview).toHaveBeenNthCalledWith(3, expect.objectContaining({ assetId: asset.id, startMs: 7_400, durationMs: 20_000, timelineRevision: 17, options: expect.objectContaining({ mode: "ORIGINAL_STEREO" }) }));
-    expect(api.createAudioPreview).toHaveBeenNthCalledWith(4, expect.objectContaining({ startMs: 7_400, durationMs: 20_000, timelineRevision: 17 }));
+    expect(api.createAudioPreview).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        assetId: asset.id,
+        startMs: 7_400,
+        durationMs: 20_000,
+        timelineRevision: 17,
+        options: expect.objectContaining({ mode: "ORIGINAL_STEREO" }),
+      }),
+    );
+    expect(api.createAudioPreview).toHaveBeenNthCalledWith(
+      4,
+      expect.objectContaining({ startMs: 7_400, durationMs: 20_000, timelineRevision: 17 }),
+    );
   });
 
   it("keeps the proxy playhead when switching A/B and never invokes a render API", async () => {
@@ -98,6 +122,10 @@ describe("AudioProcessingSettings live preview", () => {
     await new Promise((resolve) => setTimeout(resolve, 400));
     await waitFor(() => expect(api.createAudioPreview).toHaveBeenCalledTimes(3));
     expect(api.cancelAudioPreview).toHaveBeenCalled();
-    expect(api.createAudioPreview).toHaveBeenLastCalledWith(expect.objectContaining({ options: expect.objectContaining({ stereoWidthPercent: 130, mode: "ENHANCED_STEREO" }) }));
+    expect(api.createAudioPreview).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({ stereoWidthPercent: 130, mode: "ENHANCED_STEREO" }),
+      }),
+    );
   });
 });

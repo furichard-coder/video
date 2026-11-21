@@ -147,13 +147,19 @@ export interface VideoBaseMasterRecord {
   createdAt: string;
 }
 
-type LegacyRenderCheckpointRecord = Omit<RenderCheckpointRecord, "schemaVersion" | "timing"> & { schemaVersion: 1 | 2 | 3 | 4 };
+type LegacyRenderCheckpointRecord = Omit<RenderCheckpointRecord, "schemaVersion" | "timing"> & {
+  schemaVersion: 1 | 2 | 3 | 4;
+};
 
 function looksLikeRecord(value: unknown): value is RenderCheckpointRecord | LegacyRenderCheckpointRecord {
   if (!value || typeof value !== "object") return false;
   const item = value as Omit<Partial<RenderCheckpointRecord>, "schemaVersion"> & { schemaVersion?: 1 | 2 | 3 | 4 | 5 };
   return (
-    (item.schemaVersion === 1 || item.schemaVersion === 2 || item.schemaVersion === 3 || item.schemaVersion === 4 || item.schemaVersion === 5) &&
+    (item.schemaVersion === 1 ||
+      item.schemaVersion === 2 ||
+      item.schemaVersion === 3 ||
+      item.schemaVersion === 4 ||
+      item.schemaVersion === 5) &&
     typeof item.checkpointId === "string" &&
     typeof item.signature === "string" &&
     typeof item.projectId === "string" &&
@@ -252,11 +258,13 @@ export class RenderCheckpointStore {
       !normalizedName.endsWith(".resume") ||
       !normalizedName.includes(record.checkpointId.toLowerCase()) ||
       canonical === path.parse(canonical).root
-    ) throw new Error("Checkpoint work root 命名或路徑不安全，已拒絕清理。");
-    const allowedParents = new Set([
-      path.dirname(canonical),
-      ...(record.tempLocations ?? []).map((location) => path.resolve(location.path)),
-    ].map((item) => item.toLowerCase()));
+    )
+      throw new Error("Checkpoint work root 命名或路徑不安全，已拒絕清理。");
+    const allowedParents = new Set(
+      [path.dirname(canonical), ...(record.tempLocations ?? []).map((location) => path.resolve(location.path))].map(
+        (item) => item.toLowerCase(),
+      ),
+    );
     const recoverySource = record.recoveryMigration?.sourceWorkRoot
       ? path.resolve(record.recoveryMigration.sourceWorkRoot).toLowerCase()
       : undefined;
@@ -271,7 +279,8 @@ export class RenderCheckpointStore {
         path.basename(resolved).toLowerCase() !== normalizedName ||
         !allowedParents.has(path.dirname(resolved).toLowerCase()) ||
         (recoverySource && (lowered === recoverySource || lowered.startsWith(recoverySource + path.sep.toLowerCase())))
-      ) throw new Error("Checkpoint owned work root 超出核准 TEMP 或指向外部復原資料，已拒絕清理。");
+      )
+        throw new Error("Checkpoint owned work root 超出核准 TEMP 或指向外部復原資料，已拒絕清理。");
       return resolved;
     });
   }
@@ -292,7 +301,9 @@ export class RenderCheckpointStore {
     return path.join(this.root, `${safeProjectId(projectId)}.v080-recovery-completed.json`);
   }
 
-  private recordPathFor(record: Pick<RenderCheckpointRecord, "projectId" | "checkpointProducer" | "recoveryMigration">): string {
+  private recordPathFor(
+    record: Pick<RenderCheckpointRecord, "projectId" | "checkpointProducer" | "recoveryMigration">,
+  ): string {
     if (record.checkpointProducer === "v0.82") return this.v082RecordPath(record.projectId);
     return record.checkpointProducer === "v0.80" || Boolean(record.recoveryMigration)
       ? this.v080RecordPath(record.projectId)
@@ -307,25 +318,45 @@ export class RenderCheckpointStore {
     return path.join(this.root, `${safeProjectId(projectId)}.artifact-relocations.json`);
   }
 
-  private async loadArtifactRelocations(projectId: string): Promise<Record<string, { path: string; sizeBytes: number }>> {
+  private async loadArtifactRelocations(
+    projectId: string,
+  ): Promise<Record<string, { path: string; sizeBytes: number }>> {
     const safeId = safeProjectId(projectId);
     const legacy = this.relocationRegistryPath(projectId);
     const entries = await readdir(this.root, { withFileTypes: true }).catch(() => []);
     const versioned = entries
-      .filter((entry) => entry.isFile() && entry.name.startsWith(`${safeId}.artifact-relocations.`) && entry.name.endsWith(".json"))
+      .filter(
+        (entry) =>
+          entry.isFile() && entry.name.startsWith(`${safeId}.artifact-relocations.`) && entry.name.endsWith(".json"),
+      )
       .map((entry) => path.join(this.root, entry.name));
     const candidates = [legacy, ...versioned];
-    const ordered = (await Promise.all(candidates.map(async (candidate) => ({
-      candidate,
-      mtimeMs: (await stat(candidate).catch(() => undefined))?.mtimeMs ?? -1,
-    })))).filter((item) => item.mtimeMs >= 0).sort((left, right) => left.mtimeMs - right.mtimeMs);
+    const ordered = (
+      await Promise.all(
+        candidates.map(async (candidate) => ({
+          candidate,
+          mtimeMs: (await stat(candidate).catch(() => undefined))?.mtimeMs ?? -1,
+        })),
+      )
+    )
+      .filter((item) => item.mtimeMs >= 0)
+      .sort((left, right) => left.mtimeMs - right.mtimeMs);
     const merged: Record<string, { path: string; sizeBytes: number }> = {};
     for (const { candidate } of ordered) {
       try {
-        const parsed = JSON.parse(await readFile(candidate, "utf8")) as Record<string, { path?: unknown; sizeBytes?: unknown }>;
+        const parsed = JSON.parse(await readFile(candidate, "utf8")) as Record<
+          string,
+          { path?: unknown; sizeBytes?: unknown }
+        >;
         for (const [hash, item] of Object.entries(parsed)) {
-          if (/^[A-F0-9]{64}$/i.test(hash) && typeof item?.path === "string" && path.isAbsolute(item.path) &&
-            typeof item.sizeBytes === "number" && Number.isFinite(item.sizeBytes) && item.sizeBytes >= 0)
+          if (
+            /^[A-F0-9]{64}$/i.test(hash) &&
+            typeof item?.path === "string" &&
+            path.isAbsolute(item.path) &&
+            typeof item.sizeBytes === "number" &&
+            Number.isFinite(item.sizeBytes) &&
+            item.sizeBytes >= 0
+          )
             merged[hash] = { path: path.resolve(item.path), sizeBytes: item.sizeBytes };
         }
       } catch {
@@ -366,7 +397,10 @@ export class RenderCheckpointStore {
       // The final name is unique and never exists. Same-directory rename is an
       // atomic publication; failure leaves every previous registry intact.
       await this.publishRelocationRegistry(partial, registryPath);
-      const published = JSON.parse(await readFile(registryPath, "utf8")) as Record<string, { path?: unknown; sizeBytes?: unknown }>;
+      const published = JSON.parse(await readFile(registryPath, "utf8")) as Record<
+        string,
+        { path?: unknown; sizeBytes?: unknown }
+      >;
       for (const item of items) {
         const verified = published[item.sha256];
         if (!verified || verified.path !== path.resolve(item.path) || verified.sizeBytes !== item.sizeBytes)
@@ -378,7 +412,11 @@ export class RenderCheckpointStore {
   }
 
   async load(projectId: string): Promise<RenderCheckpointRecord | undefined> {
-    for (const candidate of [this.v082RecordPath(projectId), this.v080RecordPath(projectId), this.legacyRecordPath(projectId)]) {
+    for (const candidate of [
+      this.v082RecordPath(projectId),
+      this.v080RecordPath(projectId),
+      this.legacyRecordPath(projectId),
+    ]) {
       try {
         const parsed: unknown = JSON.parse(await readFile(candidate, "utf8"));
         if (!looksLikeRecord(parsed) || parsed.projectId !== projectId) continue;
@@ -395,7 +433,8 @@ export class RenderCheckpointStore {
           if (
             marker.completedCheckpointId === record.checkpointId ||
             (candidate === this.legacyRecordPath(projectId) && marker.sourceCheckpointId === record.checkpointId)
-          ) return undefined;
+          )
+            return undefined;
         } catch {
           // No completion marker means the checkpoint may still be offered.
         }
@@ -501,7 +540,8 @@ export class RenderCheckpointStore {
       return source.checkpointId === checkpointId || source.recoveryMigration?.sourceCheckpointId === checkpointId
         ? source
         : undefined;
-    if (source.checkpointId !== checkpointId && source.recoveryMigration?.sourceCheckpointId !== checkpointId) return undefined;
+    if (source.checkpointId !== checkpointId && source.recoveryMigration?.sourceCheckpointId !== checkpointId)
+      return undefined;
     if (source.checkpointProducer !== "v0.80") {
       source = await this.importV079RecoveryCopy(projectId, checkpointId);
       if (!source) return undefined;
@@ -522,12 +562,18 @@ export class RenderCheckpointStore {
     const workRoot = path.join(path.dirname(source.workRoot), `.${parsed.name}.${checkpointIdV082}.v082.resume`);
     await mkdir(workRoot, { recursive: true });
     const importedAt = new Date().toISOString();
-    const segmentValidity = await Promise.all(source.segments.map((segment) =>
-      segment.status === "COMPLETED" ? this.validateSegment(segment) : Promise.resolve(false),
-    ));
+    const segmentValidity = await Promise.all(
+      source.segments.map((segment) =>
+        segment.status === "COMPLETED" ? this.validateSegment(segment) : Promise.resolve(false),
+      ),
+    );
     const segments = source.segments.map((segment, index) =>
       segment.status === "COMPLETED" && !segmentValidity[index]
-        ? { ...structuredClone(segment), status: "FAILED" as const, lastError: "v0.82 migration validation failed; only this segment may be rebuilt." }
+        ? {
+            ...structuredClone(segment),
+            status: "FAILED" as const,
+            lastError: "v0.82 migration validation failed; only this segment may be rebuilt.",
+          }
         : structuredClone(segment),
     );
     const imported: RenderCheckpointRecord = {
@@ -546,8 +592,12 @@ export class RenderCheckpointStore {
         sourceStateBackupPath,
         importedAt,
         sourcePreserved: true,
-        validatedExternalSegmentBytes: segments.filter((item) => item.status === "COMPLETED").reduce((sum, item) => sum + (item.sizeBytes ?? 0), 0),
-        validatedExternalSegmentDurationMs: segments.filter((item) => item.status === "COMPLETED").reduce((sum, item) => sum + item.durationMs, 0),
+        validatedExternalSegmentBytes: segments
+          .filter((item) => item.status === "COMPLETED")
+          .reduce((sum, item) => sum + (item.sizeBytes ?? 0), 0),
+        validatedExternalSegmentDurationMs: segments
+          .filter((item) => item.status === "COMPLETED")
+          .reduce((sum, item) => sum + item.durationMs, 0),
       },
     };
     await this.save(imported);
@@ -630,9 +680,14 @@ export class RenderCheckpointStore {
     return record;
   }
 
-  async loadVideoBaseMaster(projectId: string, pictureBaseSignature: string): Promise<VideoBaseMasterRecord | undefined> {
+  async loadVideoBaseMaster(
+    projectId: string,
+    pictureBaseSignature: string,
+  ): Promise<VideoBaseMasterRecord | undefined> {
     try {
-      const parsed = JSON.parse(await readFile(this.baseMasterRecordPath(projectId), "utf8")) as Partial<VideoBaseMasterRecord>;
+      const parsed = JSON.parse(
+        await readFile(this.baseMasterRecordPath(projectId), "utf8"),
+      ) as Partial<VideoBaseMasterRecord>;
       if (
         parsed.schemaVersion !== 1 ||
         parsed.projectId !== projectId ||
@@ -641,7 +696,8 @@ export class RenderCheckpointStore {
         !path.isAbsolute(parsed.outputPath) ||
         typeof parsed.sizeBytes !== "number" ||
         typeof parsed.sha256 !== "string"
-      ) return undefined;
+      )
+        return undefined;
       const item = await stat(parsed.outputPath);
       if (!item.isFile() || item.size !== parsed.sizeBytes || (await sha256(parsed.outputPath)) !== parsed.sha256)
         return undefined;
@@ -705,7 +761,8 @@ export class RenderCheckpointStore {
       if (
         previousResolved &&
         (previousResolved.startsWith(oldOwnedRoot + path.sep) || previousResolved.startsWith(newOwnedRoot + path.sep))
-      ) await rm(previousResolved, { force: true });
+      )
+        await rm(previousResolved, { force: true });
     }
     return record;
   }
@@ -725,7 +782,9 @@ export class RenderCheckpointStore {
     if (record?.outputPath) {
       const resolved = path.resolve(record.outputPath);
       const legacyOwned = resolved.startsWith(path.resolve(directory) + path.sep);
-      const portableOwned = resolved.includes(`${path.sep}SceneryWalkerMasters${path.sep}${safeProjectId(projectId)}${path.sep}`);
+      const portableOwned = resolved.includes(
+        `${path.sep}SceneryWalkerMasters${path.sep}${safeProjectId(projectId)}${path.sep}`,
+      );
       if (legacyOwned || portableOwned) await rm(resolved, { force: true });
     }
     await rm(this.baseMasterRecordPath(projectId), { force: true });
@@ -777,7 +836,11 @@ export class RenderCheckpointStore {
         return false;
       }
       if (segment.codec) {
-        const expectedCodec = segment.codec.startsWith("H264") ? "h264" : segment.codec.startsWith("H265") ? "hevc" : undefined;
+        const expectedCodec = segment.codec.startsWith("H264")
+          ? "h264"
+          : segment.codec.startsWith("H265")
+            ? "hevc"
+            : undefined;
         if (expectedCodec && info.videoCodec.toLowerCase() !== expectedCodec) return false;
       }
       if (segment.resolution) {
@@ -794,7 +857,9 @@ export class RenderCheckpointStore {
       }
       if (segment.pixelFormat) {
         const exactPixelFormat = info.pixelFormat === segment.pixelFormat;
-        const compatibleFullRange420 = segment.pixelFormat === "yuv420p" && info.pixelFormat === "yuvj420p" &&
+        const compatibleFullRange420 =
+          segment.pixelFormat === "yuv420p" &&
+          info.pixelFormat === "yuvj420p" &&
           (info.colorRange === "pc" || info.colorRange === "jpeg");
         if (!exactPixelFormat && !compatibleFullRange420) return false;
       }
@@ -838,10 +903,16 @@ export class RenderCheckpointStore {
     await this.save(record);
   }
 
-  async remapCompletedSegments(projectId: string, checkpointId: string, fromRoot: string, toRoot: string): Promise<number> {
+  async remapCompletedSegments(
+    projectId: string,
+    checkpointId: string,
+    fromRoot: string,
+    toRoot: string,
+  ): Promise<number> {
     const record = await this.load(projectId);
     if (!record || record.checkpointId !== checkpointId) throw new Error("找不到可重新對應的 checkpoint。");
-    if (record.checkpointProducer !== "v0.80" && record.checkpointProducer !== "v0.82") throw new Error("舊版 checkpoint 必須先建立 copy-on-write 復原副本。");
+    if (record.checkpointProducer !== "v0.80" && record.checkpointProducer !== "v0.82")
+      throw new Error("舊版 checkpoint 必須先建立 copy-on-write 復原副本。");
     if (!path.isAbsolute(fromRoot) || !path.isAbsolute(toRoot)) throw new Error("重新對應路徑必須是絕對路徑。");
     const sourceRoot = path.resolve(fromRoot);
     const destinationRoot = path.resolve(toRoot);
@@ -852,15 +923,18 @@ export class RenderCheckpointStore {
       return segment.status === "COMPLETED" && current.startsWith(sourceRoot + path.sep);
     });
     if (!candidates.length) throw new Error("舊 TEMP root 下沒有已完成片段可重新對應。");
-    const replacements = await Promise.all(candidates.map(async (segment) => {
-      const relative = path.relative(sourceRoot, path.resolve(segment.outputPath));
-      if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("片段路徑超出舊 TEMP root。");
-      const candidate = path.resolve(destinationRoot, relative);
-      if (!candidate.startsWith(destinationRoot + path.sep)) throw new Error("候選路徑超出新 TEMP root。");
-      const remapped = { ...segment, outputPath: candidate, volume: path.parse(candidate).root.toUpperCase() };
-      if (!(await this.validateSegment(remapped))) throw new Error(`重新對應驗證失敗：${path.basename(candidate)}`);
-      return { segment, remapped };
-    }));
+    const replacements = await Promise.all(
+      candidates.map(async (segment) => {
+        const relative = path.relative(sourceRoot, path.resolve(segment.outputPath));
+        if (!relative || relative.startsWith("..") || path.isAbsolute(relative))
+          throw new Error("片段路徑超出舊 TEMP root。");
+        const candidate = path.resolve(destinationRoot, relative);
+        if (!candidate.startsWith(destinationRoot + path.sep)) throw new Error("候選路徑超出新 TEMP root。");
+        const remapped = { ...segment, outputPath: candidate, volume: path.parse(candidate).root.toUpperCase() };
+        if (!(await this.validateSegment(remapped))) throw new Error(`重新對應驗證失敗：${path.basename(candidate)}`);
+        return { segment, remapped };
+      }),
+    );
     for (const { segment, remapped } of replacements) Object.assign(segment, remapped);
     await this.save(record);
     await this.appendDiagnostic(record, {
@@ -887,11 +961,16 @@ export class RenderCheckpointStore {
     persistOverlay = true,
   ): Promise<ResumeArtifactRecoveryResult> {
     const record = await this.load(projectId);
-    if (!record || (record.checkpointId !== checkpointId && record.recoveryMigration?.sourceCheckpointId !== checkpointId))
+    if (
+      !record ||
+      (record.checkpointId !== checkpointId && record.recoveryMigration?.sourceCheckpointId !== checkpointId)
+    )
       throw new Error("找不到可重新掃描的 checkpoint。");
     if (record.checkpointProducer !== "v0.80" && record.checkpointProducer !== "v0.82")
       throw new Error("舊版 checkpoint 必須先建立 copy-on-write 復原副本。");
-    const roots = [...new Set(registeredRoots.filter((root) => path.isAbsolute(root)).map((root) => path.resolve(root)))];
+    const roots = [
+      ...new Set(registeredRoots.filter((root) => path.isAbsolute(root)).map((root) => path.resolve(root))),
+    ];
     if (!roots.length) throw new Error("沒有已登錄的 TEMP root 可供重新掃描。");
 
     const files: Array<{ path: string; size: number }> = [];
@@ -921,7 +1000,10 @@ export class RenderCheckpointStore {
       }
     };
     for (const root of roots) await walk(root, 0);
-    if (limitReached) throw new Error(`TEMP 掃描超過安全上限（${maximumFiles} 個媒體檔／50,000 個項目）；請選擇較精確的 SceneryWalker TEMP 目的地。`);
+    if (limitReached)
+      throw new Error(
+        `TEMP 掃描超過安全上限（${maximumFiles} 個媒體檔／50,000 個項目）；請選擇較精確的 SceneryWalker TEMP 目的地。`,
+      );
 
     const remappedArtifactIds: string[] = [];
     const duplicateSourceArtifactIds: string[] = [];
@@ -930,16 +1012,25 @@ export class RenderCheckpointStore {
     for (const segment of record.segments.filter((item) => item.status === "COMPLETED")) {
       const original = path.resolve(segment.outputPath);
       const originalItem = await stat(original).catch(() => undefined);
-      const originalExists = Boolean(originalItem?.isFile() && (!segment.sizeBytes || originalItem.size === segment.sizeBytes));
+      const originalExists = Boolean(
+        originalItem?.isFile() && (!segment.sizeBytes || originalItem.size === segment.sizeBytes),
+      );
       // Relocation discovery is for missing checkpoint artifacts. An existing,
       // correctly-sized source stays authoritative; a duplicate elsewhere must
       // never silently replace it during an automatic Resume preflight.
       if (missingOnly && originalExists) continue;
       const candidates = files
-        .filter((file) => file.path.toLowerCase() !== original.toLowerCase() && (!segment.sizeBytes || file.size === segment.sizeBytes))
+        .filter(
+          (file) =>
+            file.path.toLowerCase() !== original.toLowerCase() &&
+            (!segment.sizeBytes || file.size === segment.sizeBytes),
+        )
         .sort((left, right) => {
           const expected = path.basename(original).toLowerCase();
-          return Number(path.basename(right.path).toLowerCase() === expected) - Number(path.basename(left.path).toLowerCase() === expected);
+          return (
+            Number(path.basename(right.path).toLowerCase() === expected) -
+            Number(path.basename(left.path).toLowerCase() === expected)
+          );
         });
       let match: string | undefined;
       const rejectedExactNameCandidates: ResumeArtifactRecoveryResult["invalidCandidates"] = [];
@@ -950,7 +1041,11 @@ export class RenderCheckpointStore {
           break;
         }
         if (path.basename(candidate.path).toLowerCase() === path.basename(original).toLowerCase())
-          rejectedExactNameCandidates.push({ artifactId: segment.id, path: candidate.path, reason: "File size matched, but ffprobe/media fingerprint validation failed." });
+          rejectedExactNameCandidates.push({
+            artifactId: segment.id,
+            path: candidate.path,
+            reason: "File size matched, but ffprobe/media fingerprint validation failed.",
+          });
       }
       if (!match) {
         invalidCandidates.push(...rejectedExactNameCandidates);
@@ -971,9 +1066,12 @@ export class RenderCheckpointStore {
       // Publish a path-remap overlay rather than rewriting the source checkpoint.
       // load() applies this registry to a fresh in-memory record after validating
       // the relocated content, preserving the old JSON as recovery evidence.
-      await this.saveArtifactRelocations(record.projectId, record.segments
-        .filter((item) => remappedArtifactIds.includes(item.id) && item.sha256 && item.sizeBytes)
-        .map((item) => ({ sha256: item.sha256!, path: item.outputPath, sizeBytes: item.sizeBytes! })));
+      await this.saveArtifactRelocations(
+        record.projectId,
+        record.segments
+          .filter((item) => remappedArtifactIds.includes(item.id) && item.sha256 && item.sizeBytes)
+          .map((item) => ({ sha256: item.sha256!, path: item.outputPath, sizeBytes: item.sizeBytes! })),
+      );
     }
     if (persistOverlay) {
       await this.appendDiagnostic(record, {
@@ -993,9 +1091,11 @@ export class RenderCheckpointStore {
       duplicateSourceArtifactIds,
       missingArtifactIds,
       invalidCandidates,
-      remappedPaths: Object.fromEntries(record.segments
-        .filter((item) => remappedArtifactIds.includes(item.id))
-        .map((item) => [item.id, item.outputPath])),
+      remappedPaths: Object.fromEntries(
+        record.segments
+          .filter((item) => remappedArtifactIds.includes(item.id))
+          .map((item) => [item.id, item.outputPath]),
+      ),
     };
   }
 
@@ -1012,7 +1112,9 @@ export class RenderCheckpointStore {
     if (!path.isAbsolute(location.path) || !location.id) throw new Error("新的 TEMP 位置無效。");
     const normalized = { ...structuredClone(location), path: path.resolve(location.path), enabled: true };
     record.tempLocations = [
-      ...(record.tempLocations ?? []).filter((item) => item.id !== normalized.id && path.resolve(item.path).toLowerCase() !== normalized.path.toLowerCase()),
+      ...(record.tempLocations ?? []).filter(
+        (item) => item.id !== normalized.id && path.resolve(item.path).toLowerCase() !== normalized.path.toLowerCase(),
+      ),
       normalized,
     ];
     await this.save(record);
@@ -1036,21 +1138,34 @@ export class RenderCheckpointStore {
     checkpointId: string,
     artifactIds: readonly string[],
     destinationTempRoot: string,
-  ): Promise<{ migratedArtifactIds: string[]; copiedBytes: number; deletedSourceBytes: number; sourcePreservedArtifactIds: string[] }> {
+  ): Promise<{
+    migratedArtifactIds: string[];
+    copiedBytes: number;
+    deletedSourceBytes: number;
+    sourcePreservedArtifactIds: string[];
+  }> {
     const record = await this.load(projectId);
     if (!record || record.checkpointId !== checkpointId) throw new Error("找不到可搬移的 checkpoint。");
-    if (record.checkpointProducer !== "v0.82") throw new Error("舊版 checkpoint 必須先建立 v0.82 copy-on-write 復原副本。");
+    if (record.checkpointProducer !== "v0.82")
+      throw new Error("舊版 checkpoint 必須先建立 v0.82 copy-on-write 復原副本。");
     if (!path.isAbsolute(destinationTempRoot)) throw new Error("搬移目的 TEMP 必須是絕對路徑。");
     const destinationRoot = path.resolve(destinationTempRoot);
-    const destinationConfig = (record.tempLocations ?? []).find((location) =>
-      path.resolve(location.path).toLowerCase() === destinationRoot.toLowerCase() && location.enabled !== false,
+    const destinationConfig = (record.tempLocations ?? []).find(
+      (location) =>
+        path.resolve(location.path).toLowerCase() === destinationRoot.toLowerCase() && location.enabled !== false,
     );
     if (!destinationConfig) throw new Error("搬移目的地不在 checkpoint 核准的 TEMP 清單中。");
     const requested = new Set(artifactIds);
     if (!requested.size) throw new Error("未選擇要搬移的已完成 Artifact。");
     const candidates = record.segments.filter((segment) => requested.has(segment.id));
     if (candidates.length !== requested.size) throw new Error("搬移清單包含不存在的 Artifact。");
-    const prepared: Array<{ segment: RenderCheckpointSegment; source: string; destination: string; partial: string; bytes: number }> = [];
+    const prepared: Array<{
+      segment: RenderCheckpointSegment;
+      source: string;
+      destination: string;
+      partial: string;
+      bytes: number;
+    }> = [];
     const transientPaths: string[] = [];
     let checkpointSaved = false;
     try {
@@ -1062,7 +1177,11 @@ export class RenderCheckpointStore {
         const sourceStat = await stat(source);
         const destinationWorkRoot = path.join(destinationRoot, path.basename(record.workRoot));
         const parsedName = path.parse(source);
-        const safeArtifactName = segment.id.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "artifact";
+        const safeArtifactName =
+          segment.id
+            .replace(/[^a-z0-9_-]+/gi, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 80) || "artifact";
         let destination = path.join(destinationWorkRoot, `${safeArtifactName}-${parsedName.base}`);
         let collision = 0;
         while (await stat(destination).catch(() => undefined)) {
@@ -1105,9 +1224,14 @@ export class RenderCheckpointStore {
       // Keep immutable legacy checkpoint JSON usable without rewriting it.
       // If a legacy path later disappears, load() verifies and follows this
       // content-addressed relocation registry.
-      await this.saveArtifactRelocations(record.projectId, prepared.map((item) => ({
-        sha256: item.segment.sha256!, path: item.destination, sizeBytes: item.bytes,
-      })));
+      await this.saveArtifactRelocations(
+        record.projectId,
+        prepared.map((item) => ({
+          sha256: item.segment.sha256!,
+          path: item.destination,
+          sizeBytes: item.bytes,
+        })),
+      );
       await this.appendDiagnostic(record, {
         event: "COMPLETED_ARTIFACTS_MIGRATED_CHECKPOINTED",
         destinationRoot,
@@ -1144,11 +1268,15 @@ export class RenderCheckpointStore {
   /** Change only where *future* stage files are written. Existing segment
    * paths remain absolute and authoritative; no media is copied or moved. */
   async switchWorkRootForFutureJobs(record: RenderCheckpointRecord, selectedTempRoot: string): Promise<void> {
-    if (record.checkpointProducer !== "v0.80" && record.checkpointProducer !== "v0.82") throw new Error("舊版 checkpoint 必須先建立 copy-on-write 副本。");
+    if (record.checkpointProducer !== "v0.80" && record.checkpointProducer !== "v0.82")
+      throw new Error("舊版 checkpoint 必須先建立 copy-on-write 副本。");
     if (!path.isAbsolute(selectedTempRoot)) throw new Error("新 TEMP 根目錄必須是絕對路徑。");
-    if (!(record.tempLocations ?? []).some((location) =>
-      path.resolve(location.path).toLowerCase() === path.resolve(selectedTempRoot).toLowerCase(),
-    )) throw new Error("新工作目錄不在本 checkpoint 核准的 TEMP 清單中。");
+    if (
+      !(record.tempLocations ?? []).some(
+        (location) => path.resolve(location.path).toLowerCase() === path.resolve(selectedTempRoot).toLowerCase(),
+      )
+    )
+      throw new Error("新工作目錄不在本 checkpoint 核准的 TEMP 清單中。");
     const destination = path.join(path.resolve(selectedTempRoot), path.basename(record.workRoot));
     if (path.resolve(destination).toLowerCase() === path.resolve(record.workRoot).toLowerCase()) return;
     const previousRoot = record.workRoot;
@@ -1195,7 +1323,9 @@ export class RenderCheckpointStore {
     const missingCompletedSegmentCount = recordedCompleted.length - physicallyPresentCount;
     const physicallyPresent = recordedCompleted.filter((_segment, index) => physicalChecks[index]);
     const firstMissing = recordedCompleted.find((_segment, index) => !physicalChecks[index]);
-    const missingPaths = recordedCompleted.filter((_segment, index) => !physicalChecks[index]).map((segment) => path.resolve(segment.outputPath));
+    const missingPaths = recordedCompleted
+      .filter((_segment, index) => !physicalChecks[index])
+      .map((segment) => path.resolve(segment.outputPath));
     const possibleRoots = [
       ...(record.tempLocations ?? []).map((location) => location.path),
       ...(record.request.tempLocations ?? []).map((location) => location.path),
@@ -1203,9 +1333,13 @@ export class RenderCheckpointStore {
       path.dirname(record.workRoot),
       ...(record.ownedWorkRoots ?? []).map((root) => path.dirname(root)),
     ].map((root) => path.resolve(root));
-    const missingTempRoots = [...new Set(possibleRoots.filter((root) =>
-      missingPaths.some((missing) => missing.toLowerCase().startsWith((root + path.sep).toLowerCase())),
-    ))];
+    const missingTempRoots = [
+      ...new Set(
+        possibleRoots.filter((root) =>
+          missingPaths.some((missing) => missing.toLowerCase().startsWith((root + path.sep).toLowerCase())),
+        ),
+      ),
+    ];
     return {
       checkpointId: record.checkpointId,
       projectId: record.projectId,
@@ -1217,11 +1351,7 @@ export class RenderCheckpointStore {
       missingCompletedPathExample: firstMissing?.outputPath,
       missingTempRoots,
       physicalState:
-        missingCompletedSegmentCount === 0
-          ? "READY"
-          : physicallyPresentCount > 0
-            ? "PARTIAL"
-            : "SEGMENT_CACHE_MISSING",
+        missingCompletedSegmentCount === 0 ? "READY" : physicallyPresentCount > 0 ? "PARTIAL" : "SEGMENT_CACHE_MISSING",
       totalSegmentCount: record.totalSegmentCount,
       concatStatus: record.concatStatus,
       lastError: record.lastError,
@@ -1248,7 +1378,9 @@ export class RenderCheckpointStore {
     const record = await this.load(projectId);
     if (!record || (checkpointId && record.checkpointId !== checkpointId)) return;
     if (record.checkpointProducer !== "v0.82") {
-      throw new Error("偵測到 v0.79–v0.81 復原資料；v0.82 建立 copy-on-write migration copy 之前，不能捨棄或清理原始 checkpoint。");
+      throw new Error(
+        "偵測到 v0.79–v0.81 復原資料；v0.82 建立 copy-on-write migration copy 之前，不能捨棄或清理原始 checkpoint。",
+      );
     }
     const ownedRoots = this.validatedOwnedWorkRoots(record);
     await Promise.all(ownedRoots.map((root) => rm(root, { recursive: true, force: true })));
@@ -1264,13 +1396,17 @@ export class RenderCheckpointStore {
     const temporary = `${markerPath}.${randomUUID()}.partial`;
     await writeFile(
       temporary,
-      `${JSON.stringify({
-        schemaVersion: 1,
-        projectId,
-        sourceCheckpointId: record.recoveryMigration?.sourceCheckpointId ?? record.checkpointId,
-        completedCheckpointId: record.checkpointId,
-        completedAt: new Date().toISOString(),
-      }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          projectId,
+          sourceCheckpointId: record.recoveryMigration?.sourceCheckpointId ?? record.checkpointId,
+          completedCheckpointId: record.checkpointId,
+          completedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      )}\n`,
       { encoding: "utf8", flag: "wx" },
     );
     await copyFile(temporary, markerPath);

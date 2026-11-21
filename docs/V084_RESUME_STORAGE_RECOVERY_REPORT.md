@@ -6,18 +6,18 @@
 
 目前 v0.82 copy-on-write checkpoint：`C:\Users\fgg88\AppData\Roaming\SceneryWalker 素材整理\projects\render-state\033e4b53-b4fa-4418-95d2-5f7bc4b6df86.v082.render-state.json`，checkpoint ID `2a268cff-ead8-4b6e-bf50-910a95dcac7a`，狀態 `PAUSED_DISK_SPACE`。其 10／10 個 level-1 segment 均標為 `COMPLETED`，存在於 `E:\temp\.SceneryWalker_preview_20260926_0243.d8d72501-a0c5-46df-af3e-4ba4c01c419f.resume`。目前檔案大小均符合 checkpoint；逐檔 `ffprobe` 都可讀到 H.264／AAC、3840×2160。checkpoint 已保存 SHA-256，這次唯讀盤點**沒有**重新對 67.547 GiB 全量計算 SHA 或做尾段解碼；正式重用／搬移仍必須重驗。
 
-| 段 | 檔名 | 大小（GiB，約） | 片段長度 |
-| ---: | --- | ---: | ---: |
-| 1 | `level-1-part-001-2e026c2a2081bbdb9a3dca90.mkv` | 0.58 | 1:15.742 |
-| 2 | `level-1-part-002-1bf7cfb392a6696127026884.mkv` | 0.32 | 0:52.517 |
-| 3 | `level-1-part-003-641389e0fc8e6a065a8af08d.mkv` | 2.37 | 5:47.590 |
-| 4 | `level-1-part-004-b2cdaaf9e49645e0d2da96d5.mkv` | 11.91 | 25:55.134 |
-| 5 | `level-1-part-005-bd68f77c7644d1e239bd3bb5.mkv` | 26.44 | 57:34.890 |
-| 6 | `level-1-part-006-1a925452d422c5b2a238e329.mkv` | 2.12 | 5:00.746 |
-| 7 | `level-1-part-007-035acf82f07b4774c27b9d0a.mkv` | 16.92 | 37:01.424 |
-| 8 | `level-1-part-008-b61bd3635b469e369cafb777.mkv` | 6.73 | 14:57.286 |
-| 9 | `level-1-part-009-b7666e70ce8e44620058d1a5.mkv` | 0.04 | 0:43.700 |
-| 10 | `level-1-part-010-8cd83335a2a6b49477988a7d.mkv` | 0.11 | 0:27.479 |
+|  段 | 檔名                                            | 大小（GiB，約） |  片段長度 |
+| --: | ----------------------------------------------- | --------------: | --------: |
+|   1 | `level-1-part-001-2e026c2a2081bbdb9a3dca90.mkv` |            0.58 |  1:15.742 |
+|   2 | `level-1-part-002-1bf7cfb392a6696127026884.mkv` |            0.32 |  0:52.517 |
+|   3 | `level-1-part-003-641389e0fc8e6a065a8af08d.mkv` |            2.37 |  5:47.590 |
+|   4 | `level-1-part-004-b2cdaaf9e49645e0d2da96d5.mkv` |           11.91 | 25:55.134 |
+|   5 | `level-1-part-005-bd68f77c7644d1e239bd3bb5.mkv` |           26.44 | 57:34.890 |
+|   6 | `level-1-part-006-1a925452d422c5b2a238e329.mkv` |            2.12 |  5:00.746 |
+|   7 | `level-1-part-007-035acf82f07b4774c27b9d0a.mkv` |           16.92 | 37:01.424 |
+|   8 | `level-1-part-008-b61bd3635b469e369cafb777.mkv` |            6.73 | 14:57.286 |
+|   9 | `level-1-part-009-b7666e70ce8e44620058d1a5.mkv` |            0.04 |  0:43.700 |
+|  10 | `level-1-part-010-8cd83335a2a6b49477988a7d.mkv` |            0.11 |  0:27.479 |
 
 合計 **72,527,956,978 bytes（67.547 GiB）**、checkpoint 媒體時間 **8,976,508 ms（2:29:36.508）**。10 段都是仍需保留的 level-1 中繼成果，不是單一 67.5 GiB MKV，也不能因為「完成」就直接當正式成品刪除或跳過所有後續處理。實際 FFmpeg 診斷記錄顯示下一階段為 `BASE_MASTER`：10 段輸入、轉場／字幕／浮水印的 filter graph、`h264_qsv` 輸出 base MKV。原 `.base.partial.mkv` 及最終 MP4 目前不存在；因此可免重編的是上述 10 段，後續 base picture、音訊與 mux 仍要執行，不能不顧畫面效果強行 `-c copy` 到成品。
 

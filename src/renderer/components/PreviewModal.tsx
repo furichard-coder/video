@@ -113,16 +113,21 @@ export function PreviewModal({
   const selectedBgmTrack = selectedAudioItem?.bgmTrackId
     ? project.bgmTracks.find((track) => track.id === selectedAudioItem.bgmTrackId)
     : undefined;
-  const selectedSourceRange = selectedAudioItem?.scope === "MAIN"
-    ? project.mediaInsertions.find((item) => item.id === selectedAudioItem.instanceId)
-    : selectedAudioItem?.scope === "INTRO"
-      ? project.introSegments.find((item) => item.id === selectedAudioItem.instanceId)
-      : undefined;
+  const selectedSourceRange =
+    selectedAudioItem?.scope === "MAIN"
+      ? project.mediaInsertions.find((item) => item.id === selectedAudioItem.instanceId)
+      : selectedAudioItem?.scope === "INTRO"
+        ? project.introSegments.find((item) => item.id === selectedAudioItem.instanceId)
+        : undefined;
   const selectedSourceInMs = selectedSourceRange
-    ? "sourceInMs" in selectedSourceRange ? selectedSourceRange.sourceInMs : selectedSourceRange.inMs
+    ? "sourceInMs" in selectedSourceRange
+      ? selectedSourceRange.sourceInMs
+      : selectedSourceRange.inMs
     : undefined;
   const selectedSourceOutMs = selectedSourceRange
-    ? "sourceOutMs" in selectedSourceRange ? selectedSourceRange.sourceOutMs : selectedSourceRange.outMs
+    ? "sourceOutMs" in selectedSourceRange
+      ? selectedSourceRange.sourceOutMs
+      : selectedSourceRange.outMs
     : undefined;
 
   const syncInsertionAudio = (shouldPlay: boolean, restart: boolean) => {
@@ -456,7 +461,10 @@ export function PreviewModal({
                     ref={videoRef}
                     className="preview-canvas-foreground"
                     src={preview.url}
-                    muted={selectedAudioItem?.gates.original === false || (!selectedAudioItem && asset.mainAudioGates?.original === false)}
+                    muted={
+                      selectedAudioItem?.gates.original === false ||
+                      (!selectedAudioItem && asset.mainAudioGates?.original === false)
+                    }
                     autoPlay
                     playsInline
                     preload="metadata"
@@ -513,7 +521,8 @@ export function PreviewModal({
             <section className="preview-insertion-audio-context" aria-label="插入實例混音預覽">
               <h3>插入實例的 SFX／BGM 預覽</h3>
               <p>
-                一般來源預覽只播放原素材，不代表插入後混音。請選擇明確的片頭／正片實例，預覽會讀取與 Final 相同的 Audio Plan。
+                一般來源預覽只播放原素材，不代表插入後混音。請選擇明確的片頭／正片實例，預覽會讀取與 Final 相同的 Audio
+                Plan。
               </p>
               <label>
                 插入實例
@@ -524,19 +533,20 @@ export function PreviewModal({
                     const instanceId = event.target.value;
                     setSelectedAudioInstanceId(instanceId);
                     const selected = insertionAudioItems.find((item) => item.instanceId === instanceId);
-                    const range = selected?.scope === "MAIN"
-                      ? project.mediaInsertions.find((item) => item.id === instanceId)
-                      : project.introSegments.find((item) => item.id === instanceId);
-                    const sourceIn = range
-                      ? "sourceInMs" in range ? range.sourceInMs : range.inMs
-                      : 0;
+                    const range =
+                      selected?.scope === "MAIN"
+                        ? project.mediaInsertions.find((item) => item.id === instanceId)
+                        : project.introSegments.find((item) => item.id === instanceId);
+                    const sourceIn = range ? ("sourceInMs" in range ? range.sourceInMs : range.inMs) : 0;
                     seek(sourceIn);
                   }}
                 >
                   <option value="">只播放原素材（不套用插入混音）</option>
                   {insertionAudioItems.map((item, index) => (
                     <option key={`${item.scope}:${item.instanceId}`} value={item.instanceId}>
-                      {item.scope === "INTRO" ? "片頭" : "正片"}實例 {index + 1} · {formatDuration(item.timelineStartMs)} · {item.sfxEnabled ? "SFX" : "無 SFX"}／{item.bgmEnabled ? `BGM #${item.bgmTrackIndex}` : "無 BGM"}
+                      {item.scope === "INTRO" ? "片頭" : "正片"}實例 {index + 1} ·{" "}
+                      {formatDuration(item.timelineStartMs)} · {item.sfxEnabled ? "SFX" : "無 SFX"}／
+                      {item.bgmEnabled ? `BGM #${item.bgmTrackIndex}` : "無 BGM"}
                     </option>
                   ))}
                 </select>
@@ -548,7 +558,9 @@ export function PreviewModal({
               )}
               {selectedAudioItem && (
                 <small>
-                  {selectedAudioItem.scope === "INTRO" ? "片頭" : "正片"} · Project {formatDuration(selectedAudioItem.timelineStartMs)}–{formatDuration(selectedAudioItem.timelineEndMs)} · {selectedAudioItem.continuousWithPrevious ? "BGM 延續前一實例" : "BGM 新範圍／關閉"}
+                  {selectedAudioItem.scope === "INTRO" ? "片頭" : "正片"} · Project{" "}
+                  {formatDuration(selectedAudioItem.timelineStartMs)}–{formatDuration(selectedAudioItem.timelineEndMs)}{" "}
+                  · {selectedAudioItem.continuousWithPrevious ? "BGM 延續前一實例" : "BGM 新範圍／關閉"}
                 </small>
               )}
               {selectedAudioItem?.sfxEnabled && (

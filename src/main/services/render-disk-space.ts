@@ -50,8 +50,7 @@ export function estimateResumeAdditionalPeak(input: ResumeAdditionalPeakInput): 
   const legacyUnmaterializedBytes = Math.max(0, input.legacyPeakBytes - externalBytes);
   const observedBaseBytes = externalBytes
     ? Math.ceil(
-        externalBytes * (expectedDurationMs / externalDurationMs) * 1.25 +
-          (expectedDurationMs / 1_000) * 250_000,
+        externalBytes * (expectedDurationMs / externalDurationMs) * 1.25 + (expectedDurationMs / 1_000) * 250_000,
       )
     : 0;
   const baseMasterBytes = Math.max(legacyUnmaterializedBytes, observedBaseBytes);
@@ -100,9 +99,7 @@ export function safetyReserveBytes(remainingWorkBytes: number): number {
 }
 
 export function hardSafetyLimitBytes(targetPath: string): number {
-  return volumeRoot(targetPath) === "C:\\"
-    ? MINIMUM_SYSTEM_VOLUME_HEADROOM_BYTES
-    : MINIMUM_FILESYSTEM_HEADROOM_BYTES;
+  return volumeRoot(targetPath) === "C:\\" ? MINIMUM_SYSTEM_VOLUME_HEADROOM_BYTES : MINIMUM_FILESYSTEM_HEADROOM_BYTES;
 }
 
 export function isEnospcError(error: unknown): boolean {
@@ -173,7 +170,9 @@ async function diskSpace(targetPath: string): Promise<{ freeBytes: number; capac
   };
 }
 
-async function monitoredDiskSpace(targetPath: string): Promise<{ freeBytes: number; capacityBytes: number; unavailable: boolean }> {
+async function monitoredDiskSpace(
+  targetPath: string,
+): Promise<{ freeBytes: number; capacityBytes: number; unavailable: boolean }> {
   try {
     return { ...(await diskSpace(targetPath)), unavailable: false };
   } catch {
@@ -187,7 +186,8 @@ export async function validateRenderTemporaryFolder(targetPath: string): Promise
   freeBytes: number;
   capacityBytes: number;
 }> {
-  if (typeof targetPath !== "string" || !path.isAbsolute(targetPath)) throw new Error("Render Temporary Folder 必须是绝对路径。");
+  if (typeof targetPath !== "string" || !path.isAbsolute(targetPath))
+    throw new Error("Render Temporary Folder 必须是绝对路径。");
   const resolved = path.resolve(targetPath);
   await mkdir(resolved, { recursive: true });
   const marker = path.join(resolved, `.scenerywalker-write-test-${randomUUID()}.tmp`);
@@ -293,7 +293,11 @@ export function estimatePeakDiskUsage(input: PeakDiskEstimateInput): RenderDiskE
   };
 }
 
-export function diskPressureLevel(freeBytes: number, remainingBytes: number, reserveBytes: number): RenderDiskPressureLevel {
+export function diskPressureLevel(
+  freeBytes: number,
+  remainingBytes: number,
+  reserveBytes: number,
+): RenderDiskPressureLevel {
   if (freeBytes < remainingBytes) return "EMERGENCY";
   if (freeBytes < remainingBytes + reserveBytes) return "WARNING";
   return "OK";
@@ -331,18 +335,25 @@ export function splitRemainingWriteByVolume(input: {
   };
 }
 
-export function remainingReservedWriteBytes(estimatedBytes: number, baselineBytes: number, currentBytes: number): number {
+export function remainingReservedWriteBytes(
+  estimatedBytes: number,
+  baselineBytes: number,
+  currentBytes: number,
+): number {
   return Math.max(0, Math.max(0, estimatedBytes) - Math.max(0, currentBytes - baselineBytes));
 }
 
 export class RenderDiskMonitor {
-  private readonly activeReservations = new Map<string, {
-    locationId: string;
-    path: string;
-    volume: string;
-    estimatedRemainingWriteBytes: number;
-    baselineBytes: number;
-  }>();
+  private readonly activeReservations = new Map<
+    string,
+    {
+      locationId: string;
+      path: string;
+      volume: string;
+      estimatedRemainingWriteBytes: number;
+      baselineBytes: number;
+    }
+  >();
 
   constructor(private readonly options: RenderDiskMonitorOptions) {}
 
@@ -377,10 +388,7 @@ export class RenderDiskMonitor {
       fileBytes(this.options.outputPath),
       this.options.proxyRoot ? directoryBytes(this.options.proxyRoot) : Promise.resolve(0),
     ]);
-    const remaining = Math.max(
-      0,
-      this.options.estimatedRemainingWriteBytes({ renderTempBytes, finalOutputBytes }),
-    );
+    const remaining = Math.max(0, this.options.estimatedRemainingWriteBytes({ renderTempBytes, finalOutputBytes }));
     const shared = sameVolume(this.options.tempRoot, this.options.outputPath);
     const { tempRemainingBytes: tempRemaining, outputRemainingBytes: outputRemaining } = splitRemainingWriteByVolume({
       totalRemainingBytes: remaining,
@@ -389,12 +397,18 @@ export class RenderDiskMonitor {
       sharedVolume: shared,
     });
     const configuredReserve = (targetPath: string, locationId?: string) => {
-      const config = this.options.tempLocations?.find((item) =>
-        (locationId && item.id === locationId) || path.resolve(item.path).toLowerCase() === path.resolve(targetPath).toLowerCase(),
+      const config = this.options.tempLocations?.find(
+        (item) =>
+          (locationId && item.id === locationId) ||
+          path.resolve(item.path).toLowerCase() === path.resolve(targetPath).toLowerCase(),
       );
-      return Math.max(0, config?.reserveBytes ?? (volumeRoot(targetPath) === "C:\\"
-        ? DEFAULT_SYSTEM_VOLUME_SOFT_RESERVE_BYTES
-        : DEFAULT_DATA_VOLUME_SOFT_RESERVE_BYTES));
+      return Math.max(
+        0,
+        config?.reserveBytes ??
+          (volumeRoot(targetPath) === "C:\\"
+            ? DEFAULT_SYSTEM_VOLUME_SOFT_RESERVE_BYTES
+            : DEFAULT_DATA_VOLUME_SOFT_RESERVE_BYTES),
+      );
     };
     const reserve = configuredReserve(this.options.tempRoot, "primary");
     const tempLevel = diskPressureLevel(
@@ -414,7 +428,10 @@ export class RenderDiskMonitor {
       (shared ? remaining : tempRemaining) + reserve - tempDisk.freeBytes,
       (shared ? remaining : outputRemaining) + reserve - outputDisk.freeBytes,
     );
-    const reservationGroups = new Map<string, { locationId: string; path: string; remaining: number; activeJobCount: number; currentBytes: number }>();
+    const reservationGroups = new Map<
+      string,
+      { locationId: string; path: string; remaining: number; activeJobCount: number; currentBytes: number }
+    >();
     for (const reservation of this.activeReservations.values()) {
       const currentBytes = await fileBytes(reservation.path);
       const remainingBytes = remainingReservedWriteBytes(
@@ -427,42 +444,44 @@ export class RenderDiskMonitor {
         current.remaining += remainingBytes;
         current.currentBytes += currentBytes;
         current.activeJobCount += 1;
-      }
-      else reservationGroups.set(reservation.volume, {
-        locationId: reservation.locationId,
-        path: reservation.path,
-        remaining: remainingBytes,
-        activeJobCount: 1,
-        currentBytes,
-      });
-    }
-    const extraTempVolumes = await Promise.all([...reservationGroups.entries()]
-      .filter(([volume]) => volume !== volumeRoot(this.options.tempRoot))
-      .map(async ([volume, reservation]) => {
-        const disk = await this.monitoredSpace(reservation.path);
-        const locationReserve = configuredReserve(reservation.path, reservation.locationId);
-        const locationPressure = diskPressureLevel(
-          disk.freeBytes,
-          reservation.remaining + hardSafetyLimitBytes(reservation.path),
-          locationReserve,
-        );
-        return {
+      } else
+        reservationGroups.set(reservation.volume, {
           locationId: reservation.locationId,
           path: reservation.path,
-          volume,
-          role: "FALLBACK" as const,
-          freeBytes: disk.freeBytes,
-          capacityBytes: disk.capacityBytes,
-          currentBytes: reservation.currentBytes,
-          estimatedRemainingWriteBytes: reservation.remaining,
-          reserveBytes: locationReserve,
-          requiredAdditionalBytes: Math.max(0, reservation.remaining + locationReserve - disk.freeBytes),
-          pressureLevel: locationPressure,
-          activeJobCount: reservation.activeJobCount,
-          availableForNextJob: !disk.unavailable && locationPressure !== "EMERGENCY",
-          ...(disk.unavailable ? { unavailableReason: "OFFLINE_OR_UNREADABLE" as const } : {}),
-        };
-      }));
+          remaining: remainingBytes,
+          activeJobCount: 1,
+          currentBytes,
+        });
+    }
+    const extraTempVolumes = await Promise.all(
+      [...reservationGroups.entries()]
+        .filter(([volume]) => volume !== volumeRoot(this.options.tempRoot))
+        .map(async ([volume, reservation]) => {
+          const disk = await this.monitoredSpace(reservation.path);
+          const locationReserve = configuredReserve(reservation.path, reservation.locationId);
+          const locationPressure = diskPressureLevel(
+            disk.freeBytes,
+            reservation.remaining + hardSafetyLimitBytes(reservation.path),
+            locationReserve,
+          );
+          return {
+            locationId: reservation.locationId,
+            path: reservation.path,
+            volume,
+            role: "FALLBACK" as const,
+            freeBytes: disk.freeBytes,
+            capacityBytes: disk.capacityBytes,
+            currentBytes: reservation.currentBytes,
+            estimatedRemainingWriteBytes: reservation.remaining,
+            reserveBytes: locationReserve,
+            requiredAdditionalBytes: Math.max(0, reservation.remaining + locationReserve - disk.freeBytes),
+            pressureLevel: locationPressure,
+            activeJobCount: reservation.activeJobCount,
+            availableForNextJob: !disk.unavailable && locationPressure !== "EMERGENCY",
+            ...(disk.unavailable ? { unavailableReason: "OFFLINE_OR_UNREADABLE" as const } : {}),
+          };
+        }),
+    );
     for (const item of extraTempVolumes) {
       if (rank[item.pressureLevel] > rank[level]) level = item.pressureLevel;
     }
@@ -484,64 +503,68 @@ export class RenderDiskMonitor {
       safetyReserveBytes: reserve,
       requiredAdditionalBytes,
       pressureLevel: level,
-      volumes: [...(shared
-        ? [{
-            locationId: "primary",
-            path: this.options.tempRoot,
-            volume: volumeRoot(this.options.tempRoot),
-            role: "PRIMARY" as const,
-            freeBytes: tempDisk.freeBytes,
-            capacityBytes: tempDisk.capacityBytes,
-            currentBytes: renderTempBytes + finalOutputBytes,
-            estimatedRemainingWriteBytes: remaining,
-            reserveBytes: reserve,
-            requiredAdditionalBytes,
-            pressureLevel: level,
-            activeJobCount: reservationGroups.get(volumeRoot(this.options.tempRoot))?.activeJobCount ?? 0,
-            availableForNextJob: !tempDisk.unavailable && level !== "EMERGENCY",
-            ...(tempDisk.unavailable ? { unavailableReason: "OFFLINE_OR_UNREADABLE" as const } : {}),
-          }]
-        : [
-            {
-              locationId: "primary",
-              path: this.options.tempRoot,
-              volume: volumeRoot(this.options.tempRoot),
-              role: "PRIMARY" as const,
-              freeBytes: tempDisk.freeBytes,
-              capacityBytes: tempDisk.capacityBytes,
-              currentBytes: renderTempBytes,
-              estimatedRemainingWriteBytes: tempRemaining,
-              reserveBytes: reserve,
-              requiredAdditionalBytes: Math.max(0, tempRemaining + reserve - tempDisk.freeBytes),
-              pressureLevel: tempLevel,
-              activeJobCount: reservationGroups.get(volumeRoot(this.options.tempRoot))?.activeJobCount ?? 0,
-              availableForNextJob: !tempDisk.unavailable && tempLevel !== "EMERGENCY",
-              ...(tempDisk.unavailable ? { unavailableReason: "OFFLINE_OR_UNREADABLE" as const } : {}),
-            },
-            {
-              locationId: "final-output",
-              path: this.options.outputPath,
-              volume: volumeRoot(this.options.outputPath),
-              role: "FINAL_OUTPUT" as const,
-              freeBytes: outputDisk.freeBytes,
-              capacityBytes: outputDisk.capacityBytes,
-              currentBytes: finalOutputBytes,
-              estimatedRemainingWriteBytes: outputRemaining,
-              reserveBytes: reserve,
-              requiredAdditionalBytes: Math.max(0, outputRemaining + reserve - outputDisk.freeBytes),
-              pressureLevel: outputLevel,
-              activeJobCount: 0,
-              availableForNextJob: false,
-              ...(outputDisk.unavailable ? { unavailableReason: "OFFLINE_OR_UNREADABLE" as const } : {}),
-            },
-          ]), ...extraTempVolumes],
+      volumes: [
+        ...(shared
+          ? [
+              {
+                locationId: "primary",
+                path: this.options.tempRoot,
+                volume: volumeRoot(this.options.tempRoot),
+                role: "PRIMARY" as const,
+                freeBytes: tempDisk.freeBytes,
+                capacityBytes: tempDisk.capacityBytes,
+                currentBytes: renderTempBytes + finalOutputBytes,
+                estimatedRemainingWriteBytes: remaining,
+                reserveBytes: reserve,
+                requiredAdditionalBytes,
+                pressureLevel: level,
+                activeJobCount: reservationGroups.get(volumeRoot(this.options.tempRoot))?.activeJobCount ?? 0,
+                availableForNextJob: !tempDisk.unavailable && level !== "EMERGENCY",
+                ...(tempDisk.unavailable ? { unavailableReason: "OFFLINE_OR_UNREADABLE" as const } : {}),
+              },
+            ]
+          : [
+              {
+                locationId: "primary",
+                path: this.options.tempRoot,
+                volume: volumeRoot(this.options.tempRoot),
+                role: "PRIMARY" as const,
+                freeBytes: tempDisk.freeBytes,
+                capacityBytes: tempDisk.capacityBytes,
+                currentBytes: renderTempBytes,
+                estimatedRemainingWriteBytes: tempRemaining,
+                reserveBytes: reserve,
+                requiredAdditionalBytes: Math.max(0, tempRemaining + reserve - tempDisk.freeBytes),
+                pressureLevel: tempLevel,
+                activeJobCount: reservationGroups.get(volumeRoot(this.options.tempRoot))?.activeJobCount ?? 0,
+                availableForNextJob: !tempDisk.unavailable && tempLevel !== "EMERGENCY",
+                ...(tempDisk.unavailable ? { unavailableReason: "OFFLINE_OR_UNREADABLE" as const } : {}),
+              },
+              {
+                locationId: "final-output",
+                path: this.options.outputPath,
+                volume: volumeRoot(this.options.outputPath),
+                role: "FINAL_OUTPUT" as const,
+                freeBytes: outputDisk.freeBytes,
+                capacityBytes: outputDisk.capacityBytes,
+                currentBytes: finalOutputBytes,
+                estimatedRemainingWriteBytes: outputRemaining,
+                reserveBytes: reserve,
+                requiredAdditionalBytes: Math.max(0, outputRemaining + reserve - outputDisk.freeBytes),
+                pressureLevel: outputLevel,
+                activeJobCount: 0,
+                availableForNextJob: false,
+                ...(outputDisk.unavailable ? { unavailableReason: "OFFLINE_OR_UNREADABLE" as const } : {}),
+              },
+            ]),
+        ...extraTempVolumes,
+      ],
     };
-    const activeVolumes = snapshot.volumes?.filter(
-      (item) => item.role === "FINAL_OUTPUT" || item.activeJobCount > 0,
-    ) ?? [];
+    const activeVolumes =
+      snapshot.volumes?.filter((item) => item.role === "FINAL_OUTPUT" || item.activeJobCount > 0) ?? [];
     if (activeVolumes.length) {
       snapshot.pressureLevel = activeVolumes.reduce(
-        (worst, item) => rank[item.pressureLevel] > rank[worst] ? item.pressureLevel : worst,
+        (worst, item) => (rank[item.pressureLevel] > rank[worst] ? item.pressureLevel : worst),
         "OK" as RenderDiskPressureLevel,
       );
       snapshot.requiredAdditionalBytes = activeVolumes.reduce(
@@ -576,7 +599,10 @@ export class RenderDiskMonitor {
   }
 }
 
-export async function cleanupOwnedDisposableTemp(ownedRoot: string, preservePaths: ReadonlySet<string>): Promise<number> {
+export async function cleanupOwnedDisposableTemp(
+  ownedRoot: string,
+  preservePaths: ReadonlySet<string>,
+): Promise<number> {
   const root = path.resolve(ownedRoot);
   let reclaimed = 0;
   const entries = await readdir(root, { withFileTypes: true }).catch(() => []);

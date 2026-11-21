@@ -84,12 +84,7 @@ describe("adaptive render concurrency", () => {
       resources(32 * GIB),
     );
     expect(preWave.lastChange).toBe("UP");
-    const next = decideAdaptiveConcurrency(
-      policy,
-      preWave,
-      resources(32 * GIB),
-      2.03,
-    );
+    const next = decideAdaptiveConcurrency(policy, preWave, resources(32 * GIB), 2.03);
     expect(next.currentJobs).toBe(2);
     expect(next.lastChange).toBe("DOWN");
   });

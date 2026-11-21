@@ -16,26 +16,45 @@ async function directoryBytes(folder) {
   await mkdir(root, { recursive: true });
   const before = await stat(videoPath);
   const start = Date.now();
-  const report = { status: "FAILED", videoPath, sampleStartMs: 600000, sampleDurationMs: 180000,
-    intervalSeconds: 2, apiRequests: 0, frames: 0, batches: 0, batchImageBytesPeak: 0, masterModified: false };
+  const report = {
+    status: "FAILED",
+    videoPath,
+    sampleStartMs: 600000,
+    sampleDurationMs: 180000,
+    intervalSeconds: 2,
+    apiRequests: 0,
+    frames: 0,
+    batches: 0,
+    batchImageBytesPeak: 0,
+    masterModified: false,
+  };
   try {
-    const result = await new SubtitleFrameExtractor().extractBatches({
-      sourcePath: videoPath, cacheRoot: root, projectId: "v087-offline-180s",
-      segments: [{ type: "MAIN", startMs: 600000, endMs: 780000 }],
-      intervalSeconds: 2, detectSceneChanges: true, deduplicateFrames: true,
-    }, async (frames) => {
-      report.frames += frames.length;
-      report.batches += 1;
-      let bytes = 0;
-      for (const frame of frames) bytes += (await readFile(frame.path)).length;
-      report.batchImageBytesPeak = Math.max(report.batchImageBytesPeak, bytes);
-    });
+    const result = await new SubtitleFrameExtractor().extractBatches(
+      {
+        sourcePath: videoPath,
+        cacheRoot: root,
+        projectId: "v087-offline-180s",
+        segments: [{ type: "MAIN", startMs: 600000, endMs: 780000 }],
+        intervalSeconds: 2,
+        detectSceneChanges: true,
+        deduplicateFrames: true,
+      },
+      async (frames) => {
+        report.frames += frames.length;
+        report.batches += 1;
+        let bytes = 0;
+        for (const frame of frames) bytes += (await readFile(frame.path)).length;
+        report.batchImageBytesPeak = Math.max(report.batchImageBytesPeak, bytes);
+      },
+    );
     report.counters = result.plan.counters;
     report.sampledTimestampMinMs = result.plan.samples[0]?.timeMs;
     report.sampledTimestampMaxMs = result.plan.samples.at(-1)?.timeMs;
     report.retainedCacheBytes = await directoryBytes(path.join(root, "subtitle-frames"));
     report.status = report.frames > 0 && report.batches > 0 ? "PASS" : "NO_FRAMES";
-  } catch (error) { report.error = error instanceof Error ? error.message : String(error); }
+  } catch (error) {
+    report.error = error instanceof Error ? error.message : String(error);
+  }
   const after = await stat(videoPath);
   report.masterModified = before.size !== after.size || before.mtimeMs !== after.mtimeMs;
   if (report.masterModified) report.status = "SOURCE_CHANGED";

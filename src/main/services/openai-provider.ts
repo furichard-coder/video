@@ -199,8 +199,9 @@ export class OpenAiProvider {
   ): Promise<AiAccountProfile & { apiKey: string }> {
     if (account.visionModel.trim().toLowerCase() !== "auto") return account;
     let visionModel: string;
-    try { visionModel = await this.modelCatalog.resolve("OPENAI", account.apiKey, account.visionModel); }
-    catch {
+    try {
+      visionModel = await this.modelCatalog.resolve("OPENAI", account.apiKey, account.visionModel);
+    } catch {
       const test = await this.modelCatalog.test("OPENAI", account.apiKey, "auto");
       if (!test.ok || !test.modelId) throw new Error(test.message);
       visionModel = test.modelId;

@@ -155,7 +155,9 @@ describe("multi-volume render TEMP scheduler", () => {
       freeBytes: 75 * GIB,
       capacityBytes: 500 * GIB,
     });
-    expect(evaluateRenderTempPreflight([status], 40 * GIB, "AUTO", 75 * GIB, 50 * GIB, "C:\\", 30 * GIB, 20 * GIB)).toMatchObject({
+    expect(
+      evaluateRenderTempPreflight([status], 40 * GIB, "AUTO", 75 * GIB, 50 * GIB, "C:\\", 30 * GIB, 20 * GIB),
+    ).toMatchObject({
       canRender: false,
       outputVolumeCanRender: true,
       sharedVolumeConflict: true,

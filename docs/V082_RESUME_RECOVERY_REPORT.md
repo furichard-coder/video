@@ -4,18 +4,18 @@
 
 舊版 Resume 在 `src/main/services/concat-render.ts:2395` 拒絕續轉。當時的條件要求舊 checkpoint 的 picture/base render signature 相符；舊簽章不存在時，則要求整體 request signature 與 `projectUpdatedAt` 同時相符。本案走 picture signature 比對，該比較失敗。
 
-| 欄位 | 舊 checkpoint | 目前狀態 | 判定 |
-| --- | --- | --- | --- |
-| Picture/base signature | `390D…DF66` | 舊 request 重算 `7D67…E79B`；目前 canonical signature `9066…C0A0` | 舊／新版 hash 不同；缺少舊 Project snapshot，不能把差異歸因到單一 render 欄位 |
-| `projectUpdatedAt` | 2026-09-27 12:39:31 | 2026-09-28 15:50:42 | 不同；代表專案記錄更新，不足以證明影像內容改變 |
-| Clip selection | 92 筆：Intro 25、Main 67 | 目前 manifest 相符 | 已比對欄位一致，不代表完整 Project snapshot 一致 |
-| Transition | 0.7 秒 | 0.7 秒 | 相同 |
-| Source continuity | 舊 checkpoint 沒有來源內容雜湊 | 59/59 即時 size／mtime 與目前 manifest 相符，修改時間均不晚於 checkpoint 建立時間 | 有界的來源 stat 連續性證據，非舊內容雜湊比對 |
-| Legacy level-one IDs | checkpoint 記錄 10 個 | `legacyLevelOneIdsForProject` 預期 10 個 | 10/10 exact match |
-| Segment validation | 10 個已完成 segment | 10 個通過媒體參數、size 與 SHA 驗證 | `VALIDATED_SEGMENT_REUSE` |
-| TEMP | 舊 signature/request 含舊版儲存設定；v0.81 使用 E: 主 TEMP、C: 備援槽 | 儲存位置可能不同 | 路徑屬儲存位置；它是舊 hash 的風險來源，但無法證明是本案唯一差異 |
-| YouTube 上傳設定 | 不在 render hash | UI 設定可另行變更 | 不影響此次 render signature mismatch |
-| Base partial / audio master | 無可找到的檔案 | 未找到 | 沒有可驗證的 base/audio master 可接續 |
+| 欄位                        | 舊 checkpoint                                                         | 目前狀態                                                                          | 判定                                                                          |
+| --------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Picture/base signature      | `390D…DF66`                                                           | 舊 request 重算 `7D67…E79B`；目前 canonical signature `9066…C0A0`                 | 舊／新版 hash 不同；缺少舊 Project snapshot，不能把差異歸因到單一 render 欄位 |
+| `projectUpdatedAt`          | 2026-09-27 12:39:31                                                   | 2026-09-28 15:50:42                                                               | 不同；代表專案記錄更新，不足以證明影像內容改變                                |
+| Clip selection              | 92 筆：Intro 25、Main 67                                              | 目前 manifest 相符                                                                | 已比對欄位一致，不代表完整 Project snapshot 一致                              |
+| Transition                  | 0.7 秒                                                                | 0.7 秒                                                                            | 相同                                                                          |
+| Source continuity           | 舊 checkpoint 沒有來源內容雜湊                                        | 59/59 即時 size／mtime 與目前 manifest 相符，修改時間均不晚於 checkpoint 建立時間 | 有界的來源 stat 連續性證據，非舊內容雜湊比對                                  |
+| Legacy level-one IDs        | checkpoint 記錄 10 個                                                 | `legacyLevelOneIdsForProject` 預期 10 個                                          | 10/10 exact match                                                             |
+| Segment validation          | 10 個已完成 segment                                                   | 10 個通過媒體參數、size 與 SHA 驗證                                               | `VALIDATED_SEGMENT_REUSE`                                                     |
+| TEMP                        | 舊 signature/request 含舊版儲存設定；v0.81 使用 E: 主 TEMP、C: 備援槽 | 儲存位置可能不同                                                                  | 路徑屬儲存位置；它是舊 hash 的風險來源，但無法證明是本案唯一差異              |
+| YouTube 上傳設定            | 不在 render hash                                                      | UI 設定可另行變更                                                                 | 不影響此次 render signature mismatch                                          |
+| Base partial / audio master | 無可找到的檔案                                                        | 未找到                                                                            | 沒有可驗證的 base/audio master 可接續                                         |
 
 ## Root cause 與可知範圍
 

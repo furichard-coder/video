@@ -4,13 +4,13 @@
 
 本次只盤點已設定／已知的 SceneryWalker TEMP 根目錄，沒有掃描整部電腦、刪除、搬移或重新轉檔。v0.82 視窗仍開啟，但盤點時沒有 FFmpeg 轉檔程序。
 
-| 路徑 | 可見內容 | 大小 | 判定 |
-| --- | --- | ---: | --- |
-| `E:\temp\.SceneryWalker_preview_20260926_0243.d8d72501-a0c5-46df-af3e-4ba4c01c419f.resume` | 10 個完成的 MKV segments | 72,527,956,978 bytes（67.547 GiB） | **RESUME_REQUIRED**，禁止直接刪除 |
-| `E:\temp\SceneryWalkerCache` | 82 個 JPG／JSON | 1,706,787 bytes（1.63 MiB） | 候選可重建 cache；依賴尚未確認，不標為可刪 |
-| `E:\temp\SceneryWalker-v080-quickbench-20260927` | 3 個 MKV | 760,778,128 bytes（725.53 MiB） | UNKNOWN；未證明可刪 |
-| E: 的 v0.80／v0.82 命名 `.resume` 目錄 | 空 | 0 | 不提供有意義的空間回收 |
-| `C:\Users\fgg88\AppData\Local\Temp\SceneryWalker` | 空 | 0 | 可用作未來新工作的備援，仍須做寫入／容量檢查 |
+| 路徑                                                                                       | 可見內容                 |                               大小 | 判定                                         |
+| ------------------------------------------------------------------------------------------ | ------------------------ | ---------------------------------: | -------------------------------------------- |
+| `E:\temp\.SceneryWalker_preview_20260926_0243.d8d72501-a0c5-46df-af3e-4ba4c01c419f.resume` | 10 個完成的 MKV segments | 72,527,956,978 bytes（67.547 GiB） | **RESUME_REQUIRED**，禁止直接刪除            |
+| `E:\temp\SceneryWalkerCache`                                                               | 82 個 JPG／JSON          |        1,706,787 bytes（1.63 MiB） | 候選可重建 cache；依賴尚未確認，不標為可刪   |
+| `E:\temp\SceneryWalker-v080-quickbench-20260927`                                           | 3 個 MKV                 |    760,778,128 bytes（725.53 MiB） | UNKNOWN；未證明可刪                          |
+| E: 的 v0.80／v0.82 命名 `.resume` 目錄                                                     | 空                       |                                  0 | 不提供有意義的空間回收                       |
+| `C:\Users\fgg88\AppData\Local\Temp\SceneryWalker`                                          | 空                       |                                  0 | 可用作未來新工作的備援，仍須做寫入／容量檢查 |
 
 盤點時磁碟可用：E: 176,677,855,232 bytes（約 164.5 GiB），C: 80,984,784,896 bytes（約 75.4 GiB）。這是當下快照，不代表轉檔開始或失敗瞬間的容量。
 

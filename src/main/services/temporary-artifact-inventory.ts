@@ -1,17 +1,15 @@
 import { createHash } from "node:crypto";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import type {
-  TemporaryArtifactInventory,
-  TemporaryArtifactInventoryItem,
-} from "../../shared/domain";
+import type { TemporaryArtifactInventory, TemporaryArtifactInventoryItem } from "../../shared/domain";
 import { volumeRoot } from "./render-disk-space";
 
 const MAX_DISCOVERED_ROOTS = 24;
 const MAX_SCANNED_ENTRIES = 20_000;
 const MAX_SCAN_DEPTH = 8;
 const APP_OWNED_SIBLING = /^(?:\.?scenerywalker|v0?(?:77|78|79|80|81|82|83)(?:[-_.]|$))/i;
-const REBUILDABLE_CACHE = /(?:^|[\\/])(?:preview-cache|proxy-cache|thumbnail-cache|thumbnails|waveforms?|analysis-cache|scenerywalkercache)(?:[\\/]|$)/i;
+const REBUILDABLE_CACHE =
+  /(?:^|[\\/])(?:preview-cache|proxy-cache|thumbnail-cache|thumbnails|waveforms?|analysis-cache|scenerywalkercache)(?:[\\/]|$)/i;
 
 function artifactId(filePath: string): string {
   return `inventory:${createHash("sha256").update(path.resolve(filePath).toLowerCase()).digest("hex").slice(0, 24)}`;
@@ -97,14 +95,17 @@ export async function scanRegisteredTemporaryArtifacts(
           reason: isProjectSource
             ? "此檔案是目前專案來源素材，即使位於 cache 命名路徑也禁止清理。"
             : partial
-            ? "未經 ffprobe 證明不可恢復的 partial，保守標記 UNKNOWN 並禁止清理。"
-            : rebuildable
-              ? "位於 SceneryWalker 明確命名的可重建 cache，僅列為候選；尚未證明沒有 checkpoint／目前工作依賴，因此禁止直接刪除。"
-              : "無法由 checkpoint、內容指紋或明確 cache 類型證明用途，保守保留。",
+              ? "未經 ffprobe 證明不可恢復的 partial，保守標記 UNKNOWN 並禁止清理。"
+              : rebuildable
+                ? "位於 SceneryWalker 明確命名的可重建 cache，僅列為候選；尚未證明沒有 checkpoint／目前工作依賴，因此禁止直接刪除。"
+                : "無法由 checkpoint、內容指紋或明確 cache 類型證明用途，保守保留。",
         });
       }
     }
-    if (!rootFileCount && !known.items.some((item) => path.resolve(item.path).startsWith(path.resolve(root) + path.sep))) {
+    if (
+      !rootFileCount &&
+      !known.items.some((item) => path.resolve(item.path).startsWith(path.resolve(root) + path.sep))
+    ) {
       const resolved = path.resolve(root);
       discovered.set(`empty:${resolved.toLowerCase()}`, {
         artifactId: artifactId(`${resolved}${path.sep}.empty-root`),
@@ -126,7 +127,9 @@ export async function scanRegisteredTemporaryArtifacts(
     roots,
     items,
     totalBytes: items.reduce((sum, item) => sum + item.sizeBytes, 0),
-    immediatelyReclaimableBytes: items.filter((item) => item.safeToDelete).reduce((sum, item) => sum + item.sizeBytes, 0),
+    immediatelyReclaimableBytes: items
+      .filter((item) => item.safeToDelete)
+      .reduce((sum, item) => sum + item.sizeBytes, 0),
     movableBytes: items.filter((item) => item.safeToMove).reduce((sum, item) => sum + item.sizeBytes, 0),
   };
 }

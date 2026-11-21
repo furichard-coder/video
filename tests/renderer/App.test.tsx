@@ -827,9 +827,14 @@ describe("App source workflow", () => {
     expect(within(card).getByRole("checkbox", { name: "配音 ✓" })).toBeChecked();
     const bgm = within(card).getByRole("checkbox", { name: "BGM ✓" });
     fireEvent.click(bgm);
-    await waitFor(() => expect(api.setMainAudioGates).toHaveBeenCalledWith(video.id, {
-      original: true, voice: true, bgm: false, sfx: true,
-    }));
+    await waitFor(() =>
+      expect(api.setMainAudioGates).toHaveBeenCalledWith(video.id, {
+        original: true,
+        voice: true,
+        bgm: false,
+        sfx: true,
+      }),
+    );
   });
 
   it("keeps the trailing time and sequence visible when adjacent grid filenames share a prefix and date", async () => {
@@ -2086,14 +2091,8 @@ describe("App source workflow", () => {
 
     expect(api.ensureIntroThumbnail).toHaveBeenCalledWith(video.id, 1_000, 4_000);
     expect(api.ensureIntroThumbnail).toHaveBeenCalledWith(photo.id, 0, 5_000);
-    expect(videoThumbnail).toHaveAttribute(
-      "src",
-      `preview-media://intro-thumbnail/${video.id}/1000-4000`,
-    );
-    expect(photoThumbnail).toHaveAttribute(
-      "src",
-      `preview-media://intro-thumbnail/${photo.id}/0-5000`,
-    );
+    expect(videoThumbnail).toHaveAttribute("src", `preview-media://intro-thumbnail/${video.id}/1000-4000`);
+    expect(photoThumbnail).toHaveAttribute("src", `preview-media://intro-thumbnail/${photo.id}/0-5000`);
 
     const trim = within(studio).getByRole("button", { name: "調整片頭第 2 段裁切與長度" });
     expect(trim).toHaveClass("intro-icon-action");
@@ -2981,18 +2980,37 @@ describe("App source workflow", () => {
 
   it("keeps playback scope stable on edit selection and changes it only on explicit cue jump", async () => {
     const introSegment = {
-      id: "scope-intro-segment", assetId: video.id, fileName: video.fileName,
-      inMs: 0, outMs: 3_000, score: 90, reasons: ["scope regression"],
+      id: "scope-intro-segment",
+      assetId: video.id,
+      fileName: video.fileName,
+      inMs: 0,
+      outMs: 3_000,
+      score: 90,
+      reasons: ["scope regression"],
     };
     const mainCue = {
-      id: "scope-main-cue", startMs: 1_000, endMs: 2_000, text: "正片編輯",
-      timelineScope: "MAIN" as const, origin: "MANUAL" as const, reviewStatus: "DRAFT" as const,
+      id: "scope-main-cue",
+      startMs: 1_000,
+      endMs: 2_000,
+      text: "正片編輯",
+      timelineScope: "MAIN" as const,
+      origin: "MANUAL" as const,
+      reviewStatus: "DRAFT" as const,
     };
     const introCue = {
-      id: "scope-intro-cue", startMs: 500, endMs: 1_500, text: "片頭編輯",
-      timelineScope: "INTRO" as const, origin: "MANUAL" as const, reviewStatus: "DRAFT" as const,
+      id: "scope-intro-cue",
+      startMs: 500,
+      endMs: 1_500,
+      text: "片頭編輯",
+      timelineScope: "INTRO" as const,
+      origin: "MANUAL" as const,
+      reviewStatus: "DRAFT" as const,
     };
-    const scopedProject = { ...structuredClone(project), introSegments: [introSegment], subtitleCues: [mainCue, introCue] };
+    const scopedProject = {
+      ...structuredClone(project),
+      introSegments: [introSegment],
+      subtitleCues: [mainCue, introCue],
+    };
     const api = mockApi(scopedProject);
     Object.defineProperty(window, "sourceApp", { configurable: true, value: api });
     render(<App />);
